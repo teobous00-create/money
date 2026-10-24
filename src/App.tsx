@@ -1,0 +1,203 @@
+import { useRef, type ReactNode } from 'react';
+import { AnimatePresence, motion, MotionConfig } from 'motion/react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil } from 'lucide-react';
+import { useStore, setPeriod } from './lib/store';
+import { useUi, setUi, type UiState } from './lib/ui';
+import { useHeaderTotal } from './lib/calc';
+import { label, shift, type PeriodMode } from './lib/period';
+import { Money, ToastHost, softSpring, ease } from './components/ui';
+import { AuthScreen } from './screens/Auth';
+import { AccountsScreen } from './screens/Accounts';
+import { CategoriesScreen } from './screens/Categories';
+import { TransactionsScreen } from './screens/Transactions';
+import { OverviewScreen } from './screens/Overview';
+import { AddTransactionSheet } from './sheets/AddTransaction';
+import { AccountSheet } from './sheets/AccountEdit';
+import { CategorySheet } from './sheets/CategoryEdit';
+import { CategoryDetailSheet } from './sheets/CategoryDetail';
+import { SettingsSheet } from './sheets/Settings';
+import { FilterSheet } from './sheets/Filter';
+import { PeriodSheet } from './sheets/PeriodPicker';
+import { RecurringSheet } from './sheets/Recurring';
+import { ImportSheet } from './sheets/Import';
+
+const MODE_SHORT: Record<PeriodMode, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year', all: 'All' };
+
+export default function App() {
+  const phase = useStore(s => s.phase);
+  return (
+    <MotionConfig reducedMotion="user">
+      {phase === 'loading' ? <div /> : phase === 'auth' ? <AuthScreen /> : <Shell />}
+    </MotionConfig>
+  );
+}
+
+function Shell() {
+  const tab = useUi(u => u.tab);
+  const dir = useUi(u => u.tabDir);
+  return (
+    <div className="app">
+      <TopBar />
+      <AnimatePresence initial={false}>
+        {tab !== 'accounts' && (
+          <motion.div key="pb" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.28, ease }} style={{ overflow: 'hidden', flex: 'none' }}>
+            <PeriodBar />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <AnimatePresence initial={false} custom={dir} mode="popLayout">
+          <motion.div key={tab} custom={dir} style={{ position: 'absolute', inset: 0, display: 'flex' }}
+            variants={{
+              enter: (d: number) => ({ opacity: 0, x: d * 28 }),
+              center: { opacity: 1, x: 0 },
+              exit: (d: number) => ({ opacity: 0, x: d * -28 }),
+            }}
+            initial="enter" animate="center" exit="exit" transition={{ duration: 0.26, ease }}>
+            {tab === 'accounts' && <AccountsScreen />}
+            {tab === 'categories' && <Swipe><CategoriesScreen /></Swipe>}
+            {tab === 'transactions' && <Swipe><TransactionsScreen /></Swipe>}
+            {tab === 'overview' && <Swipe><OverviewScreen /></Swipe>}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+      <AnimatePresence>
+        {(tab === 'transactions' || tab === 'overview') && (
+          <motion.button key="fab" className="fab" aria-label="Add transaction"
+            initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }}
+            whileTap={{ scale: 0.92 }} transition={softSpring} onClick={() => setUi({ addTx: {} })}>
+            <Plus size={28} strokeWidth={2.2} />
+          </motion.button>
+        )}
+      </AnimatePresence>
+      <BottomNav />
+      <ToastHost />
+      <Sheets />
+    </div>
+  );
+}
+
+function TopBar() {
+  const { total, count } = useHeaderTotal();
+  const user = useStore(s => s.user);
+  const profiles = useStore(s => s.profiles);
+  const pending = useStore(s => s.pending);
+  const failed = useStore(s => s.failed);
+  const tab = useUi(u => u.tab);
+  const name = (user && profiles[user.id]?.display_name) || user?.email || 'Me';
+  const right: Record<UiState['tab'], ReactNode> = {
+    accounts: <button className="iconbtn" aria-label="Add account" onClick={() => setUi({ account: {} })}><Plus size={24} /></button>,
+    categories: <button className="iconbtn" aria-label="New category" onClick={() => setUi({ category: {} })}><Pencil size={20} /></button>,
+    transactions: <button className="iconbtn" aria-label="Search" onClick={() => setUi({ search: true })}><Search size={22} /></button>,
+    overview: <span />,
+  };
+  return (
+    <div className="topbar">
+      <button className="iconbtn" aria-label="Settings" onClick={() => setUi({ settings: true })}>
+        <div className="avatar">{name.slice(0, 1).toUpperCase()}{(pending > 0 || failed > 0) && <span className="sync-dot" style={failed ? { background: 'var(--expense)' } : undefined} />}</div>
+      </button>
+      <button className="total-btn" onClick={() => setUi({ filter: true })}>
+        <span className="total-label">{count} {count === 1 ? 'account' : 'accounts'} <ChevronDown size={14} /></span>
+        <Money value={total} className={`total-value ${total < 0 ? 'neg' : ''}`} />
+      </button>
+      <div style={{ justifySelf: 'end' }}>{right[tab]}</div>
+    </div>
+  );
+}
+
+function PeriodBar() {
+  const period = useStore(s => s.period);
+  return (
+    <div className="periodbar">
+      <motion.button className="iconbtn" whileTap={{ scale: 0.9 }} aria-label="Previous" disabled={period.mode === 'all'}
+        onClick={() => setPeriod(shift(period, -1))} style={{ opacity: period.mode === 'all' ? 0.3 : 1 }}>
+        <ChevronLeft size={24} />
+      </motion.button>
+      <motion.button className="period-pill" whileTap={{ scale: 0.97 }} onClick={() => setUi({ periodPicker: true })} layout transition={softSpring}>
+        <span className="mode">{MODE_SHORT[period.mode]}</span>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span key={label(period)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
+            {label(period)}
+          </motion.span>
+        </AnimatePresence>
+        <ChevronDown size={16} className="faint" />
+      </motion.button>
+      <motion.button className="iconbtn" whileTap={{ scale: 0.9 }} aria-label="Next" disabled={period.mode === 'all'}
+        onClick={() => setPeriod(shift(period, 1))} style={{ opacity: period.mode === 'all' ? 0.3 : 1 }}>
+        <ChevronRight size={24} />
+      </motion.button>
+    </div>
+  );
+}
+
+/** Horizontal swipe changes the period; the content slides in from the swipe direction. */
+function Swipe({ children }: { children: ReactNode }) {
+  const period = useStore(s => s.period);
+  const start = useRef<{ x: number; y: number; t: number } | null>(null);
+  const lastDir = useRef(0);
+  const onStart = (e: React.TouchEvent) => { const t = e.touches[0]; start.current = { x: t.clientX, y: t.clientY, t: Date.now() }; };
+  const onEnd = (e: React.TouchEvent) => {
+    const s = start.current; start.current = null;
+    if (!s || period.mode === 'all') return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8 && Date.now() - s.t < 600) {
+      const d = dx < 0 ? 1 : -1;
+      lastDir.current = d;
+      setPeriod(shift(period, d as 1 | -1));
+    }
+  };
+  const key = period.mode + period.anchor;
+  return (
+    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }} onTouchStart={onStart} onTouchEnd={onEnd}>
+      <AnimatePresence initial={false} custom={lastDir.current} mode="popLayout">
+        <motion.div key={key} custom={lastDir.current} style={{ flex: 1, display: 'flex', width: '100%' }}
+          variants={{
+            enter: (d: number) => ({ opacity: 0, x: d * 40 }),
+            center: { opacity: 1, x: 0 },
+            exit: (d: number) => ({ opacity: 0, x: d * -40 }),
+          }}
+          initial="enter" animate="center" exit="exit" transition={{ duration: 0.24, ease }}
+          onAnimationComplete={() => { lastDir.current = 0; }}>
+          {children}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function BottomNav() {
+  const tab = useUi(u => u.tab);
+  const items: Array<[UiState['tab'], string, typeof Wallet]> = [
+    ['accounts', 'Accounts', Wallet], ['categories', 'Categories', Shapes],
+    ['transactions', 'Transactions', ReceiptText], ['overview', 'Overview', ChartColumn],
+  ];
+  return (
+    <nav className="nav">
+      {items.map(([id, text, I]) => (
+        <motion.button key={id} className={`nav-item ${tab === id ? 'on' : ''}`} whileTap={{ scale: 0.94 }} onClick={() => setUi({ tab: id })}>
+          {tab === id && <motion.div layoutId="navind" className="nav-ind" transition={softSpring} />}
+          <I size={22} strokeWidth={tab === id ? 2.2 : 1.8} />
+          {text}
+        </motion.button>
+      ))}
+    </nav>
+  );
+}
+
+function Sheets() {
+  return (
+    <>
+      <AddTransactionSheet />
+      <AccountSheet />
+      <CategorySheet />
+      <CategoryDetailSheet />
+      <SettingsSheet />
+      <FilterSheet />
+      <PeriodSheet />
+      <RecurringSheet />
+      <ImportSheet />
+    </>
+  );
+}

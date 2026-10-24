@@ -1,0 +1,152 @@
+import { useMemo } from 'react';
+import { useStore, type State } from './store';
+import { range, type Period } from './period';
+import type { Account, Category, Tx } from './types';
+import { round2 } from './format';
+
+export const alive = <T extends { deleted_at?: string | null }>(rec: Record<string, T>) =>
+  Object.values(rec).filter(r => !r.deleted_at);
+
+export function sortAccounts(a: Account[]) {
+  return a.slice().sort((x, y) => x.sort - y.sort || x.name.localeCompare(y.name));
+}
+export function sortCats(c: Category[]) {
+  return c.slice().sort((x, y) => x.sort - y.sort || x.name.localeCompare(y.name));
+}
+/** newest first */
+export function sortTxs(t: Tx[]) {
+  return t.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq || ((b.created_at ?? b.updated_at ?? '') > (a.created_at ?? a.updated_at ?? '') ? 1 : -1)));
+}
+
+export function useAccounts() {
+  const rec = useStore(s => s.accounts);
+  return useMemo(() => sortAccounts(alive(rec)), [rec]);
+}
+export function useCategories() {
+  const rec = useStore(s => s.categories);
+  return useMemo(() => sortCats(alive(rec)), [rec]);
+}
+/** live transactions whose account still exists (or is unknown to us, e.g. a partner's account) */
+export function useTxs() {
+  const rec = useStore(s => s.transactions);
+  const accRec = useStore(s => s.accounts);
+  return useMemo(() => alive(rec).filter(t => !accRec[t.account_id]?.deleted_at), [rec, accRec]);
+}
+
+export function computeBalances(accounts: Account[], txs: Tx[]): Map<string, number> {
+  const b = new Map<string, number>();
+  for (const a of accounts) b.set(a.id, a.opening_balance);
+  for (const t of txs) {
+    if (t.type === 'expense') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! - t.amount);
+    else if (t.type === 'income') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! + t.amount);
+    else {
+      if (b.has(t.account_id)) b.set(t.account_id, b.get(t.account_id)! - t.amount);
+      if (t.to_account_id && b.has(t.to_account_id)) b.set(t.to_account_id, b.get(t.to_account_id)! + t.amount);
+    }
+  }
+  for (const [k, v] of b) b.set(k, round2(v));
+  return b;
+}
+
+export function useBalances() {
+  const accounts = useAccounts();
+  const txs = useTxs();
+  return useMemo(() => computeBalances(accounts, txs), [accounts, txs]);
+}
+
+export function defaultSelection(accounts: Account[]) {
+  return accounts.filter(a => !a.archived && a.kind !== 'savings').map(a => a.id);
+}
+
+/** Account ids included in totals and statistics. */
+export function useSelection() {
+  const accounts = useAccounts();
+  const filter = useStore(s => s.accountFilter);
+  return useMemo(() => {
+    const ids = filter ? filter.filter(id => accounts.some(a => a.id === id)) : defaultSelection(accounts);
+    return new Set(ids.length ? ids : defaultSelection(accounts));
+  }, [accounts, filter]);
+}
+
+export function useHeaderTotal() {
+  const sel = useSelection();
+  const bal = useBalances();
+  return useMemo(() => {
+    let total = 0;
+    sel.forEach(id => { total += bal.get(id) ?? 0; });
+    return { total: round2(total), count: sel.size };
+  }, [sel, bal]);
+}
+
+export interface PeriodStats {
+  txs: Tx[];          // expenses + incomes in period on selected accounts
+  all: Tx[];          // everything in period touching selected accounts (incl. transfers)
+  expense: number;
+  income: number;
+  byCat: Map<string, number>;    // top-level category id -> total
+  bySub: Map<string, number>;    // category id (sub or top when no sub) -> total
+  byDay: Map<string, Map<string, number>>; // date -> top category id -> expense total
+}
+
+export function topCategoryId(catId: string | null, cats: Record<string, Category>): string {
+  if (!catId) return 'none';
+  const c = cats[catId];
+  return c?.parent_id ?? catId;
+}
+
+export function periodStats(txs: Tx[], period: Period, sel: Set<string>, cats: Record<string, Category>): PeriodStats {
+  const [a, b] = range(period);
+  const res: PeriodStats = { txs: [], all: [], expense: 0, income: 0, byCat: new Map(), bySub: new Map(), byDay: new Map() };
+  for (const t of txs) {
+    if (t.date < a || t.date > b) continue;
+    const touches = sel.has(t.account_id) || (t.to_account_id != null && sel.has(t.to_account_id));
+    if (!touches) continue;
+    res.all.push(t);
+    if (t.type === 'transfer' || !sel.has(t.account_id)) continue;
+    res.txs.push(t);
+    const top = topCategoryId(t.category_id, cats);
+    if (t.type === 'expense') res.expense += t.amount; else res.income += t.amount;
+    res.byCat.set(top, (res.byCat.get(top) ?? 0) + t.amount);
+    const sub = t.category_id ?? 'none';
+    res.bySub.set(sub, (res.bySub.get(sub) ?? 0) + t.amount);
+    if (t.type === 'expense') {
+      let day = res.byDay.get(t.date);
+      if (!day) res.byDay.set(t.date, (day = new Map()));
+      day.set(top, (day.get(top) ?? 0) + t.amount);
+    }
+  }
+  res.expense = round2(res.expense);
+  res.income = round2(res.income);
+  return res;
+}
+
+export function usePeriodStats(override?: Period) {
+  const txs = useTxs();
+  const period = useStore(s => s.period);
+  const cats = useStore(s => s.categories);
+  const sel = useSelection();
+  const p = override ?? period;
+  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats]);
+}
+
+export function catName(id: string | null, cats: Record<string, Category>, withParent = true): string {
+  if (!id) return 'Uncategorized';
+  const c = cats[id];
+  if (!c) return 'Shared category';
+  if (c.parent_id && withParent) {
+    const p = cats[c.parent_id];
+    return p ? `${p.name} · ${c.name}` : c.name;
+  }
+  return c.name;
+}
+
+export function catStyle(id: string | null, cats: Record<string, Category>) {
+  if (!id) return { icon: 'circle', color: '#64748B' };
+  const c = cats[id];
+  if (!c) return { icon: 'circle', color: '#64748B' };
+  const parent = c.parent_id ? cats[c.parent_id] : null;
+  // subcategories use their own icon but inherit the parent's color
+  return { icon: c.icon !== 'circle' ? c.icon : parent?.icon ?? 'circle', color: parent?.color ?? c.color };
+}
+
+export const selectMe = (s: State) => s.user?.id ?? '';
