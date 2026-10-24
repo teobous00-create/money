@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
+const p = await (await b.newContext({ viewport: { width: 400, height: 860 }, isMobile: true, hasTouch: true })).newPage();
+const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(process.env.URL); await p.waitForTimeout(700);
+await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
+await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
+await p.setInputFiles('input[type=file]', process.env.CSV); await p.waitForTimeout(500);
+console.log((await p.locator('.sheet').last().innerText()).replace(/\n+/g, ' | ').slice(0, 600));
+await p.getByRole('button', { name: 'Import', exact: true }).click(); await p.waitForTimeout(500);
+await p.getByText('Go to accounts').click(); await p.waitForTimeout(2500);
+console.log((await p.locator('.screen').last().innerText()).replace(/\n+/g, ' | ').slice(0, 500));
+console.log('errors', errs);
+await b.close();

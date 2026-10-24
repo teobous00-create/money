@@ -65,7 +65,7 @@ function Body({ close }: { close: () => void }) {
           <label className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: 30, border: '2px dashed var(--surface-3)', boxShadow: 'none', cursor: 'pointer' }}>
             <FileUp size={30} style={{ color: 'var(--accent)' }} />
             <span className="bold">Choose CSV file</span>
-            <input type="file" accept=".csv,text/csv,text/comma-separated-values" style={{ display: 'none' }} onChange={e => onFile(e.target.files?.[0])} />
+            <input type="file" style={{ display: 'none' }} onChange={e => onFile(e.target.files?.[0])} />
           </label>
           {err && <div className="err" style={{ marginTop: 12 }}>{err}</div>}
         </>
