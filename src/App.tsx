@@ -5,6 +5,7 @@ import { useStore, setPeriod } from './lib/store';
 import { useUi, setUi, type UiState } from './lib/ui';
 import { useHeaderTotal } from './lib/calc';
 import { label, shift, type PeriodMode } from './lib/period';
+import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
 import { AuthScreen } from './screens/Auth';
 import { AccountsScreen } from './screens/Accounts';
@@ -80,7 +81,7 @@ function Shell() {
 }
 
 function TopBar() {
-  const { total, count } = useHeaderTotal();
+  const { total, count, planned } = useHeaderTotal();
   const user = useStore(s => s.user);
   const profiles = useStore(s => s.profiles);
   const pending = useStore(s => s.pending);
@@ -101,6 +102,13 @@ function TopBar() {
       <button className="total-btn" onClick={() => setUi({ filter: true })}>
         <span className="total-label">{count} {count === 1 ? 'account' : 'accounts'} <ChevronDown size={14} /></span>
         <Money value={total} className={`total-value ${total < 0 ? 'neg' : ''}`} />
+        <AnimatePresence initial={false}>
+          {planned !== 0 && (
+            <motion.span className="tiny muted num" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+              Planned {planned > 0 ? '+' : '−'}{num(Math.abs(planned))} € · after: {num(Math.round((total + planned) * 100) / 100)} €
+            </motion.span>
+          )}
+        </AnimatePresence>
       </button>
       <div style={{ justifySelf: 'end' }}>{right[tab]}</div>
     </div>

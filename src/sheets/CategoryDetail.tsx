@@ -6,7 +6,7 @@ import { useUi, setUi } from '../lib/ui';
 import { useStore, getState } from '../lib/store';
 import { useTxs, useSelection, useCategories, useSharedRoots, partnersOf, sortTxs } from '../lib/calc';
 import { label, range } from '../lib/period';
-import { money, round2, shortDate } from '../lib/format';
+import { money, round2, shortDate, todayISO } from '../lib/format';
 import { tint } from '../lib/icons';
 
 type Scope = 'mine' | 'theirs' | 'both';
@@ -49,12 +49,14 @@ function Detail({ id, close }: { id: string; close: () => void }) {
     const inCat = txs.filter(t => (t.category_id === id || (t.category_id && subIds.has(t.category_id))) && t.date >= a && t.date <= b && t.type === cat.type);
     const isMine = (t: (typeof txs)[number]) => t.owner_id === me && sel.has(t.account_id);
     const scoped = sortTxs(inCat.filter(t => scope === 'both' ? (isMine(t) || t.owner_id !== me) : scope === 'mine' ? isMine(t) : t.owner_id !== me));
-    const total = round2(scoped.reduce((s, t) => s + t.amount, 0));
+    const today = todayISO();
+    const counted = scoped.filter(t => t.date <= today); // planned entries are listed but not counted yet
+    const total = round2(counted.reduce((s, t) => s + t.amount, 0));
     const perPerson = new Map<string, number>();
-    for (const t of scoped) perPerson.set(t.owner_id, round2((perPerson.get(t.owner_id) ?? 0) + t.amount));
+    for (const t of counted) perPerson.set(t.owner_id, round2((perPerson.get(t.owner_id) ?? 0) + t.amount));
     const sum = (catId: string) => {
       const m = new Map<string, number>();
-      for (const t of scoped) if (t.category_id === catId) m.set(t.owner_id, round2((m.get(t.owner_id) ?? 0) + t.amount));
+      for (const t of counted) if (t.category_id === catId) m.set(t.owner_id, round2((m.get(t.owner_id) ?? 0) + t.amount));
       return m;
     };
     // hidden subcategories still show while they carry amounts, so the rows always add up to the total
@@ -143,7 +145,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
                           </div>
                           {t.note && <div className="tx-note ellipsis">{t.note}</div>}
                         </div>
-                        <span className="tx-amt num" style={{ color: cat.type === 'expense' ? 'var(--expense)' : 'var(--income)' }}>{money(t.amount)}</span>
+                        {t.date > todayISO() && <span className="badge">Planned</span>}
+                        <span className="tx-amt num" style={{ opacity: t.date > todayISO() ? 0.5 : 1, color: cat.type === 'expense' ? 'var(--expense)' : 'var(--income)' }}>{money(t.amount)}</span>
                       </motion.button>
                     );
                   })}

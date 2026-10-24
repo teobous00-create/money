@@ -88,10 +88,10 @@ export function TransactionsScreen() {
             <div className="day-head">
               <div className="day-num num" style={{ color: g.date === todayISO() ? 'var(--accent)' : undefined }}>{d.getDate()}</div>
               <div className="day-meta grow">
-                <div className="d1" style={{ color: g.date === todayISO() ? undefined : 'var(--ink-2)' }}>{rel}</div>
+                <div className="d1" style={{ color: g.date === todayISO() ? undefined : 'var(--ink-2)' }}>{rel}{g.date > todayISO() && <span className="badge" style={{ marginLeft: 6 }}>Planned</span>}</div>
                 <div className="d2">{monthFmt.format(d)}</div>
               </div>
-              {g.net !== 0 && <Money value={g.net} sign colorize className="bold" animate={false} />}
+              {g.net !== 0 && <span style={{ opacity: g.date > todayISO() ? 0.5 : 1 }}><Money value={g.net} sign colorize className="bold" animate={false} /></span>}
             </div>
             <div className="list">
               {g.txs.map(t => <TxRow key={t.id} t={t} index={rowIndex++} />)}
@@ -123,8 +123,9 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
     }
   };
   const anim = index < 14;
+  const planned = t.date > todayISO();
   return (
-    <motion.div className="swipe-wrap" layout="position" exit={{ height: 0, opacity: 0 }}
+    <motion.div className="swipe-wrap" layout="position" exit={{ height: 0, opacity: 0 }} style={planned ? { opacity: 0.6 } : undefined}
       initial={anim ? { opacity: 0, y: 6 } : false} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease, delay: anim ? index * 0.022 : 0 }}>
       {mine && <div className="swipe-bg"><Trash2 size={20} /></div>}
       <motion.button className="list-row" drag={mine ? 'x' : false} dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.5, right: 0 }}
@@ -141,6 +142,7 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
               ? <>{acc?.name ?? ownerName}<ArrowLeftRight size={12} />{to?.name ?? '—'}</>
               : <><Icon name={acc?.icon ?? 'wallet'} size={13} />{acc?.name ?? '—'}</>}
             {t.recurring_id && <Repeat size={12} />}
+            {planned && <span className="badge" style={{ marginLeft: 4 }}>Planned</span>}
             {!mine && <span className="badge" style={{ marginLeft: 4 }}>by {ownerName}</span>}
           </div>
           {t.note && <div className="tx-note ellipsis">{t.note}</div>}

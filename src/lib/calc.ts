@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useStore, type State } from './store';
 import { range, type Period } from './period';
 import type { Account, Category, Tx } from './types';
-import { round2 } from './format';
+import { round2, todayISO } from './format';
 
 export const alive = <T extends { deleted_at?: string | null }>(rec: Record<string, T>) =>
   Object.values(rec).filter(r => !r.deleted_at);
@@ -33,10 +33,15 @@ export function useTxs() {
   return useMemo(() => alive(rec).filter(t => !accRec[t.account_id]?.deleted_at), [rec, accRec]);
 }
 
-export function computeBalances(accounts: Account[], txs: Tx[]): Map<string, number> {
+/** A transaction dated after today is "planned": it doesn't touch balances or totals until its day. */
+export const isPlanned = (t: Tx, today = todayISO()) => t.date > today;
+
+export function computeBalances(accounts: Account[], txs: Tx[], today = todayISO()): Map<string, number> {
   const b = new Map<string, number>();
   for (const a of accounts) b.set(a.id, a.opening_balance);
   for (const t of txs) {
+    if (t.date > today) continue; // planned
+
     if (t.type === 'expense') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! - t.amount);
     else if (t.type === 'income') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! + t.amount);
     else {
@@ -51,7 +56,8 @@ export function computeBalances(accounts: Account[], txs: Tx[]): Map<string, num
 export function useBalances() {
   const accounts = useAccounts();
   const txs = useTxs();
-  return useMemo(() => computeBalances(accounts, txs), [accounts, txs]);
+  const today = todayISO();
+  return useMemo(() => computeBalances(accounts, txs, today), [accounts, txs, today]);
 }
 
 export function defaultSelection(accounts: Account[]) {
@@ -71,11 +77,22 @@ export function useSelection() {
 export function useHeaderTotal() {
   const sel = useSelection();
   const bal = useBalances();
+  const txs = useTxs();
+  const today = todayISO();
   return useMemo(() => {
     let total = 0;
     sel.forEach(id => { total += bal.get(id) ?? 0; });
-    return { total: round2(total), count: sel.size };
-  }, [sel, bal]);
+    // net effect of planned (future-dated) transactions on the selected accounts
+    let planned = 0;
+    for (const t of txs) {
+      if (t.date <= today) continue;
+      const fromIn = sel.has(t.account_id), toIn = t.to_account_id != null && sel.has(t.to_account_id);
+      if (t.type === 'expense' && fromIn) planned -= t.amount;
+      else if (t.type === 'income' && fromIn) planned += t.amount;
+      else if (t.type === 'transfer') { if (fromIn && !toIn) planned -= t.amount; if (toIn && !fromIn) planned += t.amount; }
+    }
+    return { total: round2(total), count: sel.size, planned: round2(planned) };
+  }, [sel, bal, txs, today]);
 }
 
 export interface PeriodStats {
@@ -95,7 +112,9 @@ export function topCategoryId(catId: string | null, cats: Record<string, Categor
 }
 
 export function periodStats(txs: Tx[], period: Period, sel: Set<string>, cats: Record<string, Category>): PeriodStats {
-  const [a, b] = range(period);
+  const [a, b0] = range(period);
+  const today = todayISO();
+  const b = b0 > today ? today : b0; // planned transactions don't count yet
   const res: PeriodStats = { txs: [], all: [], expense: 0, income: 0, byCat: new Map(), bySub: new Map(), byDay: new Map() };
   for (const t of txs) {
     if (t.date < a || t.date > b) continue;
@@ -126,7 +145,8 @@ export function usePeriodStats(override?: Period) {
   const cats = useStore(s => s.categories);
   const sel = useSelection();
   const p = override ?? period;
-  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats]);
+  const today = todayISO();
+  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats, today]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function catName(id: string | null, cats: Record<string, Category>, withParent = true): string {
