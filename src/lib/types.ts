@@ -43,6 +43,7 @@ export interface Tx extends Row {
   recurring_id: string | null;
   seq: number;
   created_at?: string;
+  virtual?: boolean; // client-only: a future occurrence projected from a recurring rule
 }
 
 export interface Recurring extends Row {
@@ -56,6 +57,8 @@ export interface Recurring extends Row {
   anchor_day: number;
   next_date: string;
   active: boolean;
+  end_date: string | null;
+  skip_dates: string[];
 }
 
 export interface Profile {

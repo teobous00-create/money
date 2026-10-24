@@ -105,6 +105,12 @@ await as(TEO, async () => {
   ok(n >= 2 && n <= 4, 'recurring catch-up posted ' + n);
   ok((await q(`select post_due_recurring() n`)).rows[0].n === 0, 'recurring is idempotent');
   ok(await fails(() => q(`select post_due_recurring_core(null)`)), 'cron function not callable by users');
+  // weekly rule started 30 days ago, one week skipped, ending 9 days ago (inclusive) → 3 posted
+  const rid = (await q(`insert into recurring (type,amount,account_id,category_id,freq,anchor_day,next_date,end_date,skip_dates)
+    values ('expense',5,$1,$2,'weekly',1,current_date - 30,current_date - 9, array[current_date - 23]) returning id`, [T.cash, T.home])).rows[0].id;
+  const n3 = (await q(`select post_due_recurring() n`)).rows[0].n;
+  const dates = (await q(`select (current_date - date) d from transactions where recurring_id = $1 order by date`, [rid])).rows.map(r => r.d);
+  ok(n3 === 3 && JSON.stringify(dates) === '[30,16,9]', 'end date + skipped occurrence respected: ' + JSON.stringify(dates));
 });
 
 const rn = (await q(`select recurring_next('2026-01-31','monthly',31)::text a, recurring_next('2026-02-28','monthly',31)::text b`)).rows[0];

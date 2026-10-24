@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Bell, X } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { alive, catName } from '../lib/calc';
+import { alive, catName, ruleDates } from '../lib/calc';
 import { addDays, money, todayISO } from '../lib/format';
 import { setUi } from '../lib/ui';
 import { ease } from './ui';
@@ -15,7 +15,8 @@ export function RecurringBanner() {
   const tomorrow = addDays(todayISO(), 1);
   const key = 'money:remind-dismissed';
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(key) === todayISO(); } catch { return false; } });
-  const due = useMemo(() => alive(rec).filter(r => r.active && r.next_date === tomorrow), [rec, tomorrow]);
+  const me = useStore(s => s.user?.id);
+  const due = useMemo(() => alive(rec).filter(r => r.owner_id === me && ruleDates(r, tomorrow, tomorrow).length > 0), [rec, tomorrow, me]);
   const show = due.length > 0 && !dismissed;
   return (
     <AnimatePresence initial={false}>

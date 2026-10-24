@@ -3,15 +3,23 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Delete, Repeat, Trash2, Users } from 'lucide-react';
 import { Sheet, DragZone, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
 import { useUi, setUi, type AddTxArgs } from '../lib/ui';
-import { useStore, put, remove, restore, getState, nextOccurrence } from '../lib/store';
-import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots, catName, catStyle } from '../lib/calc';
-import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay } from '../lib/format';
+import { useStore, put, putMany, remove, restore, getState, nextOccurrence } from '../lib/store';
+import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots, catName, catStyle, parseVirtualId, ruleToTx } from '../lib/calc';
+import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
-import type { Freq, Tx, TxType } from '../lib/types';
+import type { Freq, Recurring, Tx, TxType } from '../lib/types';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
 const TYPE_LABEL: Record<TxType, string> = { expense: 'Expense', income: 'Income', transfer: 'Transfer' };
 const longDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+type Scope = 'one' | 'next' | 'all';
+
+/** First occurrence on/after `min`, walking the schedule from `start`. */
+function firstOnOrAfter(start: string, freq: Freq, anchor: number, min: string) {
+  let d = start;
+  for (let i = 0; d < min && i < 1000; i++) d = nextOccurrence(d, freq, anchor);
+  return d;
+}
 
 export function AddTransactionSheet() {
   const args = useUi(u => u.addTx);
@@ -35,7 +43,9 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const accRec = useStore(s => s.accounts);
   const accounts = useAccounts();
   const cats = useCategories();
-  const editing: Tx | null = args.editId ? txRec[args.editId] ?? null : null;
+  const virt = args.editId ? parseVirtualId(args.editId) : null;
+  const virtRule = virt ? recRec[virt.ruleId] : undefined;
+  const editing: Tx | null = args.editId ? (virt ? (virtRule ? ruleToTx(virtRule, virt.date) : null) : txRec[args.editId] ?? null) : null;
   const readOnly = !!editing && editing.owner_id !== me;
   const myAccounts = accounts.filter(a => a.owner_id === me && !a.archived);
 
@@ -52,7 +62,12 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const [date, setDate] = useState(editing?.date ?? args.date ?? todayISO());
   const [note, setNote] = useState(editing?.note ?? '');
   const rule = editing?.recurring_id ? recRec[editing.recurring_id] : undefined;
-  const [repeat, setRepeat] = useState<'never' | Freq>(rule && rule.active && !rule.deleted_at ? rule.freq : 'never');
+  const ruleLive = !!rule && rule.active && !rule.deleted_at;
+  const [repeat, setRepeat] = useState<'never' | Freq>(ruleLive ? rule!.freq : 'never');
+  const [until, setUntil] = useState<string | null>(ruleLive ? rule!.end_date ?? null : null);
+  const [askScope, setAskScope] = useState<null | 'save' | 'delete'>(null);
+  const inSeries = !!editing && ruleLive;
+  const untilRef = useRef<HTMLInputElement>(null);
   const [picker, setPicker] = useState<null | 'from' | 'repeat'>(null);
   const [picking, setPicking] = useState(!editing && (type === 'transfer' ? !toAccountId : !categoryId));
   const dateRef = useRef<HTMLInputElement>(null);
@@ -83,43 +98,140 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
 
   const openDate = () => { const el = dateRef.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
 
-  const save = () => {
-    if (hasOp) { setExpr(num(amount).replace(/\./g, '')); return; }
-    if (amount <= 0) return toast('Enter an amount');
-    if (!accountId) return toast('Pick an account');
-    if (type !== 'transfer' && !categoryId) return toast('Pick a category');
-    if (type === 'transfer' && (!toAccountId || toAccountId === accountId)) return toast('Pick two different accounts');
-    const s = getState();
-    const sameDay = Object.values(s.transactions).filter(t => t.date === date && !t.deleted_at);
-    const seq = editing && editing.date === date ? editing.seq : Math.max(0, ...sameDay.map(t => t.seq)) + 1;
+  const validate = () => {
+    if (amount <= 0) { toast('Enter an amount'); return false; }
+    if (!accountId) { toast('Pick an account'); return false; }
+    if (type !== 'transfer' && !categoryId) { toast('Pick a category'); return false; }
+    if (type === 'transfer' && (!toAccountId || toAccountId === accountId)) { toast('Pick two different accounts'); return false; }
+    return true;
+  };
+  const nextSeq = (d: string) => {
+    const sameDay = Object.values(getState().transactions).filter(t => t.date === d && !t.deleted_at);
+    return Math.max(0, ...sameDay.map(t => t.seq)) + 1;
+  };
+  const values = () => ({
+    type, amount, account_id: accountId!, to_account_id: type === 'transfer' ? toAccountId : null,
+    category_id: type === 'transfer' ? null : categoryId, note: note.trim() || null,
+  });
+  const newRule = (startDate: string, freq: Freq, keep?: Partial<Recurring>): Recurring => {
+    const anchor = fromISO(startDate).getDate();
+    let next = startDate;
+    if (next <= todayISO() && !keep?.next_date) next = firstOnOrAfter(nextOccurrence(startDate, freq, anchor), freq, anchor, addDays(todayISO(), 1));
+    return {
+      id: uuid(), owner_id: me!, ...values(), freq, anchor_day: anchor, next_date: next, active: true,
+      end_date: until, skip_dates: [], ...keep,
+    };
+  };
+  const finish = (msg: string) => {
+    try { localStorage.setItem('money:lastacc:' + type, accountId!); } catch { /* ignore */ }
+    haptic(12);
+    toast(msg);
+    close();
+  };
+
+  /** Save a brand-new transaction, or an edit of one that isn't part of a repeating series. */
+  const saveSimple = () => {
     const tx: Tx = {
-      id: editing?.id ?? uuid(), owner_id: me!, type, date, amount, account_id: accountId,
-      to_account_id: type === 'transfer' ? toAccountId : null, category_id: type === 'transfer' ? null : categoryId,
-      note: note.trim() || null, recurring_id: editing?.recurring_id ?? null, seq,
+      id: editing?.id ?? uuid(), owner_id: me!, ...values(), date,
+      recurring_id: editing?.recurring_id ?? null, seq: editing && editing.date === date ? editing.seq : nextSeq(date),
     };
     if (repeat !== 'never') {
+      // the transaction itself is the first one; the rule takes over from the next date
       const anchor = fromISO(date).getDate();
-      const base = rule && !rule.deleted_at ? rule : null;
-      const r = {
-        id: base?.id ?? uuid(), owner_id: me!, type, amount, account_id: accountId, to_account_id: tx.to_account_id,
-        category_id: tx.category_id, note: tx.note, freq: repeat, anchor_day: anchor,
-        next_date: base && base.freq === repeat && base.active ? base.next_date : nextOccurrence(date, repeat, anchor), active: true,
-      };
-      if (r.next_date <= todayISO() && !base) r.next_date = nextOccurrence(todayISO() > date ? todayISO() : date, repeat, anchor);
+      const r = newRule(date, repeat, { next_date: firstOnOrAfter(nextOccurrence(date, repeat, anchor), repeat, anchor, addDays(todayISO(), 1)) });
       put('recurring', r);
       tx.recurring_id = r.id;
-    } else if (rule && rule.active) {
-      put('recurring', { ...rule, active: false });
     }
     put('transactions', tx);
-    try { localStorage.setItem('money:lastacc:' + type, accountId); } catch { /* ignore */ }
-    haptic(12);
-    toast(editing ? 'Changes saved' : `${TYPE_LABEL[type]} of ${money(amount)} saved`);
+    finish(editing ? 'Changes saved' : `${TYPE_LABEL[type]} of ${money(amount)} saved`);
+  };
+
+  /** Save an edit of a repeating entry, for one / this and next / all occurrences. */
+  const saveSeries = (scope: Scope) => {
+    const r = rule!;
+    const D = editing!.date;
+    const v = values();
+    const realTx = editing!.virtual ? null : editing!;
+    const stopping = repeat === 'never';
+    // this occurrence as a real transaction
+    const thisTx = (recurringId: string | null): Tx => ({
+      id: realTx?.id ?? uuid(), owner_id: me!, ...v, date, recurring_id: recurringId,
+      seq: realTx && realTx.date === date ? realTx.seq : nextSeq(date),
+    });
+
+    if (scope === 'one') {
+      put('transactions', thisTx(r.id));
+      if (!realTx) put('recurring', { ...r, skip_dates: [...(r.skip_dates ?? []), D] }); // the rule won't add this date again
+      return finish('Changed only this one');
+    }
+
+    if (stopping) {
+      // stop repeating: before this one (next) or completely (all)
+      put('recurring', scope === 'next' ? { ...r, end_date: addDays(D, -1) } : { ...r, active: false });
+      put('transactions', thisTx(null));
+      if (scope === 'all') updatePast(r, v);
+      return finish('Repeating stopped');
+    }
+
+    const freq = repeat as Freq;
+    const dateChanged = date !== D;
+    const anchor = dateChanged ? fromISO(date).getDate() : r.anchor_day;
+    if (scope === 'next' && !realTx && D !== r.next_date) {
+      // split: the old rule ends before this one, a new rule starts here
+      put('recurring', { ...r, end_date: addDays(D, -1) });
+      put('recurring', { ...newRule(date, freq), anchor_day: anchor, next_date: date, skip_dates: (r.skip_dates ?? []).filter(x => x > D) });
+      return finish('Changed this and the next ones');
+    }
+    // update the rule in place (applies to every future one)
+    let next = r.next_date;
+    if (!realTx && D === r.next_date) next = date;
+    else if (dateChanged || freq !== r.freq) next = firstOnOrAfter(realTx ? date : r.next_date, freq, anchor, addDays(todayISO(), 1));
+    put('recurring', { ...r, ...v, freq, anchor_day: anchor, next_date: next, end_date: until, active: true });
+    if (realTx) put('transactions', thisTx(r.id));
+    if (scope === 'all') updatePast(r, v);
+    finish(scope === 'all' ? 'Changed all of them' : 'Changed this and the next ones');
+  };
+
+  /** Apply new values to the already-added transactions of a rule (dates stay). */
+  const updatePast = (r: Recurring, v: ReturnType<typeof values>) => {
+    const past = Object.values(getState().transactions).filter(t => t.recurring_id === r.id && !t.deleted_at && t.id !== editing?.id);
+    putMany('transactions', past.map(t => ({ ...t, ...v })));
+  };
+
+  const deleteSeries = (scope: Scope) => {
+    const r = rule!;
+    const D = editing!.date;
+    const realTx = editing!.virtual ? null : editing!;
+    if (scope === 'one') {
+      if (realTx) remove('transactions', realTx.id);
+      else put('recurring', { ...r, skip_dates: [...(r.skip_dates ?? []), D] });
+      haptic(14);
+      toast('Deleted only this one', realTx ? { label: 'Undo', run: () => restore('transactions', realTx.id) } : undefined);
+    } else if (scope === 'next') {
+      if (realTx) remove('transactions', realTx.id);
+      put('recurring', { ...r, end_date: addDays(D, -1) });
+      haptic(14);
+      toast('Deleted this and the next ones');
+    } else {
+      const all = Object.values(getState().transactions).filter(t => t.recurring_id === r.id && !t.deleted_at);
+      putMany('transactions', all.map(t => ({ ...t, deleted_at: new Date().toISOString() })));
+      remove('recurring', r.id);
+      haptic(14);
+      toast(`Deleted all ${all.length ? all.length + ' ' : ''}of them`);
+    }
     close();
+  };
+
+  const save = () => {
+    if (hasOp) { setExpr(num(amount).replace(/\./g, '')); return; }
+    if (!validate()) return;
+    if (inSeries) return setAskScope('save');
+    saveSimple();
   };
 
   const del = () => {
     if (!editing) return;
+    if (inSeries) return setAskScope('delete');
     remove('transactions', editing.id);
     haptic(14);
     toast('Transaction deleted', { label: 'Undo', run: () => restore('transactions', editing.id) });
@@ -208,7 +320,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
           </div>
           <div className="dateline">
             <button className={`chip ${repeat !== 'never' ? 'on' : ''}`} style={{ height: 34, fontSize: 13 }} onClick={() => setPicker('repeat')}>
-              <Repeat size={15} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}
+              <Repeat size={15} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}{repeat !== 'never' && until ? ` · until ${shortDate(until)}` : ''}
             </button>
             <button className="grow" onClick={openDate} style={{ position: 'relative', fontWeight: 600, color: 'var(--ink-2)' }}>
               {relativeDay(date).match(/Today|Yesterday|Tomorrow/) ? relativeDay(date) + ', ' : ''}{longDate.format(fromISO(date))}
@@ -220,6 +332,18 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
               : <span style={{ width: 92 }} />}
           </div>
 
+          <Sheet open={!!askScope} onClose={() => setAskScope(null)} title={askScope === 'delete' ? 'Delete which ones?' : 'Change which ones?'} z={1}>
+            <div className="sheet-body">
+              <p className="small muted" style={{ margin: '0 4px 12px' }}>This is a repeating {type}.</p>
+              <div className="list">
+                {([['one', 'Only this one', shortDate(editing?.date ?? date)], ['next', 'This and the next ones', 'Earlier ones stay as they are'], ['all', 'All of them', 'Earlier and future ones']] as const).map(([k, l, hint]) => (
+                  <button key={k} className="list-row" onClick={() => { const a = askScope; setAskScope(null); if (a === 'delete') deleteSeries(k); else saveSeries(k); }}>
+                    <span className="grow"><span style={{ fontWeight: 600, color: askScope === 'delete' ? 'var(--expense)' : undefined }}>{l}</span><div className="tiny muted">{hint}</div></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Sheet>
           <AccountPicker open={picker === 'from'} exclude={type === 'transfer' ? toAccountId : null}
             title={type === 'transfer' ? 'From account' : 'Account'}
             onPick={id => { setAccountId(id); setPicker(null); }} onClose={() => setPicker(null)} />
@@ -227,12 +351,27 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
             <div className="sheet-body">
               <div className="list">
                 {(['never', 'weekly', 'monthly', 'yearly'] as const).map(f => (
-                  <button key={f} className="list-row" onClick={() => { setRepeat(f); setPicker(null); }}>
+                  <button key={f} className="list-row" onClick={() => { setRepeat(f); if (f === 'never') { setUntil(null); setPicker(null); } }}>
                     <span className="grow">{FREQ_LABEL[f]}</span>{repeat === f && <Check size={20} style={{ color: 'var(--accent)' }} />}
                   </button>
                 ))}
               </div>
-              <p className="small muted" style={{ padding: '12px 6px 0' }}>Repeating entries are added automatically on their date. You'll see a reminder in the app the day before.</p>
+              {repeat !== 'never' && (
+                <>
+                  <div className="section-head" style={{ marginTop: 16 }}><span className="section-title">Until</span></div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className={`chip ${until === null ? 'on' : ''}`} onClick={() => setUntil(null)}>Forever</button>
+                    <button className={`chip ${until ? 'on' : ''}`} style={{ position: 'relative' }}
+                      onClick={() => { const el = untilRef.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } }}>
+                      <CalendarDays size={16} />{until ? longDate.format(fromISO(until)) : 'Pick an end date'}
+                      <input ref={untilRef} type="date" min={date} value={until ?? ''} onChange={e => setUntil(e.target.value || null)}
+                        style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
+                    </button>
+                  </div>
+                </>
+              )}
+              <p className="small muted" style={{ padding: '12px 6px 0' }}>Repeating entries are added automatically on their date and show as Planned before that. You'll see a reminder in the app the day before.</p>
+              <button className="btn" style={{ marginTop: 10 }} onClick={() => setPicker(null)}>Done</button>
             </div>
           </Sheet>
         </motion.div>
@@ -327,7 +466,7 @@ function Key({ k, onKey, onSave, onDate, onClear, hasOp, ready, color }: {
       onPointerDown={() => { if (k === 'del') hold.current = setTimeout(() => { onClear(); hold.current = undefined; }, 500); }}
       onPointerUp={() => clearTimeout(hold.current)} onPointerLeave={() => clearTimeout(hold.current)}
       onClick={() => { if (k === 'date') onDate(); else if (k === '00') { onKey('0'); onKey('0'); } else onKey(k); }}
-      aria-label={k === 'del' ? 'Delete' : k === 'date' ? 'Date' : k}>
+      aria-label={k === 'del' ? 'Backspace' : k === 'date' ? 'Date' : k}>
       {label[k] ?? k}
     </motion.button>
   );

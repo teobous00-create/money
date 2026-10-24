@@ -95,6 +95,10 @@ create table if not exists public.recurring (
   deleted_at timestamptz
 );
 
+-- v3: recurring end date and skipped occurrences
+alter table public.recurring add column if not exists end_date date;
+alter table public.recurring add column if not exists skip_dates date[] not null default '{}';
+
 create index if not exists tx_owner_updated on public.transactions (owner_id, updated_at);
 create index if not exists tx_account on public.transactions (account_id);
 create index if not exists tx_to_account on public.transactions (to_account_id);
@@ -305,10 +309,12 @@ begin
       and (only_owner is null or owner_id = only_owner)
     for update skip locked
   loop
-    while r.next_date <= today loop
-      insert into transactions (owner_id, type, date, amount, account_id, to_account_id, category_id, note, recurring_id)
-      values (r.owner_id, r.type, r.next_date, r.amount, r.account_id, r.to_account_id, r.category_id, r.note, r.id);
-      posted := posted + 1;
+    while r.next_date <= today and (r.end_date is null or r.next_date <= r.end_date) loop
+      if not (r.next_date = any(r.skip_dates)) then
+        insert into transactions (owner_id, type, date, amount, account_id, to_account_id, category_id, note, recurring_id)
+        values (r.owner_id, r.type, r.next_date, r.amount, r.account_id, r.to_account_id, r.category_id, r.note, r.id);
+        posted := posted + 1;
+      end if;
       r.next_date := public.recurring_next(r.next_date, r.freq, r.anchor_day);
     end loop;
     update recurring set next_date = r.next_date where id = r.id;

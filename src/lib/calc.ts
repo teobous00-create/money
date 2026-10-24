@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { useStore, type State } from './store';
 import { range, type Period } from './period';
-import type { Account, Category, Tx } from './types';
-import { round2, todayISO } from './format';
+import type { Account, Category, Recurring, Tx } from './types';
+import { round2, todayISO, addDays } from './format';
+import { nextOccurrence } from './store';
 
 export const alive = <T extends { deleted_at?: string | null }>(rec: Record<string, T>) =>
   Object.values(rec).filter(r => !r.deleted_at);
@@ -72,6 +73,16 @@ export function useSelection() {
     const ids = filter ? filter.filter(id => accounts.some(a => a.id === id)) : defaultSelection(accounts);
     return new Set(ids.length ? ids : defaultSelection(accounts));
   }, [accounts, filter]);
+}
+
+export function useHeaderTotalBase() {
+  const sel = useSelection();
+  const bal = useBalances();
+  return useMemo(() => {
+    let total = 0;
+    sel.forEach(id => { total += bal.get(id) ?? 0; });
+    return { total: round2(total), count: sel.size };
+  }, [sel, bal]);
 }
 
 export function useHeaderTotal() {
@@ -191,4 +202,81 @@ export function partnersOf(rootId: string, s: State): string[] {
   if (owner && owner !== me) ids.add(owner);
   for (const m of s.members) if (m.category_id === rootId && m.user_id !== me) ids.add(m.user_id);
   return [...ids];
+}
+
+// ---------------------------------------------------------------- recurring projections
+
+/** Occurrence dates of a rule between from and to (inclusive), not yet posted, minus skipped ones. */
+export function ruleDates(r: Recurring, from: string, to: string, max = 400): string[] {
+  const out: string[] = [];
+  if (!r.active || r.deleted_at) return out;
+  const end = r.end_date && r.end_date < to ? r.end_date : to;
+  const skips = r.skip_dates ?? [];
+  let d = r.next_date;
+  for (let i = 0; d <= end && i < max; i++) {
+    if (d >= from && !skips.includes(d)) out.push(d);
+    d = nextOccurrence(d, r.freq, r.anchor_day);
+  }
+  return out;
+}
+
+export const virtualId = (ruleId: string, date: string) => `rec:${ruleId}:${date}`;
+export function parseVirtualId(id: string): { ruleId: string; date: string } | null {
+  const m = id.match(/^rec:(.+):(\d{4}-\d{2}-\d{2})$/);
+  return m ? { ruleId: m[1], date: m[2] } : null;
+}
+
+export function ruleToTx(r: Recurring, date: string): Tx {
+  return {
+    id: virtualId(r.id, date), owner_id: r.owner_id, type: r.type, date, amount: r.amount, account_id: r.account_id,
+    to_account_id: r.to_account_id, category_id: r.category_id, note: r.note, recurring_id: r.id, seq: -1, virtual: true,
+  };
+}
+
+/** Future occurrences of my recurring rules as planned (virtual) transactions, after today and up to `to`. */
+export function useProjected(from: string, to: string): Tx[] {
+  const rec = useStore(s => s.recurring);
+  const me = useStore(s => s.user?.id);
+  const today = todayISO();
+  return useMemo(() => {
+    const start = from > today ? from : addDays(today, 1);
+    const out: Tx[] = [];
+    for (const r of Object.values(rec)) {
+      if (r.owner_id !== me) continue;
+      for (const d of ruleDates(r, start, to)) out.push(ruleToTx(r, d));
+    }
+    return out;
+  }, [rec, me, from, to, today]);
+}
+
+/** The visible period clipped to at most a year ahead (for "All time"). */
+export function viewWindow(p: Period): [string, string] {
+  const [a, b] = range(p);
+  const cap = addDays(todayISO(), 366);
+  return [a, b > cap ? cap : b];
+}
+
+/** Planned money for the visible period, plus the expected balance at its end. */
+export function usePlanned(p: Period) {
+  const txs = useTxs();
+  const sel = useSelection();
+  const { total } = useHeaderTotalBase();
+  const today = todayISO();
+  const [a, b] = viewWindow(p);
+  const projected = useProjected(addDays(today, 1), b);
+  return useMemo(() => {
+    const effect = (t: Tx) => {
+      const fromIn = sel.has(t.account_id), toIn = t.to_account_id != null && sel.has(t.to_account_id);
+      if (t.type === 'expense') return fromIn ? -t.amount : 0;
+      if (t.type === 'income') return fromIn ? t.amount : 0;
+      return (toIn ? t.amount : 0) - (fromIn ? t.amount : 0);
+    };
+    let inPeriod = 0, untilEnd = 0;
+    for (const t of [...txs.filter(t => t.date > today && t.date <= b), ...projected]) {
+      const e = effect(t);
+      untilEnd += e;
+      if (t.date >= a) inPeriod += e;
+    }
+    return { show: b > today, inPeriod: round2(inPeriod), endBalance: round2(total + untilEnd), end: b };
+  }, [txs, projected, sel, total, today, a, b]);
 }

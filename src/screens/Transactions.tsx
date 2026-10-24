@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'motion/react';
 import { ArrowLeftRight, Search, Trash2, X, Repeat } from 'lucide-react';
-import { useTxs, useSelection, catName, catStyle, sortTxs } from '../lib/calc';
+import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
 import { useStore, remove, restore } from '../lib/store';
 import { setUi, useUi } from '../lib/ui';
 import { range } from '../lib/period';
@@ -21,11 +21,13 @@ export function TransactionsScreen() {
   const search = useUi(u => u.search);
   const [q, setQ] = useState('');
   const [limit, setLimit] = useState(30);
+  const [wa, wb] = viewWindow(period);
+  const projected = useProjected(wa, wb);
 
   const groups = useMemo(() => {
     const [a, b] = range(period);
     const query = q.trim().toLowerCase();
-    const list = txs.filter(t => {
+    const list = [...txs, ...(query ? [] : projected)].filter(t => {
       if (!(sel.has(t.account_id) || (t.to_account_id && sel.has(t.to_account_id)))) return false;
       if (query) {
         const hay = [t.note, catName(t.category_id, cats), accs[t.account_id]?.name, t.to_account_id ? accs[t.to_account_id]?.name : '', num(t.amount)].join(' ').toLowerCase();
@@ -38,12 +40,16 @@ export function TransactionsScreen() {
       let g = out[out.length - 1];
       if (!g || g.date !== t.date) out.push((g = { date: t.date, txs: [], net: 0 }));
       g.txs.push(t);
+      if (t.date > todayISO()) continue; // planned entries don't count in the day total yet
       if (t.type === 'income' && sel.has(t.account_id)) g.net += t.amount;
       else if (t.type === 'expense' && sel.has(t.account_id)) g.net -= t.amount;
     }
-    out.forEach(g => { g.net = round2(g.net); });
+    out.forEach(g => {
+      if (g.date > todayISO()) g.net = g.txs.reduce((n, t) => n + (t.type === 'income' ? t.amount : t.type === 'expense' ? -t.amount : 0), 0);
+      g.net = round2(g.net);
+    });
     return out;
-  }, [txs, sel, period, q, cats, accs]);
+  }, [txs, projected, sel, period, q, cats, accs]);
 
   useEffect(() => setLimit(30), [period, q]);
   const more = useRef<HTMLDivElement>(null);
@@ -110,6 +116,7 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
   const me = useStore(s => s.user?.id);
   const profiles = useStore(s => s.profiles);
   const mine = t.owner_id === me;
+  const canSwipe = mine && !t.virtual; // projected entries are changed from their editor
   const style = t.type === 'transfer' ? { icon: 'circle', color: '#64748B' } : catStyle(t.category_id, cats);
   const acc = accs[t.account_id];
   const to = t.to_account_id ? accs[t.to_account_id] : null;
@@ -125,10 +132,10 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
   const anim = index < 14;
   const planned = t.date > todayISO();
   return (
-    <motion.div className="swipe-wrap" layout="position" exit={{ height: 0, opacity: 0 }} style={planned ? { opacity: 0.6 } : undefined}
+    <motion.div className="swipe-wrap" style={planned ? { opacity: 0.6 } : undefined}
       initial={anim ? { opacity: 0, y: 6 } : false} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease, delay: anim ? index * 0.022 : 0 }}>
-      {mine && <div className="swipe-bg"><Trash2 size={20} /></div>}
-      <motion.button className="list-row" drag={mine ? 'x' : false} dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.5, right: 0 }}
+      {canSwipe && <div className="swipe-bg"><Trash2 size={20} /></div>}
+      <motion.button className="list-row" drag={canSwipe ? 'x' : false} dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.5, right: 0 }}
         dragDirectionLock onDragEnd={onDragEnd} onClick={() => setUi({ addTx: { editId: t.id } })} style={{ touchAction: 'pan-y' }}>
         {t.type === 'transfer'
           ? <div className="ico round" style={{ background: 'var(--surface-2)', color: 'var(--ink-2)' }}><ArrowLeftRight size={20} /></div>

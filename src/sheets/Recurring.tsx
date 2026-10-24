@@ -3,8 +3,8 @@ import { Pause, Play, Trash2, Repeat } from 'lucide-react';
 import { Sheet, IconBox, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, put, remove, restore } from '../lib/store';
-import { alive, catName, catStyle } from '../lib/calc';
-import { money, shortDate } from '../lib/format';
+import { alive, catName, catStyle, ruleDates, virtualId } from '../lib/calc';
+import { money, shortDate, addDays, todayISO } from '../lib/format';
 
 const F = { weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
 
@@ -33,12 +33,14 @@ function Body() {
         <AnimatePresence initial={false}>
           {list.map(r => {
             const st = r.type === 'transfer' ? { icon: 'circle', color: '#64748B' } : catStyle(r.category_id, cats);
+            const next = ruleDates(r, r.next_date, addDays(todayISO(), 800), 60)[0];
+            const status = !r.active ? 'paused' : next ? `next ${shortDate(next)}${r.end_date ? ` · until ${shortDate(r.end_date)}` : ''}` : 'ended';
             return (
-              <motion.div key={r.id} className="list-row" layout exit={{ opacity: 0, height: 0 }} style={{ opacity: r.active ? 1 : 0.55 }}>
+              <motion.div key={r.id} className="list-row" layout exit={{ opacity: 0, height: 0 }} style={{ opacity: r.active && next ? 1 : 0.55 }}>
                 <IconBox icon={st.icon} color={st.color} round size="sm" />
-                <div className="grow">
+                <div className="grow" role="button" onClick={() => next && r.active && setUi({ recurring: false, settings: false, addTx: { editId: virtualId(r.id, next) } })}>
                   <div className="ellipsis" style={{ fontWeight: 550 }}>{r.note || (r.type === 'transfer' ? 'Transfer' : catName(r.category_id, cats))}</div>
-                  <div className="tiny muted">{F[r.freq]} · {accs[r.account_id]?.name} · {r.active ? `next ${shortDate(r.next_date)}` : 'paused'}</div>
+                  <div className="tiny muted">{F[r.freq]} · {accs[r.account_id]?.name} · {status}</div>
                 </div>
                 <span className="num bold small" style={{ color: r.type === 'expense' ? 'var(--expense)' : r.type === 'income' ? 'var(--income)' : undefined }}>{money(r.amount)}</span>
                 <button className="iconbtn" style={{ width: 36 }} aria-label={r.active ? 'Pause' : 'Resume'} onClick={() => put('recurring', { ...r, active: !r.active })}>

@@ -3,7 +3,8 @@ import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
 import { useUi, setUi, type UiState } from './lib/ui';
-import { useHeaderTotal } from './lib/calc';
+import { useHeaderTotalBase, usePlanned } from './lib/calc';
+import { todayISO } from './lib/format';
 import { label, shift, type PeriodMode } from './lib/period';
 import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
@@ -81,7 +82,13 @@ function Shell() {
 }
 
 function TopBar() {
-  const { total, count, planned } = useHeaderTotal();
+  const { total, count } = useHeaderTotalBase();
+  const period = useStore(s => s.period);
+  const tabNow = useUi(u => u.tab);
+  const view = tabNow === 'accounts' ? { mode: 'month' as const, anchor: todayISO() } : period;
+  const plan = usePlanned(view);
+  const when = view.mode === 'month' ? new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(new Date(view.anchor)) : '';
+  const endWord = view.mode === 'month' ? 'end of month' : view.mode === 'all' ? 'in a year' : view.mode === 'year' ? 'end of year' : view.mode === 'week' ? 'end of week' : 'end of day';
   const user = useStore(s => s.user);
   const profiles = useStore(s => s.profiles);
   const pending = useStore(s => s.pending);
@@ -103,9 +110,9 @@ function TopBar() {
         <span className="total-label">{count} {count === 1 ? 'account' : 'accounts'} <ChevronDown size={14} /></span>
         <Money value={total} className={`total-value ${total < 0 ? 'neg' : ''}`} />
         <AnimatePresence initial={false}>
-          {planned !== 0 && (
-            <motion.span className="tiny muted num" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-              Planned {planned > 0 ? '+' : '−'}{num(Math.abs(planned))} € · after: {num(Math.round((total + planned) * 100) / 100)} €
+          {plan.show && plan.inPeriod !== 0 && (
+            <motion.span className="tiny muted num" style={{ whiteSpace: 'nowrap' }} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+              Planned{when ? ` in ${when}` : ''} {plan.inPeriod > 0 ? '+' : '−'}{num(Math.abs(plan.inPeriod))} € · {endWord}: {num(plan.endBalance)} €
             </motion.span>
           )}
         </AnimatePresence>

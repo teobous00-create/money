@@ -213,11 +213,11 @@ const COLS: Record<Table, string[]> = {
   accounts: ['id', 'owner_id', 'name', 'kind', 'icon', 'color', 'opening_balance', 'credit_limit', 'goal', 'archived', 'sort', 'deleted_at'],
   categories: ['id', 'owner_id', 'type', 'name', 'parent_id', 'icon', 'color', 'sort', 'archived', 'deleted_at'],
   transactions: ['id', 'owner_id', 'type', 'date', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'recurring_id', 'seq', 'deleted_at'],
-  recurring: ['id', 'owner_id', 'type', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'freq', 'anchor_day', 'next_date', 'active', 'deleted_at'],
+  recurring: ['id', 'owner_id', 'type', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'freq', 'anchor_day', 'next_date', 'active', 'end_date', 'skip_dates', 'deleted_at'],
 };
 function toDb(table: Table, row: object): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? null;
+  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' ? [] : null);
   return out;
 }
 const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount'];
@@ -381,7 +381,8 @@ function runLocalRecurring() {
   for (const r of Object.values(state.recurring)) {
     if (!r.active || r.deleted_at || r.next_date > t) continue;
     let next = r.next_date;
-    while (next <= t) {
+    while (next <= t && (!r.end_date || next <= r.end_date)) {
+      if ((r.skip_dates ?? []).includes(next)) { next = nextOccurrence(next, r.freq, r.anchor_day); continue; }
       txs.push({
         id: uuid(), owner_id: r.owner_id, type: r.type, date: next, amount: r.amount, account_id: r.account_id,
         to_account_id: r.to_account_id, category_id: r.category_id, note: r.note, recurring_id: r.id, seq: 0,

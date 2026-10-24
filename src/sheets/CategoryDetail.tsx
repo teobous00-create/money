@@ -4,7 +4,7 @@ import { Pencil, Plus, Users } from 'lucide-react';
 import { Sheet, DragZone, IconBox, Money, Bar, Segmented, ease } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, getState } from '../lib/store';
-import { useTxs, useSelection, useCategories, useSharedRoots, partnersOf, sortTxs } from '../lib/calc';
+import { useTxs, useSelection, useCategories, useSharedRoots, useProjected, viewWindow, partnersOf, sortTxs } from '../lib/calc';
 import { label, range } from '../lib/period';
 import { money, round2, shortDate, todayISO } from '../lib/format';
 import { tint } from '../lib/icons';
@@ -34,6 +34,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const sel = useSelection();
   const sharedRoots = useSharedRoots();
   const [scope, setScope] = useState<Scope>('mine');
+  const [wa, wb] = viewWindow(period);
+  const projected = useProjected(wa, wb);
 
   const shared = sharedRoots.has(id);
   const partners = useMemo(() => partnersOf(id, getState()), [id, members, catRec]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -46,7 +48,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
     const [a, b] = range(period);
     const subs = cats.filter(c => c.parent_id === id);
     const subIds = new Set(subs.map(s => s.id));
-    const inCat = txs.filter(t => (t.category_id === id || (t.category_id && subIds.has(t.category_id))) && t.date >= a && t.date <= b && t.type === cat.type);
+    const inCat = [...txs, ...projected].filter(t => (t.category_id === id || (t.category_id && subIds.has(t.category_id))) && t.date >= a && t.date <= b && t.type === cat.type);
     const isMine = (t: (typeof txs)[number]) => t.owner_id === me && sel.has(t.account_id);
     const scoped = sortTxs(inCat.filter(t => scope === 'both' ? (isMine(t) || t.owner_id !== me) : scope === 'mine' ? isMine(t) : t.owner_id !== me));
     const today = todayISO();
@@ -65,7 +67,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
       .filter(r => r.v > 0 || (r.isSub && !r.hidden))
       .sort((x, y) => y.v - x.v);
     return { scoped, total, perPerson, rows };
-  }, [cat, cats, id, txs, period, scope, me, sel]);
+  }, [cat, cats, id, txs, projected, period, scope, me, sel]);
 
   if (!cat || !data) return null;
   const max = Math.max(...data.rows.map(r => r.v), 0.01);
