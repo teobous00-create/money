@@ -20,6 +20,7 @@ import { FilterSheet } from './sheets/Filter';
 import { PeriodSheet } from './sheets/PeriodPicker';
 import { RecurringSheet } from './sheets/Recurring';
 import { ImportSheet } from './sheets/Import';
+import { HiddenSheet } from './sheets/Hidden';
 
 const MODE_SHORT: Record<PeriodMode, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year', all: 'All' };
 
@@ -198,6 +199,7 @@ function Sheets() {
       <PeriodSheet />
       <RecurringSheet />
       <ImportSheet />
+      <HiddenSheet />
     </>
   );
 }

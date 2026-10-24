@@ -22,13 +22,14 @@ export interface UiState {
   recurring: boolean;
   importer: boolean;
   search: boolean;
+  hidden: boolean;
 }
 
 const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview'];
 
 let ui: UiState = {
   tab: 'categories', tabDir: 0, addTx: null, account: null, category: null, catDetail: null,
-  settings: false, filter: false, periodPicker: false, recurring: false, importer: false, search: false,
+  settings: false, filter: false, periodPicker: false, recurring: false, importer: false, search: false, hidden: false,
 };
 try {
   const t = localStorage.getItem('money:tab') as UiState['tab'] | null;

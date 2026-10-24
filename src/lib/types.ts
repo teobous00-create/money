@@ -65,8 +65,12 @@ export interface Profile {
 }
 
 export interface Member {
-  account_id: string;
+  category_id: string; // top-level category
   user_id: string;
+}
+
+export interface Person extends Profile {
+  is_owner: boolean;
 }
 
 export type Table = 'accounts' | 'categories' | 'transactions' | 'recurring';

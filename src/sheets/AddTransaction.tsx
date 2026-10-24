@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, Calendar, Check, ChevronDown, Delete, Repeat, StickyNote, Trash2, X } from 'lucide-react';
-import { Sheet, Segmented, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Delete, Repeat, Trash2, Users } from 'lucide-react';
+import { Sheet, DragZone, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
 import { useUi, setUi, type AddTxArgs } from '../lib/ui';
 import { useStore, put, remove, restore, getState, nextOccurrence } from '../lib/store';
-import { useAccounts, useCategories, useBalances, catName, catStyle } from '../lib/calc';
-import { evalExpr, haptic, money, num, relativeDay, shortDate, todayISO, uuid, fromISO } from '../lib/format';
+import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots, catName, catStyle } from '../lib/calc';
+import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay } from '../lib/format';
+import { tint } from '../lib/icons';
 import type { Freq, Tx, TxType } from '../lib/types';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
+const TYPE_LABEL: Record<TxType, string> = { expense: 'Expense', income: 'Income', transfer: 'Transfer' };
+const longDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export function AddTransactionSheet() {
   const args = useUi(u => u.addTx);
@@ -29,6 +32,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const txRec = useStore(s => s.transactions);
   const recRec = useStore(s => s.recurring);
   const catRec = useStore(s => s.categories);
+  const accRec = useStore(s => s.accounts);
   const accounts = useAccounts();
   const cats = useCategories();
   const editing: Tx | null = args.editId ? txRec[args.editId] ?? null : null;
@@ -37,9 +41,10 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
 
   const [type, setType] = useState<TxType>(editing?.type ?? args.type ?? 'expense');
   const [categoryId, setCategoryId] = useState<string | null>(editing?.category_id ?? args.categoryId ?? null);
-  const defaultAcc = (t: TxType) => {
+  const defaultAcc = (t: TxType, not?: string | null) => {
     const l = lastAccount(t);
-    return (l && myAccounts.some(a => a.id === l) ? l : null) ?? myAccounts.find(a => a.kind !== 'savings')?.id ?? myAccounts[0]?.id ?? null;
+    const ok = (id: string | null | undefined) => !!id && id !== not && myAccounts.some(a => a.id === id);
+    return (ok(l) ? l : null) ?? myAccounts.find(a => a.kind !== 'savings' && a.id !== not)?.id ?? myAccounts.find(a => a.id !== not)?.id ?? null;
   };
   const [accountId, setAccountId] = useState<string | null>(editing?.account_id ?? args.accountId ?? defaultAcc(editing?.type ?? args.type ?? 'expense'));
   const [toAccountId, setToAccountId] = useState<string | null>(editing?.to_account_id ?? null);
@@ -48,42 +53,35 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const [note, setNote] = useState(editing?.note ?? '');
   const rule = editing?.recurring_id ? recRec[editing.recurring_id] : undefined;
   const [repeat, setRepeat] = useState<'never' | Freq>(rule && rule.active && !rule.deleted_at ? rule.freq : 'never');
-  const [picker, setPicker] = useState<null | 'from' | 'to' | 'repeat'>(null);
-  const [noteOpen, setNoteOpen] = useState(!!editing?.note);
+  const [picker, setPicker] = useState<null | 'from' | 'repeat'>(null);
+  const [picking, setPicking] = useState(!editing && (type === 'transfer' ? !toAccountId : !categoryId));
   const dateRef = useRef<HTMLInputElement>(null);
 
   const parent = categoryId ? (catRec[categoryId]?.parent_id ?? categoryId) : null;
   const subs = useMemo(() => cats.filter(c => c.parent_id === parent && !c.archived), [cats, parent]);
-  const step: 'pick' | 'amount' = type !== 'transfer' && !categoryId ? 'pick' : 'amount';
-
-  const changeType = (t: TxType) => {
-    if (t === type) return;
-    setType(t);
-    if (categoryId && catRec[categoryId]?.type !== t) setCategoryId(null);
-    if (t === 'transfer' && !toAccountId) setToAccountId(myAccounts.find(a => a.id !== accountId)?.id ?? null);
-  };
 
   const amount = evalExpr(expr);
-  const hasOp = /[+\-]/.test(expr.replace(/^-/, ''));
-  const color = type === 'expense' ? 'var(--expense)' : type === 'income' ? 'var(--income)' : 'var(--ink)';
+  const hasOp = /[+\-*/]/.test(expr.replace(/^-/, ''));
+  const from = accountId ? accRec[accountId] : undefined;
+  const to = toAccountId ? accRec[toAccountId] : undefined;
+  const rightColor = type === 'transfer' ? to?.color ?? '#64748B' : (parent ? catStyle(parent, catRec).color : '#64748B');
+  const amountColor = type === 'transfer' ? 'var(--ink)' : rightColor;
 
   const press = (k: string) => {
     haptic(4);
     setExpr(e => {
       if (k === 'del') return e.slice(0, -1);
-      if (k === '+' || k === '-') { if (!e || /[+\-]$/.test(e)) return e; return e + k; }
-      if (k === ',') {
-        const seg = e.split(/[+\-]/).pop() ?? '';
-        if (seg.includes(',')) return e;
-        return e + (seg === '' ? '0,' : ',');
-      }
-      const seg = e.split(/[+\-]/).pop() ?? '';
+      if ('+-*/'.includes(k)) { if (!e) return e; if (/[+\-*/]$/.test(e)) return e.slice(0, -1) + k; return e + k; }
+      const seg = e.split(/[+\-*/]/).pop() ?? '';
+      if (k === ',') return seg.includes(',') ? e : e + (seg === '' ? '0,' : ',');
       if (/,\d\d$/.test(seg)) return e;          // max 2 decimals
-      if (seg === '0' && k !== ',') return e.slice(0, -1) + k;
+      if (seg === '0') return e.slice(0, -1) + k;
       if (seg.replace(',', '').length >= 9) return e;
       return e + k;
     });
   };
+
+  const openDate = () => { const el = dateRef.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
 
   const save = () => {
     if (hasOp) { setExpr(num(amount).replace(/\./g, '')); return; }
@@ -99,7 +97,6 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
       to_account_id: type === 'transfer' ? toAccountId : null, category_id: type === 'transfer' ? null : categoryId,
       note: note.trim() || null, recurring_id: editing?.recurring_id ?? null, seq,
     };
-    // recurring rule
     if (repeat !== 'never') {
       const anchor = fromISO(date).getDate();
       const base = rule && !rule.deleted_at ? rule : null;
@@ -117,7 +114,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     put('transactions', tx);
     try { localStorage.setItem('money:lastacc:' + type, accountId); } catch { /* ignore */ }
     haptic(12);
-    toast(editing ? 'Changes saved' : `${type === 'expense' ? 'Expense' : type === 'income' ? 'Income' : 'Transfer'} of ${money(amount)} saved`);
+    toast(editing ? 'Changes saved' : `${TYPE_LABEL[type]} of ${money(amount)} saved`);
     close();
   };
 
@@ -129,135 +126,209 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     close();
   };
 
-  if (readOnly && editing) return <ReadOnly tx={editing} close={close} />;
+  if (readOnly && editing) return <ReadOnly tx={editing} />;
 
-  const amountStr = expr ? expr.replace(/-/g, '−') : '0';
-  const fontSize = Math.max(30, 60 - Math.max(0, amountStr.length - 5) * 4.2);
+  const onPick = (t: TxType, id: string) => {
+    haptic(6);
+    setType(t);
+    if (t === 'transfer') {
+      setToAccountId(id);
+      if (!accountId || accountId === id) setAccountId(defaultAcc('transfer', id));
+    } else {
+      setCategoryId(id);
+      if (!accountId) setAccountId(defaultAcc(t));
+    }
+    setPicking(false);
+  };
+
+  const shown = expr ? expr.replace(/-/g, '−').replace(/\*/g, '×').replace(/\//g, '÷') : '0';
+  const fontSize = Math.max(28, 52 - Math.max(0, shown.length - 6) * 3.4);
 
   return (
-    <>
-      <div className="row" style={{ padding: '0 12px 6px 16px', gap: 8 }}>
-        <Segmented value={type} onChange={changeType} style={{ flex: 1 }}
-          options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }, { value: 'transfer', label: 'Transfer' }]} />
-        {editing && <button className="iconbtn" onClick={del} aria-label="Delete" style={{ color: 'var(--expense)' }}><Trash2 size={21} /></button>}
-        <button className="iconbtn" onClick={close} aria-label="Close"><X size={22} /></button>
-      </div>
+    <AnimatePresence mode="popLayout" initial={false}>
+      {picking ? (
+        <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+          initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
+          <Picker type={type} onType={setType} onPick={onPick} exclude={accountId} />
+        </motion.div>
+      ) : (
+        <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+          initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.22, ease }}>
+          {/* split header: from (left) → to (right) */}
+          <DragZone className="split">
+            <motion.button className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicker('from')}
+              animate={{ backgroundColor: from?.color ?? '#64748B' }} transition={{ duration: 0.3 }}>
+              <span className="split-icon"><Icon name={from?.icon ?? 'wallet'} size={19} /></span>
+              <span className="split-label">From account</span>
+              <span className="split-name">{from?.name ?? 'Choose'}</span>
+            </motion.button>
+            <motion.button className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicking(true)}
+              animate={{ backgroundColor: rightColor }} transition={{ duration: 0.3 }}>
+              <span className="split-icon"><Icon name={type === 'transfer' ? to?.icon ?? 'wallet' : catStyle(parent, catRec).icon} size={19} /></span>
+              <span className="split-label">{type === 'transfer' ? 'To account' : 'To category'}</span>
+              <span className="split-name">{type === 'transfer' ? to?.name ?? 'Choose' : parent ? catRec[parent]?.name : 'Choose'}</span>
+            </motion.button>
+          </DragZone>
 
-      <AnimatePresence mode="popLayout" initial={false}>
-        {step === 'pick' ? (
-          <motion.div key="pick" className="sheet-body" initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.24, ease }}>
-            <div className="small muted" style={{ margin: '8px 4px 14px', fontWeight: 600 }}>Choose a category</div>
-            <motion.div className="cat-grid" initial="h" animate="s" variants={{ s: { transition: { staggerChildren: 0.02 } } }}>
-              {cats.filter(c => c.type === type && !c.parent_id && !c.archived && c.owner_id === me).map(c => (
-                <motion.div key={c.id} variants={{ h: { opacity: 0, scale: 0.85 }, s: { opacity: 1, scale: 1 } }} transition={softSpring}>
-                  <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => { haptic(6); setCategoryId(c.id); }}>
-                    <IconBox icon={c.icon} color={c.color} />
-                    <span className="cat-name">{c.name}</span>
-                  </Pressable>
-                </motion.div>
-              ))}
-            </motion.div>
-            {cats.filter(c => c.type === type && !c.parent_id && c.owner_id === me).length === 0 && (
-              <div className="empty">No {type} categories yet.<br />
-                <button className="btn secondary" style={{ marginTop: 14 }} onClick={() => setUi({ category: { type: type === 'income' ? 'income' : 'expense' } })}>Create category</button>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '12px 14px 0' }}>
+            {type !== 'transfer' && subs.length > 0 && (
+              <div className="chips" style={{ paddingBottom: 4 }}>
+                {subs.map(s => {
+                  const on = categoryId === s.id;
+                  return (
+                    <motion.button key={s.id} className="subchip" whileTap={{ scale: 0.95 }}
+                      style={{ borderColor: rightColor, color: on ? '#fff' : rightColor, background: on ? rightColor : 'transparent' }}
+                      onClick={() => { haptic(4); setCategoryId(on ? parent : s.id); }}>
+                      <Icon name={s.icon !== 'circle' ? s.icon : catStyle(parent, catRec).icon} size={17} />{s.name}
+                    </motion.button>
+                  );
+                })}
               </div>
             )}
-          </motion.div>
-        ) : (
-          <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-            initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 30 }} transition={{ duration: 0.24, ease }}>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '6px 16px 0' }}>
-              {/* account + category */}
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <AccountChip id={accountId} onClick={() => setPicker('from')} />
-                {type === 'transfer' ? (
-                  <><ArrowRight size={18} className="faint" /><AccountChip id={toAccountId} onClick={() => setPicker('to')} placeholder="To account" /></>
-                ) : (
-                  <motion.button className="chip" whileTap={{ scale: 0.96 }} onClick={() => setCategoryId(null)}>
-                    <span style={{ color: catStyle(parent, catRec).color, display: 'grid' }}><Icon name={catStyle(parent, catRec).icon} size={18} /></span>
-                    {parent ? catRec[parent]?.name : 'Category'}<ChevronDown size={15} className="faint" />
-                  </motion.button>
-                )}
-              </div>
-
-              {/* amount */}
-              <div className="amount-wrap">
-                <div className="expr">{hasOp ? `= ${money(amount)}` : ''}</div>
-                <div className="amount num" style={{ fontSize, color: expr ? color : 'var(--ink-3)' }}>
-                  <AnimatePresence initial={false} mode="popLayout">
-                    {amountStr.split('').map((ch, i) => (
-                      <motion.span key={i + ch} className="ch" initial={{ opacity: 0, y: 14, scale: 0.8 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -10, scale: 0.8 }} transition={{ type: 'spring', stiffness: 520, damping: 34 }}>{ch}</motion.span>
-                    ))}
-                  </AnimatePresence>
-                  <span className="cur" style={{ fontSize: '0.5em' }}>€</span>
-                </div>
-              </div>
-
-              {/* subcategories */}
-              {type !== 'transfer' && subs.length > 0 && (
-                <div className="chips" style={{ marginBottom: 6 }}>
-                  <button className={`chip ${categoryId === parent ? 'on' : ''}`} onClick={() => setCategoryId(parent)}>General</button>
-                  {subs.map(s => (
-                    <button key={s.id} className={`chip ${categoryId === s.id ? 'on' : ''}`} onClick={() => { haptic(4); setCategoryId(s.id); }}>{s.name}</button>
+            <div className="amount-wrap" style={{ minHeight: 92 }}>
+              <div className="tiny bold" style={{ color: amountColor, letterSpacing: '.02em', marginBottom: 4 }}>{TYPE_LABEL[type]}</div>
+              <div className="amount num" style={{ fontSize, color: expr ? amountColor : 'var(--ink-3)' }}>
+                <AnimatePresence initial={false} mode="popLayout">
+                  {shown.split('').map((ch, i) => (
+                    <motion.span key={i + ch} className="ch" initial={{ opacity: 0, y: 12, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.85 }} transition={{ type: 'spring', stiffness: 520, damping: 34 }}>{ch}</motion.span>
                   ))}
-                </div>
-              )}
-
-              {/* date / repeat / note */}
-              <div className="chips">
-                <button className="chip" onClick={() => dateRef.current?.showPicker ? dateRef.current.showPicker() : dateRef.current?.click()} style={{ position: 'relative' }}>
-                  <Calendar size={16} />{date === todayISO() || Math.abs(fromISO(date).getTime() - Date.now()) < 2 * 86400000 ? relativeDay(date) : shortDate(date)}
-                  <input ref={dateRef} type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)}
-                    style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
-                </button>
-                <button className={`chip ${repeat !== 'never' ? 'on' : ''}`} onClick={() => setPicker('repeat')}>
-                  <Repeat size={16} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}
-                </button>
-                {!noteOpen && <button className="chip" onClick={() => setNoteOpen(true)}><StickyNote size={16} />Note</button>}
+                </AnimatePresence>
+                <span className="cur" style={{ fontSize: '0.6em' }}>€</span>
               </div>
-              <AnimatePresence initial={false}>
-                {noteOpen && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease }} style={{ overflow: 'hidden' }}>
-                    <input className="input" placeholder="Note (e.g. Netflix)" value={note} onChange={e => setNote(e.target.value)} autoFocus={!editing} style={{ marginTop: 4, marginBottom: 8 }} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <div className="expr" style={{ marginTop: 4, marginBottom: 0 }}>{hasOp ? `= ${money(amount)}` : ''}</div>
             </div>
+            <input className="input note-input" placeholder="Notes…" value={note} onChange={e => setNote(e.target.value)} />
+          </div>
 
-            <Keypad onKey={press} onSave={save} onClear={() => setExpr('')} hasOp={hasOp} ready={amount > 0} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AccountPicker open={picker === 'from' || picker === 'to'} exclude={picker === 'to' ? accountId : null}
-        title={picker === 'to' ? 'To account' : type === 'transfer' ? 'From account' : 'Account'}
-        onPick={id => { if (picker === 'to') setToAccountId(id); else { setAccountId(id); if (id === toAccountId) setToAccountId(null); } setPicker(null); }}
-        onClose={() => setPicker(null)} />
-      <Sheet open={picker === 'repeat'} onClose={() => setPicker(null)} title="Repeat" z={1}>
-        <div className="sheet-body">
-          <div className="list">
-            {(['never', 'weekly', 'monthly', 'yearly'] as const).map(f => (
-              <button key={f} className="list-row" onClick={() => { setRepeat(f); setPicker(null); }}>
-                <span className="grow">{FREQ_LABEL[f]}</span>{repeat === f && <Check size={20} style={{ color: 'var(--accent)' }} />}
-              </button>
+          <div className="keypad5">
+            {['/', '7', '8', '9', 'del', '*', '4', '5', '6', 'date', '-', '1', '2', '3', 'go', '+', '00', '0', ','].map(k => (
+              <Key key={k} k={k} onKey={press} onSave={save} onDate={openDate} onClear={() => setExpr('')} hasOp={hasOp} ready={amount > 0} color={type === 'transfer' ? undefined : rightColor} />
             ))}
           </div>
-          <p className="small muted" style={{ padding: '12px 6px 0' }}>
-            Repeating entries are added automatically on their date. You'll see a reminder in the app the day before.
-          </p>
-        </div>
-      </Sheet>
+          <div className="dateline">
+            <button className={`chip ${repeat !== 'never' ? 'on' : ''}`} style={{ height: 34, fontSize: 13 }} onClick={() => setPicker('repeat')}>
+              <Repeat size={15} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}
+            </button>
+            <button className="grow" onClick={openDate} style={{ position: 'relative', fontWeight: 600, color: 'var(--ink-2)' }}>
+              {relativeDay(date).match(/Today|Yesterday|Tomorrow/) ? relativeDay(date) + ', ' : ''}{longDate.format(fromISO(date))}
+              <input ref={dateRef} type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)}
+                style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
+            </button>
+            {editing
+              ? <button className="iconbtn" style={{ color: 'var(--expense)', width: 40, height: 34 }} onClick={del} aria-label="Delete"><Trash2 size={20} /></button>
+              : <span style={{ width: 92 }} />}
+          </div>
+
+          <AccountPicker open={picker === 'from'} exclude={type === 'transfer' ? toAccountId : null}
+            title={type === 'transfer' ? 'From account' : 'Account'}
+            onPick={id => { setAccountId(id); setPicker(null); }} onClose={() => setPicker(null)} />
+          <Sheet open={picker === 'repeat'} onClose={() => setPicker(null)} title="Repeat" z={1}>
+            <div className="sheet-body">
+              <div className="list">
+                {(['never', 'weekly', 'monthly', 'yearly'] as const).map(f => (
+                  <button key={f} className="list-row" onClick={() => { setRepeat(f); setPicker(null); }}>
+                    <span className="grow">{FREQ_LABEL[f]}</span>{repeat === f && <Check size={20} style={{ color: 'var(--accent)' }} />}
+                  </button>
+                ))}
+              </div>
+              <p className="small muted" style={{ padding: '12px 6px 0' }}>Repeating entries are added automatically on their date. You'll see a reminder in the app the day before.</p>
+            </div>
+          </Sheet>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Step 1: Income / Expense / Transfer tabs with the category (or destination account) grid. */
+function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: TxType) => void; onPick: (t: TxType, id: string) => void; exclude: string | null }) {
+  const cats = useCategories();
+  const accounts = useAccounts();
+  const me = useStore(s => s.user?.id);
+  const stats = usePeriodStats();
+  const shared = useSharedRoots();
+  const bal = useBalances();
+  const tabs: Array<[TxType, string, typeof ArrowUpRight]> = [['income', 'Income', ArrowDownLeft], ['expense', 'Expense', ArrowUpRight], ['transfer', 'Transfer', ArrowLeftRight]];
+  const list = type === 'transfer'
+    ? accounts.filter(a => a.owner_id === me && !a.archived && a.id !== exclude)
+    : cats.filter(c => c.type === type && !c.parent_id && !c.archived);
+  return (
+    <>
+      <DragZone className="ptabs">
+        {tabs.map(([t, label, I]) => (
+          <button key={t} className={`ptab ${type === t ? 'on' : ''}`} onClick={() => onType(t)}>
+            <I size={18} />{label}
+            {type === t && <motion.span layoutId="ptab-ind" className="ptab-ind" transition={softSpring} />}
+          </button>
+        ))}
+      </DragZone>
+      <div className="sheet-body" style={{ paddingTop: 14 }}>
+        <div className="small muted" style={{ margin: '0 4px 12px', fontWeight: 600 }}>{type === 'transfer' ? 'Transfer to' : 'Choose a category'}</div>
+        <motion.div className="cat-grid" key={type} initial="h" animate="s" variants={{ s: { transition: { staggerChildren: 0.018 } } }}>
+          {type === 'transfer'
+            ? (list as typeof accounts).map(a => (
+              <motion.div key={a.id} variants={{ h: { opacity: 0, scale: 0.85 }, s: { opacity: 1, scale: 1 } }} transition={softSpring}>
+                <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => onPick('transfer', a.id)}>
+                  <span className="cat-name">{a.name}</span>
+                  <IconBox icon={a.icon} color={a.color} />
+                  <span className="cat-amt num" style={{ color: 'var(--ink-2)' }}>{money(bal.get(a.id) ?? 0)}</span>
+                </Pressable>
+              </motion.div>
+            ))
+            : (list as typeof cats).map(c => {
+              const v = stats.byCat.get(c.id) ?? 0;
+              return (
+                <motion.div key={c.id} variants={{ h: { opacity: 0, scale: 0.85 }, s: { opacity: 1, scale: 1 } }} transition={softSpring}>
+                  <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => onPick(type, c.id)}>
+                    <span className="cat-name">{c.name}</span>
+                    <div style={{ position: 'relative' }}>
+                      <IconBox icon={c.icon} color={c.color} soft={v === 0} />
+                      {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
+                    </div>
+                    <span className="cat-amt num" style={{ color: v ? c.color : 'var(--ink-3)' }}>{money(v)}</span>
+                  </Pressable>
+                </motion.div>
+              );
+            })}
+        </motion.div>
+        {list.length === 0 && (
+          <div className="empty">
+            {type === 'transfer' ? 'Add another account first.' : `No ${type} categories yet.`}
+            {type !== 'transfer' && <button className="btn secondary" style={{ marginTop: 14 }} onClick={() => setUi({ category: { type } })}>Create category</button>}
+          </div>
+        )}
+      </div>
     </>
   );
 }
 
-function AccountChip({ id, onClick, placeholder = 'Account' }: { id: string | null; onClick: () => void; placeholder?: string }) {
-  const acc = useStore(s => (id ? s.accounts[id] : undefined));
+function Key({ k, onKey, onSave, onDate, onClear, hasOp, ready, color }: {
+  k: string; onKey: (k: string) => void; onSave: () => void; onDate: () => void; onClear: () => void; hasOp: boolean; ready: boolean; color?: string;
+}) {
+  const hold = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(hold.current), []);
+  if (k === 'go') {
+    return (
+      <motion.button className="key go" style={{ gridRow: 'span 2', background: color ?? 'var(--accent)', color: color ? '#fff' : undefined }}
+        whileTap={{ scale: 0.95 }} onClick={onSave} animate={{ opacity: ready || hasOp ? 1 : 0.6 }} aria-label={hasOp ? 'Calculate' : 'Save'}>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span key={hasOp ? 'eq' : 'ok'} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }} transition={{ duration: 0.14 }} style={{ display: 'grid', fontSize: 30 }}>
+            {hasOp ? '=' : <Check size={30} strokeWidth={2.4} />}
+          </motion.span>
+        </AnimatePresence>
+      </motion.button>
+    );
+  }
+  const op = '/*-+'.includes(k) || k === 'del' || k === 'date';
+  const label: Record<string, React.ReactNode> = { '/': '÷', '*': '×', '-': '−', '+': '+', del: <Delete size={24} />, date: <CalendarDays size={22} /> };
   return (
-    <motion.button className="chip" whileTap={{ scale: 0.96 }} onClick={onClick}>
-      {acc ? <span style={{ color: acc.color, display: 'grid' }}><Icon name={acc.icon} size={18} /></span> : null}
-      {acc?.name ?? placeholder}<ChevronDown size={15} className="faint" />
+    <motion.button className={`key ${op ? 'op' : ''}`} whileTap={{ scale: 0.92 }} transition={{ duration: 0.1 }}
+      onPointerDown={() => { if (k === 'del') hold.current = setTimeout(() => { onClear(); hold.current = undefined; }, 500); }}
+      onPointerUp={() => clearTimeout(hold.current)} onPointerLeave={() => clearTimeout(hold.current)}
+      onClick={() => { if (k === 'date') onDate(); else if (k === '00') { onKey('0'); onKey('0'); } else onKey(k); }}
+      aria-label={k === 'del' ? 'Delete' : k === 'date' ? 'Date' : k}>
+      {label[k] ?? k}
     </motion.button>
   );
 }
@@ -289,52 +360,21 @@ function AccountPicker({ open, onClose, onPick, exclude, title }: { open: boolea
   );
 }
 
-function Keypad({ onKey, onSave, onClear, hasOp, ready }: { onKey: (k: string) => void; onSave: () => void; onClear: () => void; hasOp: boolean; ready: boolean }) {
-  const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const keys = ['7', '8', '9', 'del', '4', '5', '6', '-', '1', '2', '3', '+', ',', '0', '00', 'go'];
-  useEffect(() => () => clearTimeout(holdTimer.current), []);
-  return (
-    <div className="keypad">
-      {keys.map(k => {
-        if (k === 'go') {
-          return (
-            <motion.button key={k} className="key go" whileTap={{ scale: 0.93 }} onClick={onSave} animate={{ opacity: ready || hasOp ? 1 : 0.55 }} aria-label={hasOp ? 'Calculate' : 'Save'}>
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.span key={hasOp ? 'eq' : 'ok'} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }} transition={{ duration: 0.14 }} style={{ display: 'grid' }}>
-                  {hasOp ? '=' : <Check size={28} strokeWidth={2.6} />}
-                </motion.span>
-              </AnimatePresence>
-            </motion.button>
-          );
-        }
-        const op = k === 'del' || k === '+' || k === '-';
-        return (
-          <motion.button key={k} className={`key ${op ? 'op' : ''}`} whileTap={{ scale: 0.92 }} transition={{ duration: 0.1 }}
-            onPointerDown={() => { if (k === 'del') holdTimer.current = setTimeout(() => { onClear(); holdTimer.current = undefined; }, 500); }}
-            onPointerUp={() => clearTimeout(holdTimer.current)} onPointerLeave={() => clearTimeout(holdTimer.current)}
-            onClick={() => { if (k === '00') { onKey('0'); onKey('0'); } else onKey(k); }} aria-label={k === 'del' ? 'Delete' : k}>
-            {k === 'del' ? <Delete size={24} /> : k === '-' ? '−' : k}
-          </motion.button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ReadOnly({ tx, close }: { tx: Tx; close: () => void }) {
+function ReadOnly({ tx }: { tx: Tx }) {
   const cats = useStore(s => s.categories);
-  const accs = useStore(s => s.accounts);
   const profiles = useStore(s => s.profiles);
-  const st = tx.type === 'transfer' ? { icon: 'circle', color: '#64748B' } : catStyle(tx.category_id, cats);
+  const st = catStyle(tx.category_id, cats);
+  const who = profiles[tx.owner_id]?.display_name ?? 'Partner';
   return (
     <div className="sheet-body" style={{ textAlign: 'center' }}>
-      <div className="row" style={{ justifyContent: 'flex-end' }}><button className="iconbtn" onClick={close}><X size={22} /></button></div>
-      <div style={{ display: 'grid', placeItems: 'center', marginTop: 10 }}><IconBox icon={st.icon} color={st.color} size="lg" round /></div>
-      <div style={{ fontSize: 40, fontWeight: 650, margin: '16px 0 4px', color: tx.type === 'expense' ? 'var(--expense)' : 'var(--income)' }} className="num">{money(tx.amount)}</div>
-      <div className="bold">{tx.type === 'transfer' ? 'Transfer' : catName(tx.category_id, cats)}</div>
-      <div className="muted small" style={{ marginTop: 4 }}>{accs[tx.account_id]?.name ?? (profiles[tx.owner_id]?.display_name ?? 'Partner') + "'s account"}{tx.to_account_id ? ` → ${accs[tx.to_account_id]?.name ?? ''}` : ''} · {shortDate(tx.date)}</div>
+      <div style={{ display: 'grid', placeItems: 'center', marginTop: 10 }}>
+        <div className="ico lg round" style={{ background: tint(st.color, 0.15), color: st.color }}><Icon name={st.icon} size={26} /></div>
+      </div>
+      <div style={{ fontSize: 40, fontWeight: 650, margin: '16px 0 4px', color: st.color }} className="num">{money(tx.amount)}</div>
+      <div className="bold">{catName(tx.category_id, cats)}</div>
+      <div className="muted small" style={{ marginTop: 4 }}>Paid by {who} · {shortDate(tx.date)}</div>
       {tx.note && <div className="tx-note" style={{ marginTop: 10 }}>{tx.note}</div>}
-      <div className="badge" style={{ marginTop: 18 }}>Added by {profiles[tx.owner_id]?.display_name ?? 'partner'} · view only</div>
+      <div className="badge" style={{ marginTop: 18 }}><Users size={12} />Added by {who} · only {who} can edit it</div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert } from 'lucide-react';
+import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff } from 'lucide-react';
 import { Sheet, toast, ease } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, signOut, sync, wipeMyData, discardFailed } from '../lib/store';
@@ -67,6 +67,9 @@ function Body() {
       <div className="section list">
         <button className="list-row" onClick={() => setUi({ recurring: true })}>
           <Repeat size={21} /><span className="grow">Recurring</span><span className="muted small">{recCount}</span><ChevronRight size={18} className="faint" />
+        </button>
+        <button className="list-row" onClick={() => setUi({ hidden: true })}>
+          <EyeOff size={21} /><span className="grow">Hidden categories</span><ChevronRight size={18} className="faint" />
         </button>
         <button className="list-row" onClick={() => setUi({ importer: true })}>
           <Upload size={21} /><span className="grow">Import from 1Money</span><ChevronRight size={18} className="faint" />

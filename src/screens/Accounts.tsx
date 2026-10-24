@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Users, Archive } from 'lucide-react';
+import { ChevronDown, Archive } from 'lucide-react';
 import { useAccounts, useBalances } from '../lib/calc';
 import { useStore } from '../lib/store';
 import { setUi } from '../lib/ui';
@@ -13,20 +13,15 @@ export function AccountsScreen() {
   const accounts = useAccounts();
   const bal = useBalances();
   const me = useStore(s => s.user?.id);
-  const profiles = useStore(s => s.profiles);
-  const members = useStore(s => s.members);
   const [showArchive, setShowArchive] = useState(false);
 
   const regular = accounts.filter(a => !a.archived && a.kind !== 'savings');
   const savings = accounts.filter(a => !a.archived && a.kind === 'savings');
   const archived = accounts.filter(a => a.archived);
   const sum = (l: Account[]) => round2(l.reduce((s, a) => s + (bal.get(a.id) ?? 0), 0));
-  const sharedIds = useMemo(() => new Set(members.map(m => m.account_id)), [members]);
 
   const Row = ({ a, i }: { a: Account; i: number }) => {
     const b = bal.get(a.id) ?? 0;
-    const shared = a.owner_id !== me;
-    const ownerName = shared ? profiles[a.owner_id]?.display_name : null;
     return (
       <motion.button className="list-row" onClick={() => setUi({ account: { id: a.id } })}
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease, delay: Math.min(i, 10) * 0.03 }}>
@@ -34,10 +29,7 @@ export function AccountsScreen() {
           <IconBox icon={a.icon} color={a.color} />
         </div>
         <div className="grow">
-          <div className="row" style={{ gap: 6 }}>
-            <span className="ellipsis bold" style={{ fontWeight: 550 }}>{a.name}</span>
-            {(shared || sharedIds.has(a.id)) && <span className="badge"><Users size={11} />{shared ? ownerName ?? 'Shared' : 'Shared'}</span>}
-          </div>
+          <div className="ellipsis" style={{ fontWeight: 550 }}>{a.name}</div>
           <Money value={b} className={b < 0 ? 'neg' : b === 0 ? 'zero' : ''} />
         </div>
         {a.kind === 'credit' && a.credit_limit != null && (

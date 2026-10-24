@@ -24,7 +24,6 @@ function Body({ close }: { close: () => void }) {
   const groups: Array<[string, Account[]]> = [
     ['Accounts', accounts.filter(a => a.kind !== 'savings' && a.owner_id === me)],
     ['Savings', accounts.filter(a => a.kind === 'savings' && a.owner_id === me)],
-    ['Shared with me', accounts.filter(a => a.owner_id !== me)],
   ];
   return (
     <div className="sheet-body">

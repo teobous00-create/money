@@ -63,15 +63,26 @@ export function haptic(ms = 8) {
   try { navigator.vibrate?.(ms); } catch { /* not supported */ }
 }
 
-/** Evaluates a keypad expression like "12,5+3-1" safely. */
+/** Evaluates a keypad expression like "12,5+3*2-1" (× and ÷ before + and −). */
 export function evalExpr(expr: string): number {
-  const s = expr.replace(/,/g, '.').replace(/[+\-]$/, '');
+  const s = expr.replace(/,/g, '.').replace(/[+\-*/]$/, '');
   if (!s) return 0;
-  const parts = s.match(/[+\-]?[^+\-]+/g) || [];
-  let total = 0;
-  for (const p of parts) {
-    const v = parseFloat(p);
-    if (!Number.isNaN(v)) total += v;
+  const tokens = s.match(/\d*\.?\d+|\d+\.|[+\-*/]/g) ?? [];
+  // first pass: × ÷
+  const terms: number[] = [];
+  const ops: string[] = [];
+  let i = 0;
+  const read = () => parseFloat(tokens[i++] ?? '0') || 0;
+  let cur = read();
+  while (i < tokens.length) {
+    const op = tokens[i++];
+    const v = read();
+    if (op === '*') cur *= v;
+    else if (op === '/') cur = v === 0 ? cur : cur / v;
+    else { terms.push(cur); ops.push(op); cur = v; }
   }
+  terms.push(cur);
+  let total = terms[0];
+  ops.forEach((op, k) => { total = op === '+' ? total + terms[k + 1] : total - terms[k + 1]; });
   return round2(total);
 }

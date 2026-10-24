@@ -150,3 +150,25 @@ export function catStyle(id: string | null, cats: Record<string, Category>) {
 }
 
 export const selectMe = (s: State) => s.user?.id ?? '';
+
+/** Top-level category ids that are shared (I'm a member of someone's, or I shared mine). */
+export function useSharedRoots() {
+  const members = useStore(s => s.members);
+  const cats = useStore(s => s.categories);
+  const me = useStore(s => s.user?.id);
+  return useMemo(() => {
+    const set = new Set(members.map(m => m.category_id));
+    for (const c of Object.values(cats)) if (!c.parent_id && c.owner_id !== me) set.add(c.id);
+    return set;
+  }, [members, cats, me]);
+}
+
+/** Everyone involved in a shared top-level category, except me. */
+export function partnersOf(rootId: string, s: State): string[] {
+  const me = s.user?.id;
+  const ids = new Set<string>();
+  const owner = s.categories[rootId]?.owner_id;
+  if (owner && owner !== me) ids.add(owner);
+  for (const m of s.members) if (m.category_id === rootId && m.user_id !== me) ids.add(m.user_id);
+  return [...ids];
+}

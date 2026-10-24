@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Trash2 } from 'lucide-react';
-import { Sheet, Segmented, IconBox, Icon, Toggle, toast } from '../components/ui';
+import { Eye, EyeOff, UserPlus, Users, X } from 'lucide-react';
+import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, put, remove, restore } from '../lib/store';
+import { useStore, put, shareCategory, unshareCategory, categoryPeople } from '../lib/store';
 import { useCategories } from '../lib/calc';
 import { ICON_NAMES, COLORS, guessStyle } from '../lib/icons';
+import { REMOTE } from '../lib/supabase';
 import { uuid } from '../lib/format';
-import type { CatType, Category } from '../lib/types';
+import type { CatType, Category, Person } from '../lib/types';
 
 export function CategorySheet() {
   const arg = useUi(u => u.category);
@@ -15,7 +16,7 @@ export function CategorySheet() {
   const close = () => setUi({ category: null });
   const isSub = !!(cat?.parent_id ?? arg?.parentId);
   return (
-    <Sheet open={!!arg} onClose={close} title={cat ? (isSub ? 'Edit subcategory' : 'Edit category') : isSub ? 'New subcategory' : 'New category'} z={1} full={!isSub}>
+    <Sheet open={!!arg} onClose={close} title={cat ? (isSub ? 'Edit subcategory' : 'Edit category') : isSub ? 'New subcategory' : 'New category'} z={1} full>
       {arg && <Form key={arg.id ?? 'new' + arg.parentId} cat={cat} type={arg.type} parentId={arg.parentId} close={close} />}
     </Sheet>
   );
@@ -28,7 +29,6 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
   const [type, setType] = useState<CatType>(cat?.type ?? parentRec?.type ?? initialType ?? 'expense');
   const [icon, setIcon] = useState(cat?.icon ?? 'circle');
   const [color, setColor] = useState(cat?.color ?? parentRec?.color ?? COLORS[(cats.length * 5) % COLORS.length]);
-  const [archived, setArchived] = useState(cat?.archived ?? false);
   const [touchedIcon, setTouchedIcon] = useState(!!cat);
   const isSub = !!parentRec;
 
@@ -40,19 +40,21 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
     if (!name.trim()) return toast('Give it a name');
     put('categories', {
       id: cat?.id ?? uuid(), owner_id: cat?.owner_id ?? '', type, name: name.trim(), parent_id: parentRec?.id ?? null,
-      icon, color: isSub ? parentRec!.color : color, archived,
+      icon, color: isSub ? parentRec!.color : color, archived: cat?.archived ?? false,
       sort: cat?.sort ?? Math.max(0, ...cats.map(c => c.sort)) + 1,
     });
-    toast(cat ? 'Saved' : 'Category added');
+    toast(cat ? 'Saved' : isSub ? 'Subcategory added' : 'Category added');
     close();
   };
-  const del = () => {
+  const toggleHidden = () => {
     if (!cat) return;
-    remove('categories', cat.id);
-    toast(`${cat.name} deleted`, { label: 'Undo', run: () => restore('categories', cat.id) });
-    setUi({ catDetail: null });
+    const hide = !cat.archived;
+    put('categories', { ...cat, archived: hide });
+    toast(hide ? `${cat.name} hidden · its history stays` : `${cat.name} is visible again`, hide ? { label: 'Undo', run: () => put('categories', { ...cat, archived: false }) } : undefined);
+    if (hide && !isSub) setUi({ catDetail: null });
     close();
   };
+
   return (
     <div className="sheet-body">
       <div style={{ display: 'grid', placeItems: 'center', margin: '4px 0 18px' }}>
@@ -75,13 +77,66 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
       <div className="field"><label>Icon</label>
         <div className="pick-grid">{ICON_NAMES.map(n => <button key={n} className={n === icon ? 'on' : ''} onClick={() => { setIcon(n); setTouchedIcon(true); }} aria-label={n}><Icon name={n} size={20} /></button>)}</div>
       </div>
-      {cat && (
-        <div className="list" style={{ marginBottom: 14 }}>
-          <div className="list-row"><span className="grow">Hide from grid<div className="tiny muted">History stays in reports</div></span><Toggle on={archived} onChange={setArchived} /></div>
-        </div>
-      )}
+      {cat && !isSub && REMOTE && <ShareSection cat={cat} />}
       <button className="btn" onClick={save}>Save</button>
-      {cat && <button className="btn danger" style={{ marginTop: 10 }} onClick={del}><Trash2 size={18} />Delete</button>}
+      {cat && (
+        <button className="btn secondary" style={{ marginTop: 10 }} onClick={toggleHidden}>
+          {cat.archived ? <><Eye size={18} />Show again</> : <><EyeOff size={18} />Hide {isSub ? 'subcategory' : 'category'}</>}
+        </button>
+      )}
+      {cat && !cat.archived && <p className="tiny muted" style={{ textAlign: 'center', marginTop: 8 }}>Hiding removes it from the grid and pickers. No transactions are lost — reports still include them.</p>}
+    </div>
+  );
+}
+
+function ShareSection({ cat }: { cat: Category }) {
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const online = useStore(s => s.online);
+  const me = useStore(s => s.user?.id);
+  const load = () => categoryPeople(cat.id).then(setPeople).catch(() => setPeople([]));
+  useEffect(() => { if (online) void load(); }, [cat.id, online]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const share = async () => {
+    if (!email.trim()) return;
+    setBusy(true);
+    try {
+      const r = await shareCategory(cat.id, email);
+      if (r === 'ok') { toast('Shared · you both see each other\'s entries here'); setEmail(''); void load(); }
+      else if (r === 'no_user') toast('No user with that email — they need to create an account in the app first');
+      else if (r === 'self') toast('Already part of this category');
+      else toast('Could not share');
+    } catch { toast('Could not share — check your connection'); }
+    setBusy(false);
+  };
+  const others = (people ?? []).filter(p => p.id !== me);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div className="section-head"><span className="section-title row" style={{ gap: 6 }}><Users size={14} />Shared with</span></div>
+      <div className="list">
+        {others.map(p => (
+          <div key={p.id} className="list-row">
+            <div className="avatar">{(p.display_name ?? p.email ?? '?').slice(0, 1).toUpperCase()}</div>
+            <div className="grow"><div className="bold small">{p.display_name}{p.is_owner && <span className="badge" style={{ marginLeft: 6 }}>created it</span>}</div><div className="tiny muted">{p.email}</div></div>
+            {!p.is_owner && (
+              <button className="iconbtn" aria-label="Stop sharing" onClick={async () => { await unshareCategory(cat.id, p.id); void load(); toast('Stopped sharing'); }}><X size={18} /></button>
+            )}
+          </div>
+        ))}
+        {(people ?? []).some(p => p.is_owner && p.id !== me) && (
+          <button className="list-row small" style={{ color: 'var(--expense)' }} onClick={async () => { await unshareCategory(cat.id, me!); toast('You left this shared category'); setUi({ category: null, catDetail: null }); }}>
+            Leave this shared category
+          </button>
+        )}
+        <div className="list-row" style={{ gap: 8 }}>
+          <input className="input" style={{ boxShadow: 'none', background: 'var(--surface-2)', height: 44 }} type="email" placeholder="Partner's email" value={email} onChange={e => setEmail(e.target.value)} />
+          <button className="iconbtn" disabled={busy || !online} onClick={share} aria-label="Share" style={{ color: 'var(--accent)' }}><UserPlus size={22} /></button>
+        </div>
+      </div>
+      <div className="tiny muted" style={{ padding: '6px 6px 0' }}>
+        You both add your own part here and see each other's entries and totals (with subcategories). Each person can only edit their own entries. Your other categories and your accounts stay private.
+      </div>
     </div>
   );
 }

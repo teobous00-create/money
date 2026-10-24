@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Plus } from 'lucide-react';
-import { useCategories, usePeriodStats } from '../lib/calc';
-import { useStore } from '../lib/store';
+import { Plus, Users, EyeOff } from 'lucide-react';
+import { useCategories, usePeriodStats, useSharedRoots } from '../lib/calc';
 import { setUi } from '../lib/ui';
 import { IconBox, Money, Pressable, Segmented, ease, softSpring } from '../components/ui';
 import { RecurringBanner } from '../components/RecurringBanner';
@@ -15,16 +14,11 @@ export function CategoriesScreen() {
   const [type, setTypeState] = useState<CatType>(lastType);
   const setType = (t: CatType) => { lastType = t; setTypeState(t); };
   const cats = useCategories();
-  const catRec = useStore(s => s.categories);
-  const me = useStore(s => s.user?.id);
   const stats = usePeriodStats();
-
-  const tops = useMemo(() => {
-    const own = cats.filter(c => c.type === type && !c.parent_id && !c.archived && c.owner_id === me);
-    // categories of a shared account's owner, shown only when they carry an amount
-    const shared = [...stats.byCat.keys()].map(id => catRec[id]).filter(c => c && c.type === type && c.owner_id !== me && !c.deleted_at);
-    return [...own, ...shared];
-  }, [cats, catRec, type, me, stats]);
+  const shared = useSharedRoots();
+  // your categories plus the ones shared with you; amounts are only what you paid
+  const tops = useMemo(() => cats.filter(c => c.type === type && !c.parent_id && !c.archived), [cats, type]);
+  const hiddenCount = useMemo(() => cats.filter(c => c.archived).length, [cats]);
 
   const total = type === 'expense' ? stats.expense : stats.income;
   const other = type === 'expense' ? stats.income : stats.expense;
@@ -56,14 +50,16 @@ export function CategoriesScreen() {
         initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.025 } } }}>
         {tops.map(c => {
           const v = stats.byCat.get(c.id) ?? 0;
-          const mine = c.owner_id === me;
           return (
             <motion.div key={c.id} variants={{ hidden: { opacity: 0, scale: 0.85, y: 6 }, show: { opacity: 1, scale: 1, y: 0 } }} transition={softSpring}>
               <Pressable className="cat-tile" style={{ width: '100%' }}
-                onClick={() => { if (!mine) return setUi({ catDetail: { id: c.id, type } }); haptic(6); setUi({ addTx: { type, categoryId: c.id } }); }}
+                onClick={() => { haptic(6); setUi({ addTx: { type, categoryId: c.id } }); }}
                 onLongPress={() => { haptic(12); setUi({ catDetail: { id: c.id, type } }); }}>
                 <span className="cat-name">{c.name}</span>
-                <IconBox icon={c.icon} color={c.color} soft={v === 0} />
+                <div style={{ position: 'relative' }}>
+                  <IconBox icon={c.icon} color={c.color} soft={v === 0} />
+                  {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
+                </div>
                 <span className="cat-amt num" style={{ color: v ? c.color : 'var(--ink-3)' }}>{money(v)}</span>
               </Pressable>
             </motion.div>
@@ -78,6 +74,11 @@ export function CategoriesScreen() {
         </motion.div>
       </motion.div>
       <p className="tiny faint" style={{ textAlign: 'center', marginTop: 22 }}>Tap a category to add · hold for details</p>
+      {hiddenCount > 0 && (
+        <button className="row small muted" style={{ margin: '4px auto 0', gap: 6, padding: 8 }} onClick={() => setUi({ hidden: true })}>
+          <EyeOff size={15} />Hidden categories · {hiddenCount}
+        </button>
+      )}
     </div>
   );
 }

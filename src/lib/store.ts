@@ -2,7 +2,7 @@ import { useSyncExternalStore, useRef } from 'react';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, REMOTE } from './supabase';
-import type { Account, Category, Member, Profile, Recurring, Table, TableRow, Tx } from './types';
+import type { Account, Category, Member, Person, Profile, Recurring, Table, TableRow, Tx } from './types';
 import { addDays, todayISO, fromISO, toISO, uuid } from './format';
 import type { Period } from './period';
 
@@ -16,7 +16,7 @@ export interface State {
   transactions: Rec<Tx>;
   recurring: Rec<Recurring>;
   profiles: Rec<Profile>;
-  members: Member[];
+  members: Member[]; // shared category memberships visible to me
   pending: number;
   failed: number;
   syncing: boolean;
@@ -318,10 +318,10 @@ async function fetchAll(table: string, since: string | null) {
 }
 
 async function pull() {
-  const { data: mem, error: memErr } = await supabase!.from('account_members').select('account_id,user_id');
+  const { data: mem, error: memErr } = await supabase!.from('category_members').select('category_id,user_id');
   if (memErr) throw memErr;
   const members = (mem ?? []) as Member[];
-  const fp = (ms: Member[]) => ms.map(m => m.account_id + m.user_id).sort().join('|');
+  const fp = (ms: Member[]) => ms.map(m => m.category_id + m.user_id).sort().join('|');
   // if sharing changed, rows that are "old" may have become visible → full pull
   const full = !state.lastSync || fp(members) !== fp(state.members);
   const since = full ? null : new Date(new Date(state.lastSync!).getTime() - 120_000).toISOString();
@@ -396,21 +396,23 @@ function runLocalRecurring() {
 
 // ---------------------------------------------------------------- sharing
 
-export async function shareAccount(accountId: string, email: string): Promise<string> {
-  const { data, error } = await supabase!.rpc('share_account', { acc: accountId, member_email: email });
+export async function shareCategory(categoryId: string, email: string): Promise<string> {
+  await flush(); // the category must exist on the server first
+  const { data, error } = await supabase!.rpc('share_category', { cat: categoryId, member_email: email });
   if (error) throw error;
   await pull();
   return data as string;
 }
 
-export async function unshareAccount(accountId: string, userId: string) {
-  const { error } = await supabase!.from('account_members').delete().match({ account_id: accountId, user_id: userId });
+export async function unshareCategory(categoryId: string, userId: string) {
+  const { error } = await supabase!.from('category_members').delete().match({ category_id: categoryId, user_id: userId });
   if (error) throw error;
   await pull();
 }
 
-export async function memberList(accountId: string): Promise<Profile[]> {
-  const { data, error } = await supabase!.rpc('account_member_list', { acc: accountId });
+export async function categoryPeople(categoryId: string): Promise<Person[]> {
+  const { data, error } = await supabase!.rpc('category_people', { cat: categoryId });
   if (error) throw error;
-  return ((data ?? []) as Array<{ user_id: string; email: string; display_name: string }>).map(r => ({ id: r.user_id, email: r.email, display_name: r.display_name }));
+  return ((data ?? []) as Array<{ user_id: string; email: string; display_name: string; is_owner: boolean }>)
+    .map(r => ({ id: r.user_id, email: r.email, display_name: r.display_name, is_owner: r.is_owner }));
 }

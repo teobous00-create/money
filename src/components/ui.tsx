@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useDragControls, useSpring, useMotionValueEvent, type PanInfo } from 'motion/react';
 import { X } from 'lucide-react';
@@ -76,14 +76,23 @@ function useBackButton(open: boolean, onClose: () => void) {
   }, [open]);
 }
 
+const SheetDrag = createContext<(e: RPointerEvent) => void>(() => {});
+
+/** Any area wrapped in DragZone drags the sheet down to close it (taps still work). */
+export function DragZone({ children, className, style }: { children: ReactNode; className?: string; style?: CSSProperties }) {
+  const start = useContext(SheetDrag);
+  return <div className={className} style={{ touchAction: 'none', ...style }} onPointerDown={start}>{children}</div>;
+}
+
 export function Sheet({ open, onClose, title, children, full = false, right, z = 0 }: {
   open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; full?: boolean; right?: ReactNode; z?: number;
 }) {
   useBackButton(open, onClose);
   const controls = useDragControls();
   const onDragEnd = (_: unknown, info: PanInfo) => {
-    if (info.offset.y > 110 || info.velocity.y > 600) onClose();
+    if (info.offset.y > 90 || info.velocity.y > 500) onClose();
   };
+  const start = (e: RPointerEvent) => controls.start(e);
   return createPortal(
     <AnimatePresence>
       {open && (
@@ -93,18 +102,20 @@ export function Sheet({ open, onClose, title, children, full = false, right, z =
           <motion.div className={`sheet ${full ? 'full' : ''}`} style={{ zIndex: 51 + z * 2 }}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={spring}
             drag="y" dragListener={false} dragControls={controls} dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.6 }} onDragEnd={onDragEnd}>
-            <div onPointerDown={e => controls.start(e)}>
-              <div className="sheet-grab" />
-              {(title || right) && (
-                <div className="sheet-head">
-                  <div className="sheet-title">{title}</div>
-                  {right}
-                  <button className="iconbtn" onClick={onClose} aria-label="Close"><X size={22} /></button>
-                </div>
-              )}
-            </div>
-            {children}
+            dragElastic={{ top: 0, bottom: 0.7 }} onDragEnd={onDragEnd}>
+            <SheetDrag.Provider value={start}>
+              <DragZone>
+                <div className="sheet-grab" />
+                {(title || right) && (
+                  <div className="sheet-head">
+                    <div className="sheet-title">{title}</div>
+                    {right}
+                    <button className="iconbtn" onClick={onClose} aria-label="Close"><X size={22} /></button>
+                  </div>
+                )}
+              </DragZone>
+              {children}
+            </SheetDrag.Provider>
           </motion.div>
         </>
       )}

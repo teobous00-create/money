@@ -32,14 +32,6 @@ create table if not exists public.accounts (
   deleted_at timestamptz
 );
 
-create table if not exists public.account_members (
-  account_id uuid not null references public.accounts on delete cascade,
-  user_id uuid not null references auth.users on delete cascade,
-  role text not null default 'viewer' check (role in ('viewer')),
-  created_at timestamptz not null default now(),
-  primary key (account_id, user_id)
-);
-
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null default auth.uid() references auth.users on delete cascade,
@@ -53,6 +45,18 @@ create table if not exists public.categories (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
+);
+
+-- v2: categories are shared (not accounts). Remove the old account-sharing objects if present.
+drop function if exists public.share_account(uuid, text);
+drop function if exists public.account_member_list(uuid);
+drop table if exists public.account_members cascade;
+
+create table if not exists public.category_members (
+  category_id uuid not null references public.categories on delete cascade,
+  user_id uuid not null references auth.users on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (category_id, user_id)
 );
 
 create table if not exists public.transactions (
@@ -97,7 +101,7 @@ create index if not exists tx_to_account on public.transactions (to_account_id);
 create index if not exists tx_category on public.transactions (category_id);
 create index if not exists cat_owner on public.categories (owner_id);
 create index if not exists acc_owner on public.accounts (owner_id);
-create index if not exists mem_user on public.account_members (user_id);
+create index if not exists catmem_user on public.category_members (user_id);
 
 -- ---------- updated_at trigger ----------
 
@@ -144,42 +148,43 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from accounts where id = acc and owner_id = auth.uid());
 $$;
 
-create or replace function public.can_see_account(acc uuid) returns boolean
+-- top-level category of a category (itself if it has no parent)
+create or replace function public.cat_root(cat uuid) returns uuid
 language sql stable security definer set search_path = public as $$
-  select acc is not null and (
-    exists (select 1 from accounts where id = acc and owner_id = auth.uid())
-    or exists (select 1 from account_members where account_id = acc and user_id = auth.uid())
+  select coalesce(parent_id, id) from categories where id = cat;
+$$;
+
+-- true if I own the category's top-level category, or it is shared with me
+create or replace function public.can_use_category(cat uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select cat is not null and exists (
+    select 1 from categories r
+    where r.id = public.cat_root(cat)
+      and (r.owner_id = auth.uid()
+           or exists (select 1 from category_members m where m.category_id = r.id and m.user_id = auth.uid()))
   );
 $$;
 
--- a category of someone else is visible only if it is used on a shared account I can see
-create or replace function public.can_see_category(cat uuid) returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (
-    select 1
-    from transactions t
-    join account_members m on m.account_id in (t.account_id, t.to_account_id)
-    where m.user_id = auth.uid()
-      and t.deleted_at is null
-      and (t.category_id = cat
-           or t.category_id in (select c.id from categories c where c.parent_id = cat))
-  );
-$$;
-
+-- the people I share at least one category with (either direction)
 create or replace function public.shares_with(other uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from account_members m join accounts a on a.id = m.account_id
-    where (a.owner_id = auth.uid() and m.user_id = other)
-       or (a.owner_id = other and m.user_id = auth.uid())
+    select 1 from category_members m join categories c on c.id = m.category_id
+    where (c.owner_id = auth.uid() and m.user_id = other)
+       or (c.owner_id = other and m.user_id = auth.uid())
+       or (m.user_id = other and exists (select 1 from category_members m2 where m2.category_id = m.category_id and m2.user_id = auth.uid()))
   );
 $$;
+
+-- drop helpers from v1
+drop function if exists public.can_see_account(uuid) cascade;
+drop function if exists public.can_see_category(uuid) cascade;
 
 -- ---------- row level security ----------
 
 alter table public.profiles enable row level security;
 alter table public.accounts enable row level security;
-alter table public.account_members enable row level security;
+alter table public.category_members enable row level security;
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
 alter table public.recurring enable row level security;
@@ -191,31 +196,45 @@ drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
 
+-- accounts are always private
 drop policy if exists accounts_select on public.accounts;
 create policy accounts_select on public.accounts for select
-  using (public.can_see_account(id));
+  using (owner_id = auth.uid());
 drop policy if exists accounts_write on public.accounts;
 create policy accounts_write on public.accounts for all
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-drop policy if exists members_select on public.account_members;
-create policy members_select on public.account_members for select
-  using (user_id = auth.uid() or public.owns_account(account_id));
-drop policy if exists members_delete on public.account_members;
-create policy members_delete on public.account_members for delete
-  using (public.owns_account(account_id) or user_id = auth.uid());
--- inserts go through share_account() below
+drop policy if exists catmem_select on public.category_members;
+create policy catmem_select on public.category_members for select
+  using (user_id = auth.uid() or public.can_use_category(category_id));
+drop policy if exists catmem_delete on public.category_members;
+create policy catmem_delete on public.category_members for delete
+  using (user_id = auth.uid() or public.can_use_category(category_id));
+-- inserts go through share_category() below
 
+-- categories: everyone in a shared category can see and edit it and its subcategories
+drop policy if exists categories_write on public.categories;
 drop policy if exists categories_select on public.categories;
 create policy categories_select on public.categories for select
-  using (owner_id = auth.uid() or public.can_see_category(id));
-drop policy if exists categories_write on public.categories;
-create policy categories_write on public.categories for all
-  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  using (owner_id = auth.uid() or public.can_use_category(id));
+drop policy if exists categories_insert on public.categories;
+create policy categories_insert on public.categories for insert
+  with check (
+    (owner_id = auth.uid() and (parent_id is null or public.can_use_category(parent_id)))
+    or public.can_use_category(id)
+  );
+drop policy if exists categories_update on public.categories;
+create policy categories_update on public.categories for update
+  using (owner_id = auth.uid() or public.can_use_category(id))
+  with check (owner_id = auth.uid() or public.can_use_category(id) or public.can_use_category(parent_id));
+drop policy if exists categories_delete on public.categories;
+create policy categories_delete on public.categories for delete
+  using (owner_id = auth.uid());
 
+-- transactions: mine, plus everyone's entries in categories shared with me (view only)
 drop policy if exists tx_select on public.transactions;
 create policy tx_select on public.transactions for select
-  using (owner_id = auth.uid() or public.can_see_account(account_id) or public.can_see_account(to_account_id));
+  using (owner_id = auth.uid() or public.can_use_category(category_id));
 drop policy if exists tx_write on public.transactions;
 create policy tx_write on public.transactions for all
   using (owner_id = auth.uid())
@@ -223,35 +242,39 @@ create policy tx_write on public.transactions for all
     owner_id = auth.uid()
     and public.owns_account(account_id)
     and (to_account_id is null or public.owns_account(to_account_id))
+    and (category_id is null or public.can_use_category(category_id))
   );
 
 drop policy if exists recurring_all on public.recurring;
 create policy recurring_all on public.recurring for all
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
--- ---------- sharing ----------
+-- ---------- sharing categories ----------
 
-create or replace function public.share_account(acc uuid, member_email text) returns text
+create or replace function public.share_category(cat uuid, member_email text) returns text
 language plpgsql security definer set search_path = public as $$
-declare uid uuid;
+declare uid uuid; root uuid;
 begin
-  if not exists (select 1 from accounts where id = acc and owner_id = auth.uid()) then
-    return 'not_owner';
-  end if;
+  root := public.cat_root(cat);
+  if root is null or not public.can_use_category(root) then return 'not_allowed'; end if;
   select id into uid from auth.users where lower(email) = lower(trim(member_email));
   if uid is null then return 'no_user'; end if;
-  if uid = auth.uid() then return 'self'; end if;
-  insert into account_members (account_id, user_id) values (acc, uid) on conflict do nothing;
+  if uid = auth.uid() or uid = (select owner_id from categories where id = root) then return 'self'; end if;
+  insert into category_members (category_id, user_id) values (root, uid) on conflict do nothing;
   return 'ok';
 end $$;
 
-create or replace function public.account_member_list(acc uuid)
-returns table (user_id uuid, email text, display_name text)
+-- everyone in a category: owner first, then members
+create or replace function public.category_people(cat uuid)
+returns table (user_id uuid, email text, display_name text, is_owner boolean)
 language sql stable security definer set search_path = public as $$
-  select m.user_id, p.email, p.display_name
-  from account_members m join profiles p on p.id = m.user_id
-  where m.account_id = acc
-    and exists (select 1 from accounts a where a.id = acc and a.owner_id = auth.uid());
+  select p.id, p.email, p.display_name, true
+  from categories c join profiles p on p.id = c.owner_id
+  where c.id = public.cat_root(cat) and public.can_use_category(cat)
+  union all
+  select p.id, p.email, p.display_name, false
+  from category_members m join profiles p on p.id = m.user_id
+  where m.category_id = public.cat_root(cat) and public.can_use_category(cat);
 $$;
 
 -- ---------- recurring transactions ----------
@@ -305,8 +328,8 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 revoke execute on function public.post_due_recurring_core(uuid) from public, anon, authenticated;
 grant execute on function public.post_due_recurring() to authenticated;
-grant execute on function public.share_account(uuid, text) to authenticated;
-grant execute on function public.account_member_list(uuid) to authenticated;
+grant execute on function public.share_category(uuid, text) to authenticated;
+grant execute on function public.category_people(uuid) to authenticated;
 
 -- ---------- daily schedule (posts recurring entries even if nobody opens the app) ----------
 
