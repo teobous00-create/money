@@ -31,7 +31,7 @@ export function BudgetRing({ spent, limit, children, size = 66 }: { spent: numbe
 }
 
 /** "112 € / 150 € · 38 € left" with a bar. */
-export function BudgetLine({ spent, limit, compact = false }: { spent: number; limit: number; compact?: boolean }) {
+export function BudgetLine({ spent, limit, compact = false, note }: { spent: number; limit: number; compact?: boolean; note?: string }) {
   const level = budgetLevel(spent, limit);
   const left = round2(limit - spent);
   return (
@@ -44,6 +44,7 @@ export function BudgetLine({ spent, limit, compact = false }: { spent: number; l
         <motion.div style={{ background: LEVEL_COLOR[level] }} initial={{ width: 0 }}
           animate={{ width: `${Math.min(1, limit > 0 ? spent / limit : 0) * 100}%` }} transition={{ duration: 0.7, ease }} />
       </div>
+      {note && <div className="tiny muted num" style={{ marginTop: 4 }}>{note}</div>}
     </div>
   );
 }

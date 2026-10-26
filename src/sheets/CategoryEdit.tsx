@@ -35,6 +35,8 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
   const savedBudget = useStore(s => (cat ? s.prefs.budgets?.[cat.id] : undefined));
   const [budget, setBudgetText] = useState(savedBudget ? String(savedBudget).replace('.', ',') : '');
   const isSub = !!parentRec;
+  const sharedRoots = useSharedRoots();
+  const jointBudget = sharedRoots.has(parentRec?.id ?? cat?.id ?? '');
 
   const onName = (v: string) => {
     setName(v);
@@ -77,7 +79,9 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         <div className="field">
           <label>Monthly budget</label>
           <input className="input num" inputMode="decimal" placeholder="No budget" value={budget} onChange={e => setBudgetText(e.target.value)} />
-          <span className="tiny muted" style={{ paddingLeft: 4 }}>Only you see it. Counts only what you paid.</span>
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>{jointBudget
+            ? 'Joint budget: counts what both of you spend here. Each of you sets the amount on your own phone.'
+            : 'Only you see it. Counts only what you paid.'}</span>
         </div>
       )}
       {cat && !isSub && <SubList parent={cat} />}

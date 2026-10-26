@@ -1,0 +1,38 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
+const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const p = await ctx.newPage();
+const errors = []; p.on('pageerror', e => errors.push(e.message));
+const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
+const OUT = process.env.OUT;
+const top = () => p.locator('.sheet').last();
+await p.goto(process.env.URL); await p.waitForTimeout(700);
+await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
+await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
+await p.setInputFiles('input[type=file]', process.env.CSV); await p.waitForTimeout(300);
+await p.getByRole('button', { name: 'Import', exact: true }).click(); await p.waitForTimeout(400);
+await p.getByText('Go to accounts').click(); await p.waitForTimeout(600);
+// pretend Σπίτι is shared by a partner who spent 50 € on Supermarket this month
+await p.evaluate(() => {
+  const m = window.__money; const s = m.getState();
+  const home = Object.values(s.categories).find(c => c.name === 'Σπίτι' && !c.parent_id);
+  const sm = Object.values(s.categories).find(c => c.name === 'Supermarket' && c.parent_id === home.id);
+  m.putMany('categories', [{ ...home, owner_id: 'partner' }]);
+  m.putMany('transactions', [{ id: crypto.randomUUID(), owner_id: 'partner', type: 'expense', date: '2026-10-20', amount: 50, account_id: 'her-acc', to_account_id: null, category_id: sm.id, note: null, recurring_id: null, seq: 1 }]);
+});
+await p.click('.nav-item:nth-child(2)'); await p.waitForTimeout(1000);
+const cdp = await ctx.newCDPSession(p);
+const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+const hold = async (loc) => { const bb = await loc.boundingBox(); await touch('touchStart', bb.x + bb.width / 2, bb.y + bb.height / 2); await p.waitForTimeout(650); await touch('touchEnd', 0, 0); await p.waitForTimeout(900); };
+await hold(p.locator('.screen .cat-tile').filter({ hasText: 'Σπίτι' }).first());
+await p.locator('[aria-label="Edit Supermarket"]').click(); await p.waitForTimeout(800);
+ok(/Joint budget/.test(await top().innerText()), 'edit screen says joint budget');
+await top().getByPlaceholder('No budget').fill('350');
+await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(900);
+const det = await top().innerText();
+await p.screenshot({ path: `${OUT}/j1.png` });
+ok(/338,38 € \/ 350 €/.test(det) && /11,62 € left/.test(det), 'joint: 288,38 mine + 50 hers = 338,38 / 350');
+ok(/Joint budget · Me 288,38 € · Partner 50 €/.test(det), 'who spent what');
+ok(/^1\.258,37/m.test(det.split('\n').slice(0, 6).join('\n')) || det.includes('1.258,37'), 'category total still only mine (1.258,37 €)');
+console.log('errors:', errors.length ? errors : 'none');
+await b.close();

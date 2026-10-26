@@ -491,3 +491,6 @@ async function pullPrefs() {
   setState({ prefs: (data?.prefs as Prefs) ?? {} });
   scheduleSave();
 }
+
+// test hook: only in the on-device (local) build used by the e2e scripts
+if (!REMOTE) (window as unknown as { __money: unknown }).__money = { getState, putMany };

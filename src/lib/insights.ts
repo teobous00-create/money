@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useStore } from './store';
-import { useTxs, useSelection, periodStats } from './calc';
+import { useTxs, useSelection, useSharedRoots } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
 import type { Category, Job, Tx } from './types';
 import { shiftPay, shiftParts } from './tracker';
@@ -25,22 +25,30 @@ export function budgetLevel(spent: number, limit: number): BudgetLevel {
 }
 export const LEVEL_COLOR: Record<BudgetLevel, string> = { ok: 'var(--income)', near: 'var(--warn)', over: 'var(--expense)' };
 
-/** What I spent per category this month (top-level ids include their subcategories). */
-export function useMonthSpend(anchor: string) {
+/** Spending per category this month for budgets (top-level ids include their subcategories).
+ *  Shared categories have a joint budget: everyone's entries count. Private ones: only mine. */
+export function useBudgetSpend(anchor: string) {
   const txs = useTxs();
   const sel = useSelection();
   const cats = useStore(s => s.categories);
+  const me = useStore(s => s.user?.id ?? '');
+  const shared = useSharedRoots();
   return useMemo(() => {
-    const st = periodStats(txs, { mode: 'month', anchor }, sel, cats);
-    const out = new Map<string, number>();
-    for (const t of st.txs) {
-      if (t.type !== 'expense' || !t.category_id) continue;
-      out.set(t.category_id, round2((out.get(t.category_id) ?? 0) + t.amount));
-      const parent = cats[t.category_id]?.parent_id;
-      if (parent) out.set(parent, round2((out.get(parent) ?? 0) + t.amount));
+    const today = todayISO();
+    const [a, b] = [monthStart(anchor), monthEnd(anchor)];
+    const total = new Map<string, number>(), mine = new Map<string, number>();
+    const add = (m: Map<string, number>, id: string, v: number) => m.set(id, round2((m.get(id) ?? 0) + v));
+    for (const t of txs) {
+      if (t.type !== 'expense' || !t.category_id || t.date < a || t.date > b || t.date > today) continue;
+      const parent = cats[t.category_id]?.parent_id ?? null;
+      const root = parent ?? t.category_id;
+      const own = t.owner_id === me;
+      if (own ? !sel.has(t.account_id) : !shared.has(root)) continue;
+      for (const id of parent ? [t.category_id, parent] : [t.category_id]) { add(total, id, t.amount); if (own) add(mine, id, t.amount); }
     }
-    return out;
-  }, [txs, sel, cats, anchor]);
+    const joint = (id: string) => shared.has(cats[id]?.parent_id ?? id);
+    return { total, mine, joint };
+  }, [txs, sel, cats, me, shared, anchor]);
 }
 
 // ---------------------------------------------------------------- tips

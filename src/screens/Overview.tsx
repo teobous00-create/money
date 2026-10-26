@@ -8,7 +8,7 @@ import { containsToday, elapsedDays, range } from '../lib/period';
 import { IconBox, Money, Bar, Segmented, ease, softSpring } from '../components/ui';
 import { AnalyticsView } from './Analytics';
 import { BudgetLine } from '../components/Budget';
-import { useMonthSpend } from '../lib/insights';
+import { useBudgetSpend } from '../lib/insights';
 import { catName, catStyle, alive } from '../lib/calc';
 import { addDays, fromISO, money, num, round2, todayISO } from '../lib/format';
 import type { CatType } from '../lib/types';
@@ -219,7 +219,7 @@ function niceMax(v: number) {
 function BudgetsCard({ anchor }: { anchor: string }) {
   const budgets = useStore(s => s.prefs.budgets);
   const cats = useStore(s => s.categories);
-  const spent = useMonthSpend(anchor);
+  const { total: spent, joint } = useBudgetSpend(anchor);
   const list = Object.entries(budgets ?? {})
     .map(([id, limit]) => ({ id, limit, c: cats[id], spent: spent.get(id) ?? 0 }))
     .filter(x => x.c && !x.c.deleted_at && !x.c.archived && alive(cats).some(c => c.id === x.id))
@@ -235,7 +235,7 @@ function BudgetsCard({ anchor }: { anchor: string }) {
             <button key={x.id} className="list-row" onClick={() => setUi({ catDetail: { id: x.c.parent_id ?? x.id, type: 'expense' } })}>
               <IconBox icon={st.icon} color={st.color} round size="sm" />
               <div className="grow">
-                <div className="ellipsis" style={{ fontWeight: 550 }}>{catName(x.id, cats)}</div>
+                <div className="ellipsis" style={{ fontWeight: 550 }}>{catName(x.id, cats)}{joint(x.id) && <span className="badge" style={{ marginLeft: 6 }}>joint</span>}</div>
                 <BudgetLine spent={x.spent} limit={x.limit} compact />
               </div>
             </button>

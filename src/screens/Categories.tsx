@@ -9,6 +9,7 @@ import { haptic, money } from '../lib/format';
 import { Sortable } from '../components/Sortable';
 import { saveCategoryOrder, useStore } from '../lib/store';
 import { BudgetRing } from '../components/Budget';
+import { useBudgetSpend } from '../lib/insights';
 import type { CatType } from '../lib/types';
 
 let lastType: CatType = 'expense';
@@ -26,6 +27,8 @@ export function CategoriesScreen() {
   const saveOrder = (ids: string[]) => saveCategoryOrder(ids);
   const budgets = useStore(s => s.prefs.budgets);
   const monthView = useStore(s => s.period.mode === 'month');
+  const anchor = useStore(s => s.period.anchor);
+  const budgetSpend = useBudgetSpend(anchor).total;
 
   const total = type === 'expense' ? stats.expense : stats.income;
   const other = type === 'expense' ? stats.income : stats.expense;
@@ -65,7 +68,7 @@ export function CategoriesScreen() {
               <span className="cat-name">{c.name}</span>
               <div style={{ position: 'relative' }}>
                 {monthView && budgets?.[id] && type === 'expense'
-                  ? <BudgetRing spent={v} limit={budgets[id]}><IconBox icon={c.icon} color={c.color} soft={v === 0} /></BudgetRing>
+                  ? <BudgetRing spent={budgetSpend.get(id) ?? 0} limit={budgets[id]}><IconBox icon={c.icon} color={c.color} soft={v === 0} /></BudgetRing>
                   : <IconBox icon={c.icon} color={c.color} soft={v === 0} />}
                 {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
               </div>

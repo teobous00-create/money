@@ -9,6 +9,7 @@ import { label, range } from '../lib/period';
 import { money, round2, shortDate, todayISO } from '../lib/format';
 import { tint } from '../lib/icons';
 import { BudgetLine } from '../components/Budget';
+import { useBudgetSpend } from '../lib/insights';
 
 type Scope = 'mine' | 'theirs' | 'both';
 
@@ -36,7 +37,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const sharedRoots = useSharedRoots();
   const [scope, setScope] = useState<Scope>('mine');
   const budgets = useStore(s => s.prefs.budgets);
-  const showBudget = period.mode === 'month' && scope === 'mine' && cat?.type === 'expense';
+  const showBudget = period.mode === 'month' && cat?.type === 'expense';
+  const bs = useBudgetSpend(period.anchor);
   const [wa, wb] = viewWindow(period);
   const projected = useProjected(wa, wb);
 
@@ -73,6 +75,12 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   }, [cat, cats, id, txs, projected, period, scope, me, sel]);
 
   if (!cat || !data) return null;
+  // joint budget: say who spent what
+  const budgetNote = (cid: string) => {
+    if (!bs.joint(cid)) return undefined;
+    const all = bs.total.get(cid) ?? 0, mine = bs.mine.get(cid) ?? 0;
+    return `Joint budget · ${myName} ${money(mine)} · ${partnerName} ${money(round2(all - mine))}`;
+  };
   const max = Math.max(...data.rows.map(r => r.v), 0.01);
 
   return (
@@ -100,7 +108,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
             </div>
           )}
         </div>
-        {showBudget && budgets?.[id] ? <BudgetLine spent={data.total} limit={budgets[id]} /> : null}
+        {showBudget && budgets?.[id] ? <BudgetLine spent={bs.total.get(id) ?? 0} limit={budgets[id]} note={budgetNote(id)} /> : null}
         {shared && <div className="tiny muted row" style={{ gap: 5, marginTop: 6 }}><Users size={12} />Shared with {partners.map(p => profiles[p]?.display_name ?? 'partner').join(', ') || 'your partner'}</div>}
       </DragZone>
 
@@ -116,7 +124,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
                         <span className="ellipsis" style={{ fontWeight: 550, opacity: r.hidden ? 0.55 : 1 }}>{r.name}{r.hidden && <span className="badge" style={{ marginLeft: 6 }}>hidden</span>}</span>
                         <span className="num bold">{money(r.v)}</span>
                       </div>
-                      {showBudget && r.isSub && budgets?.[r.id] ? <BudgetLine spent={r.v} limit={budgets[r.id]} compact /> : (
+                      {showBudget && r.isSub && budgets?.[r.id] ? <BudgetLine spent={bs.total.get(r.id) ?? 0} limit={budgets[r.id]} compact note={budgetNote(r.id)} /> : (
                         <div className="row" style={{ gap: 8, marginTop: 6 }}>
                           <div className="grow"><Bar value={r.v / max} color={cat.color} delay={i * 0.03} /></div>
                           <span className="tiny bold num" style={{ width: 34, textAlign: 'right', color: cat.color }}>{data.total ? Math.round((r.v / data.total) * 100) : 0}%</span>
