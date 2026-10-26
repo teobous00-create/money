@@ -379,6 +379,7 @@ create table if not exists public.jobs (
   rates jsonb not null default '[]',
   color text not null default '#3E63DD',
   salary_category_id uuid references public.categories on delete set null,
+  bonus_category_id uuid references public.categories on delete set null,
   tips_category_id uuid references public.categories on delete set null,
   tips_account_id uuid references public.accounts on delete set null,
   sort integer not null default 0,
@@ -408,7 +409,9 @@ create table if not exists public.payouts (
   period_start date not null,
   period_end date not null,
   amount numeric(14,2) not null default 0,
+  bonus numeric(14,2) not null default 0,
   tx_id uuid,
+  bonus_tx_id uuid,
   date date not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -438,6 +441,11 @@ create table if not exists public.pnl (
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
 );
+
+-- columns added after the first version of these tables
+alter table public.jobs add column if not exists bonus_category_id uuid references public.categories on delete set null;
+alter table public.payouts add column if not exists bonus numeric(14,2) not null default 0;
+alter table public.payouts add column if not exists bonus_tx_id uuid;
 
 alter table public.jobs enable row level security;
 alter table public.shifts enable row level security;

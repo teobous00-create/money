@@ -83,14 +83,20 @@ function useEnsureJobs() {
   const accs = useStore(s => s.accounts);
   const me = useStore(s => s.user?.id ?? '');
   useEffect(() => {
-    if (Object.keys(jobs).length || (REMOTE && !lastSync)) return;
+    if (REMOTE && !lastSync) return;
     const income = alive(cats).filter(c => c.type === 'income' && c.owner_id === me && !c.archived);
     const find = (re: RegExp, sub = true) => income.find(c => re.test(c.name) && (!sub || c.parent_id))?.id ?? null;
     const cash = alive(accs).find(a => a.owner_id === me && /μετρητ|cash/i.test(a.name))?.id ?? null;
-    putMany('jobs', [
-      { id: uuid(), owner_id: '', name: 'Morning', kind: 'daily', pay: 'monthly', rates: [], color: '#E8A33D', salary_category_id: null, tips_category_id: null, tips_account_id: null, sort: 0, archived: false },
-      { id: uuid(), owner_id: '', name: 'Evening', kind: 'hourly', pay: 'semimonthly', rates: [], color: '#5B5BD6', salary_category_id: find(/cake/i), tips_category_id: find(/^tips/i), tips_account_id: cash, sort: 1, archived: false },
-    ]);
+    if (!Object.keys(jobs).length) {
+      putMany('jobs', [
+        { id: uuid(), owner_id: '', name: 'Morning', kind: 'daily', pay: 'monthly', rates: [], color: '#E8A33D', salary_category_id: find(/pda salary|salary/i), bonus_category_id: find(/pda bonus|bonus/i), tips_category_id: null, tips_account_id: null, sort: 0, archived: false },
+        { id: uuid(), owner_id: '', name: 'Evening', kind: 'hourly', pay: 'semimonthly', rates: [], color: '#5B5BD6', salary_category_id: find(/cake/i), bonus_category_id: null, tips_category_id: find(/^tips/i), tips_account_id: cash, sort: 1, archived: false },
+      ]);
+      return;
+    }
+    // jobs created by an earlier version: fill in the salary/bonus categories once if we can find them
+    const fill = alive(jobs).filter(j => j.kind === 'daily' && !j.salary_category_id && j.bonus_category_id === undefined);
+    if (fill.length) putMany('jobs', fill.map(j => ({ ...j, salary_category_id: find(/pda salary|salary/i), bonus_category_id: find(/pda bonus|bonus/i) })));
   }, [jobs, lastSync, cats, accs, me]);
 }
 
@@ -316,32 +322,47 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
   const payouts = useStore(s => s.payouts);
   const me = useStore(s => s.user?.id);
   const accounts = useAccounts().filter(a => a.owner_id === me && !a.archived);
+  const split = job.kind === 'daily' && !!job.bonus_category_id;   // salary and bonus go to different categories
   const periods = list.filter(p => p.owed > 0.004 || p.paid > 0).slice(0, 8);
+  const fmt = (v: number) => (v > 0 ? num(v).replace(/\./g, '') : '');
   const [pick, setPick] = useState<PayPeriod | null>(periods.find(p => p.owed > 0 && !p.current) ?? periods.find(p => p.owed > 0) ?? null);
-  const [amount, setAmount] = useState(pick ? num(pick.owed).replace(/\./g, '') : '');
+  const initial = (p: PayPeriod | null) => (p ? (split ? [fmt(p.base - p.paidBase), fmt(p.bonus - p.paidBonus)] : [fmt(p.owed), '']) : ['', '']);
+  const [amount, setAmount] = useState(initial(pick)[0]);
+  const [bonus, setBonus] = useState(initial(pick)[1]);
   const [account, setAccount] = useState(lsGet('money:payacc:' + job.id) ?? accounts.find(a => /eurobank|τράπεζ|bank/i.test(a.name))?.id ?? accounts[0]?.id ?? '');
   const [date, setDate] = useState(todayISO());
-  const choose = (p: PayPeriod) => { setPick(p); setAmount(num(Math.max(0, p.owed)).replace(/\./g, '')); };
+  const choose = (p: PayPeriod) => { setPick(p); const [a, b] = initial(p); setAmount(a); setBonus(b); };
+  const income = (category: string, amt: number, what: string) => {
+    const id = uuid();
+    put('transactions', {
+      id, owner_id: '', type: 'income', date, amount: amt, account_id: account, to_account_id: null,
+      category_id: category, note: `${job.name} ${what}${periodLabel(pick!)}`, recurring_id: null, seq: Date.now() % 100000,
+    });
+    return id;
+  };
   const save = () => {
     if (!pick) return;
-    const amt = parseNum(amount);
-    if (amt <= 0) return toast('Enter the amount you got');
+    const amt = amount.trim() ? parseNum(amount) : 0;
+    const bon = split && bonus.trim() ? parseNum(bonus) : 0;
+    if (amt <= 0 && bon <= 0) return toast('Enter the amount you got');
     const id = payoutId(job.id, pick.start);
     const prev = payouts[id] && !payouts[id].deleted_at ? payouts[id] : null;
-    let txId: string | null = null;
-    if (job.salary_category_id && account) {
-      txId = uuid();
-      put('transactions', {
-        id: txId, owner_id: '', type: 'income', date, amount: amt, account_id: account, to_account_id: null,
-        category_id: job.salary_category_id, note: `${job.name} ${periodLabel(pick)}`, recurring_id: null, seq: Date.now() % 100000,
-      });
+    let txId: string | null = null, bonusTx: string | null = null;
+    if (account) {
+      if (amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '');
+      if (bon > 0 && job.bonus_category_id) bonusTx = income(job.bonus_category_id, bon, 'bonus ');
       lsSet('money:payacc:' + job.id, account);
     }
-    put('payouts', { id, owner_id: '', job_id: job.id, period_start: pick.start, period_end: pick.end, amount: round2((prev?.amount ?? 0) + amt), tx_id: txId ?? prev?.tx_id ?? null, date });
+    put('payouts', {
+      id, owner_id: '', job_id: job.id, period_start: pick.start, period_end: pick.end,
+      amount: round2((prev?.amount ?? 0) + amt), bonus: round2((prev?.bonus ?? 0) + bon),
+      tx_id: txId ?? prev?.tx_id ?? null, bonus_tx_id: bonusTx ?? prev?.bonus_tx_id ?? null, date,
+    });
     haptic(12);
-    toast(txId ? `${money(amt)} added to your income` : 'Payment saved');
+    toast(txId || bonusTx ? `${money(round2(amt + bon))} added to your income` : 'Payment saved');
     onClose();
   };
+  const linked = !!job.salary_category_id || (split && !!job.bonus_category_id);
   return (
     <div className="sheet-body">
       {periods.length === 0 && <div className="empty">Nothing owed yet. Log your shifts first.</div>}
@@ -350,7 +371,9 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
           <button key={p.start} className="list-row" onClick={() => choose(p)}>
             <span className="grow">
               <span style={{ fontWeight: 600 }}>{periodLabel(p)}{p.current && <span className="badge" style={{ marginLeft: 6 }}>now</span>}</span>
-              <div className="tiny muted num">earned {money(p.earned)} · paid {money(p.paid)}</div>
+              <div className="tiny muted num">
+                {split ? `salary ${money(p.base)} + bonus ${money(p.bonus)}` : `earned ${money(p.earned)}`} · paid {money(p.paid)}
+              </div>
             </span>
             <span className="num bold" style={{ color: p.owed > 0.004 ? 'var(--ink)' : p.owed < -0.004 ? 'var(--warn)' : 'var(--income)' }}>{p.owed > 0.004 ? money(p.owed) : p.owed < -0.004 ? `+${money(-p.owed)}` : '✓'}</span>
             {pick?.start === p.start && <Check size={18} style={{ color: 'var(--accent)', marginLeft: 6 }} />}
@@ -359,10 +382,20 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
       </div>
       {pick && (
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} style={{ marginTop: 14 }}>
-          <div className="field"><label>Amount you got for {periodLabel(pick)}</label>
-            <input className="input num" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
-          </div>
-          {job.salary_category_id ? (
+          {split ? (
+            <div className="row" style={{ gap: 10 }}>
+              <div className="field grow"><label>Salary {cats(job.salary_category_id)}</label>
+                <input className="input num" inputMode="decimal" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+              <div className="field grow"><label>Bonus {cats(job.bonus_category_id)}</label>
+                <input className="input num" inputMode="decimal" placeholder="0" value={bonus} onChange={e => setBonus(e.target.value)} /></div>
+            </div>
+          ) : (
+            <div className="field"><label>Amount you got for {periodLabel(pick)}</label>
+              <input className="input num" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
+            </div>
+          )}
+          {split && <div className="tiny muted" style={{ margin: '-6px 4px 12px' }}>Got only one of the two? Leave the other empty — it stays owed.</div>}
+          {linked ? (
             <div className="row" style={{ gap: 8 }}>
               <select className="input" value={account} onChange={e => setAccount(e.target.value)} style={{ flex: 1 }}>
                 {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -375,6 +408,12 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
       )}
     </div>
   );
+}
+
+/** "(PDA Salary)" style hint for a category id. */
+function cats(id: string | null) {
+  const c = id ? getState().categories[id] : null;
+  return c ? `→ ${c.name}` : '';
 }
 
 function JobsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -420,6 +459,7 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
   const [hour, setHour] = useState(r.hour ? num(r.hour).replace(/\./g, '') : '');
   const [from, setFrom] = useState(todayISO());
   const [salary, setSalary] = useState(job?.salary_category_id ?? '');
+  const [bonusCat, setBonusCat] = useState(job?.bonus_category_id ?? '');
   const [tips, setTips] = useState(job?.tips_category_id ?? '');
   const [tipsAcc, setTipsAcc] = useState(job?.tips_account_id ?? '');
   const income = alive(cats).filter(c => c.type === 'income' && c.owner_id === me && !c.archived && !(c.parent_id && cats[c.parent_id]?.archived));
@@ -437,7 +477,7 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
     }
     put('jobs', {
       id: job?.id ?? uuid(), owner_id: '', name: name.trim(), kind, pay, rates, color: job?.color ?? COLORS[(jobs.length * 3 + 8) % COLORS.length],
-      salary_category_id: salary || null, tips_category_id: kind === 'hourly' ? tips || null : null, tips_account_id: kind === 'hourly' ? tipsAcc || null : null,
+      salary_category_id: salary || null, bonus_category_id: kind === 'daily' ? bonusCat || null : null, tips_category_id: kind === 'hourly' ? tips || null : null, tips_account_id: kind === 'hourly' ? tipsAcc || null : null,
       sort: job?.sort ?? jobs.length, archived: false,
     });
     toast('Saved');
@@ -473,6 +513,14 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
           {opts.map(id => <option key={id} value={id}>{label(id)}</option>)}
         </select>
       </div>
+      {kind === 'daily' && (
+        <div className="field"><label>Bonus goes to category</label>
+          <select className="input" value={bonusCat} onChange={e => setBonusCat(e.target.value)}>
+            <option value="">— same as salary —</option>
+            {opts.map(id => <option key={id} value={id}>{label(id)}</option>)}
+          </select>
+        </div>
+      )}
       {kind === 'hourly' && (
         <div className="row" style={{ gap: 10 }}>
           <div className="field grow"><label>Tips category</label>

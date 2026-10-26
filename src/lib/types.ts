@@ -87,6 +87,7 @@ export interface Job extends Row {
   rates: JobRate[];
   color: string;
   salary_category_id: string | null;  // where pay-outs are recorded as income
+  bonus_category_id: string | null;   // daily jobs: where the sales bonus is recorded
   tips_category_id: string | null;
   tips_account_id: string | null;
   sort: number;
@@ -105,8 +106,10 @@ export interface Payout extends Row {   // id = `${job_id}:${period_start}`
   job_id: string;
   period_start: string;
   period_end: string;
-  amount: number;
+  amount: number;                     // salary part received
+  bonus: number;                      // bonus part received
   tx_id: string | null;
+  bonus_tx_id: string | null;
   date: string;
 }
 

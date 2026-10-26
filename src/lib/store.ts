@@ -99,6 +99,9 @@ async function loadCache() {
   const q = await idbGet(queueKey());
   queue = q?.queue ?? [];
   failedOps = q?.failedOps ?? [];
+  // tracker rows rejected before their tables existed: try them again
+  const retry = failedOps.filter(o => TRACKER.includes(o.table));
+  if (retry.length) { queue = [...retry, ...queue]; failedOps = failedOps.filter(o => !TRACKER.includes(o.table)); }
   if (c) {
     setState({
       accounts: c.accounts ?? {}, categories: c.categories ?? {}, transactions: c.transactions ?? {},
@@ -227,9 +230,9 @@ const COLS: Record<Table, string[]> = {
   categories: ['id', 'owner_id', 'type', 'name', 'parent_id', 'icon', 'color', 'sort', 'archived', 'deleted_at'],
   transactions: ['id', 'owner_id', 'type', 'date', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'recurring_id', 'seq', 'deleted_at'],
   recurring: ['id', 'owner_id', 'type', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'freq', 'anchor_day', 'next_date', 'active', 'end_date', 'skip_dates', 'deleted_at'],
-  jobs: ['id', 'owner_id', 'name', 'kind', 'pay', 'rates', 'color', 'salary_category_id', 'tips_category_id', 'tips_account_id', 'sort', 'archived', 'deleted_at'],
+  jobs: ['id', 'owner_id', 'name', 'kind', 'pay', 'rates', 'color', 'salary_category_id', 'bonus_category_id', 'tips_category_id', 'tips_account_id', 'sort', 'archived', 'deleted_at'],
   shifts: ['id', 'owner_id', 'job_id', 'date', 'hours', 'sales', 'tips_tx_id', 'deleted_at'],
-  payouts: ['id', 'owner_id', 'job_id', 'period_start', 'period_end', 'amount', 'tx_id', 'date', 'deleted_at'],
+  payouts: ['id', 'owner_id', 'job_id', 'period_start', 'period_end', 'amount', 'bonus', 'tx_id', 'bonus_tx_id', 'date', 'deleted_at'],
   strategies: ['id', 'owner_id', 'name', 'color', 'goal', 'sort', 'archived', 'deleted_at'],
   pnl: ['id', 'owner_id', 'strategy_id', 'date', 'pnl', 'deleted_at'],
 };
@@ -238,7 +241,7 @@ function toDb(table: Table, row: object): Record<string, unknown> {
   for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' || c === 'rates' ? [] : null);
   return out;
 }
-const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount', 'hours', 'sales', 'pnl'];
+const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount', 'hours', 'sales', 'pnl', 'bonus'];
 function fromDb<T>(row: Record<string, unknown>): T {
   for (const k of NUMERIC) if (row[k] != null) row[k] = Number(row[k]);
   return row as T;
@@ -293,6 +296,8 @@ async function flush(): Promise<void> {
 }
 
 function isNetworkError(e: { message?: string; code?: string }) {
+  // a table/column that doesn't exist yet (database script not run) is retried later, like a network error
+  if (e.code === 'PGRST205' || e.code === 'PGRST204' || e.code === '42P01' || e.code === '42703' || /does not exist|schema cache/i.test(e.message ?? '')) return true;
   return !navigator.onLine || /fetch|network|Failed to|timeout|Load failed/i.test(e.message ?? '') || e.code === '';
 }
 

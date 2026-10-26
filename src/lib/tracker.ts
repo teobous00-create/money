@@ -16,9 +16,15 @@ export function rateAt(job: Job, date: string): JobRate {
   return r;
 }
 
-export function shiftPay(job: Job, s: Shift): number {
+/** Pay for one shift, split into the base (day rate / hours) and the sales bonus. */
+export function shiftParts(job: Job, s: Shift): { base: number; bonus: number } {
   const r = rateAt(job, s.date);
-  return round2(job.kind === 'daily' ? (r.day ?? 0) + (r.bonus ?? 0) * (s.sales ?? 0) : (r.hour ?? 0) * (s.hours ?? 0));
+  if (job.kind === 'daily') return { base: round2(r.day ?? 0), bonus: round2((r.bonus ?? 0) * (s.sales ?? 0)) };
+  return { base: round2((r.hour ?? 0) * (s.hours ?? 0)), bonus: 0 };
+}
+export function shiftPay(job: Job, s: Shift): number {
+  const p = shiftParts(job, s);
+  return round2(p.base + p.bonus);
 }
 
 /** Pay period that contains `date`: the month, or 1–15 / 16–end. */
@@ -30,7 +36,11 @@ export function periodOf(job: Job, date: string): [string, string] {
   return d.getDate() <= 15 ? [first, toISO(new Date(y, m, 15))] : [toISO(new Date(y, m, 16)), last];
 }
 
-export interface PayPeriod { start: string; end: string; earned: number; paid: number; owed: number; shifts: number; hours: number; current: boolean }
+export interface PayPeriod {
+  start: string; end: string; current: boolean; shifts: number; hours: number;
+  earned: number; paid: number; owed: number;              // totals
+  base: number; bonus: number; paidBase: number; paidBonus: number;
+}
 
 export function useJobs() {
   const rec = useStore(s => s.jobs);
@@ -52,7 +62,7 @@ export function usePayPeriods(job: Job) {
     const [cs, ce] = periodOf(job, today);
     const get = (start: string, end: string) => {
       let p = map.get(start);
-      if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs }));
+      if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs, base: 0, bonus: 0, paidBase: 0, paidBonus: 0 }));
       return p;
     };
     get(cs, ce);
@@ -60,12 +70,22 @@ export function usePayPeriods(job: Job) {
       if (s.date > today) continue;
       const [a, b] = periodOf(job, s.date);
       const p = get(a, b);
-      p.earned += shiftPay(job, s);
+      const parts = shiftParts(job, s);
+      p.base += parts.base;
+      p.bonus += parts.bonus;
       p.shifts += 1;
       p.hours += s.hours ?? 0;
     }
-    for (const po of alive(payouts)) if (po.job_id === job.id) get(po.period_start, po.period_end).paid += po.amount;
-    const list = [...map.values()].map(p => ({ ...p, earned: round2(p.earned), paid: round2(p.paid), owed: round2(p.earned - p.paid), hours: round2(p.hours) }))
+    for (const po of alive(payouts)) {
+      if (po.job_id !== job.id) continue;
+      const p = get(po.period_start, po.period_end);
+      p.paidBase += po.amount;
+      p.paidBonus += po.bonus ?? 0;
+    }
+    const list = [...map.values()].map(p => {
+      const earned = round2(p.base + p.bonus), paid = round2(p.paidBase + p.paidBonus);
+      return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(p.paidBase), paidBonus: round2(p.paidBonus), earned, paid, owed: round2(earned - paid), hours: round2(p.hours) };
+    })
       .sort((a, b) => b.start.localeCompare(a.start));
     const owed = round2(list.reduce((s, p) => s + p.owed, 0));
     return { list, owed, current: list.find(p => p.current)! };

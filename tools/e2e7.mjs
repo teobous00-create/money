@@ -25,6 +25,9 @@ await top().locator('.field', { hasText: 'Bonus per sale' }).locator('input').fi
 const salSel = top().locator('.field', { hasText: 'Salary goes to category' }).locator('select');
 const opts = await salSel.locator('option').allInnerTexts();
 const pda = opts.find(o => /PDA/.test(o)); if (pda) await salSel.selectOption({ label: pda });
+const bonSel = top().locator('.field', { hasText: 'Bonus goes to category' }).locator('select');
+const bopt = (await bonSel.locator('option').allInnerTexts()).find(o => /Επιδόματα/.test(o));
+await bonSel.selectOption({ label: bopt });
 await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(600);
 await top().getByText('Evening').click(); await p.waitForTimeout(600);
 const ev = await top().innerText();
@@ -48,6 +51,16 @@ await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.
 const w = await p.locator('.screen').last().innerText();
 await shot('w2-work');
 ok(/46 €/.test(w) && /66 €/.test(w), 'owed: morning 46 €, evening 66 €');
+// morning: salary + bonus paid separately
+await p.locator('.card', { hasText: 'Morning' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+const ms = top();
+ok(await ms.locator('.field', { hasText: 'Salary' }).locator('input').inputValue() === '40' && await ms.locator('.field', { hasText: 'Bonus' }).locator('input').inputValue() === '6', 'morning payout splits: salary 40 + bonus 6');
+await ms.locator('.field', { hasText: 'Bonus' }).locator('input').fill('');
+await ms.getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
+ok((await p.locator('.card', { hasText: 'Morning' }).innerText()).includes('6 €'), 'salary paid, bonus 6 € still owed');
+await p.locator('.card', { hasText: 'Morning' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+ok(await top().locator('.field', { hasText: 'Salary' }).locator('input').inputValue() === '' && await top().locator('.field', { hasText: 'Bonus' }).locator('input').inputValue() === '6', 'next time only the bonus is prefilled');
+await top().getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
 // got paid evening
 await p.locator('.card', { hasText: 'Evening' }).getByText('Got paid').click(); await p.waitForTimeout(700);
 await shot('w3-pay');
@@ -58,6 +71,7 @@ await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(900);
 const tx = await p.locator('.screen').last().innerText();
 ok(/Tips/.test(tx) && /\+12/.test(tx), 'tips 12 € added to income automatically');
 ok(/Cake & Roll/.test(tx) && /\+66/.test(tx), 'salary 66 € added in Cake & Roll');
+ok(/PDA Salary/.test(tx) && /\+40/.test(tx) && /Επιδόματα/.test(tx) && /\+6/.test(tx), 'morning: 40 € in PDA Salary and 6 € bonus in its own category');
 
 // ---------------- trading
 await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(800);
