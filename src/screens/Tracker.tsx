@@ -8,7 +8,7 @@ import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
 import {
-  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftId, payoutId, rateAt,
+  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, payoutId, rateAt,
   useStrategies, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
@@ -109,12 +109,12 @@ function Work() {
   const [payJob, setPayJob] = useState<Job | null>(null);
   const [settings, setSettings] = useState(false);
   const byDay = useMemo(() => {
-    const m = new Map<string, Array<{ job: Job; hours: number; sales: number }>>();
+    const m = new Map<string, Array<{ job: Job; hours: number; bonus: number }>>();
     for (const s of shifts) {
       const job = jobs.find(j => j.id === s.job_id);
       if (!job) continue;
       const l = m.get(s.date) ?? [];
-      l.push({ job, hours: s.hours, sales: s.sales });
+      l.push({ job, hours: s.hours, bonus: shiftParts(job, s).bonus });
       m.set(s.date, l);
     }
     return m;
@@ -144,7 +144,7 @@ function Work() {
                 <span className="cal-jobs">
                   {list.map(x => (
                     <span key={x.job.id} className="cal-chip" style={{ background: x.job.color }}>
-                      {x.job.kind === 'daily' ? (x.sales ? `✓${x.sales}` : '✓') : `${num(x.hours)}h`}
+                      {x.job.kind === 'daily' ? (x.bonus ? `+${num(x.bonus)}` : '✓') : `${num(x.hours)}h`}
                     </span>
                   ))}
                 </span>
@@ -218,12 +218,14 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
     const s = shifts[shiftId(j.id, date)];
     const live = s && !s.deleted_at ? s : null;
     const tip = live?.tips_tx_id ? txs[live.tips_tx_id] : null;
+    const parts = live ? shiftParts(j, live) : { base: rateAt(j, date).day ?? 0, bonus: 0 };
     return [j.id, {
-      worked: !!live, hours: live?.hours ?? 0, sales: live?.sales ?? 0,
+      worked: !!live, hours: live?.hours ?? 0,
+      base: parts.base ? num(parts.base).replace(/\./g, '') : '', bonus: parts.bonus ? num(parts.bonus).replace(/\./g, '') : '',
       tips: tip && !tip.deleted_at ? num(tip.amount).replace(/\./g, '') : '', account: tip?.account_id ?? j.tips_account_id ?? accounts[0]?.id ?? '',
     }];
   }));
-  const [v, setV] = useState<Record<string, { worked: boolean; hours: number; sales: number; tips: string; account: string }>>(init);
+  const [v, setV] = useState<Record<string, { worked: boolean; hours: number; base: string; bonus: string; tips: string; account: string }>>(init);
   const set = (id: string, patch: Partial<(typeof v)[string]>) => setV(x => ({ ...x, [id]: { ...x[id], ...patch } }));
 
   const save = () => {
@@ -244,7 +246,10 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
         remove('transactions', tipsTx);
         tipsTx = null;
       }
-      if (active) put('shifts', { id, owner_id: '', job_id: j.id, date, hours: j.kind === 'hourly' ? f.hours : 1, sales: j.kind === 'daily' ? f.sales : 0, tips_tx_id: tipsTx });
+      if (active) put('shifts', {
+        id, owner_id: '', job_id: j.id, date, hours: j.kind === 'hourly' ? f.hours : 1, sales: 0,
+        base: j.kind === 'daily' ? parseNum(f.base) : null, bonus: j.kind === 'daily' ? (f.bonus.trim() ? parseNum(f.bonus) : 0) : null, tips_tx_id: tipsTx,
+      });
       else if (existing) remove('shifts', id);
     }
     haptic(10);
@@ -257,7 +262,7 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
       {jobs.map(j => {
         const f = v[j.id];
         if (!f) return null;
-        const pay = shiftPay(j, { id: '', owner_id: '', job_id: j.id, date, hours: f.hours, sales: f.sales, tips_tx_id: null });
+        const pay = shiftPay(j, { id: '', owner_id: '', job_id: j.id, date, hours: f.hours, sales: 0, base: parseNum(f.base), bonus: f.bonus.trim() ? parseNum(f.bonus) : 0, tips_tx_id: null });
         const active = j.kind === 'daily' ? f.worked : f.hours > 0;
         return (
           <div key={j.id} className="card" style={{ marginBottom: 10 }}>
@@ -274,10 +279,12 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
                 </div>
                 <AnimatePresence initial={false}>
                   {f.worked && (
-                    <motion.div className="row" style={{ justifyContent: 'space-between', marginTop: 12, overflow: 'hidden' }}
+                    <motion.div className="row" style={{ gap: 10, marginTop: 12, overflow: 'hidden' }}
                       initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease }}>
-                      <span>Sales</span>
-                      <Stepper value={f.sales} onChange={x => set(j.id, { sales: x })} />
+                      <div className="field grow" style={{ margin: 0 }}><label>Day pay</label>
+                        <input className="input num" inputMode="decimal" placeholder="0" value={f.base} onChange={e => set(j.id, { base: e.target.value })} style={{ height: 44 }} /></div>
+                      <div className="field grow" style={{ margin: 0 }}><label>Bonus</label>
+                        <input className="input num" inputMode="decimal" placeholder="0" value={f.bonus} onChange={e => set(j.id, { bonus: e.target.value })} style={{ height: 44 }} /></div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -429,7 +436,7 @@ function JobsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               <button key={j.id} className="list-row" onClick={() => setEdit(j)}>
                 <span className="ico sm" style={{ background: j.color }}>{j.kind === 'daily' ? <Sun size={18} /> : <Moon size={18} />}</span>
                 <span className="grow"><span style={{ fontWeight: 600 }}>{j.name}</span>
-                  <div className="tiny muted num">{j.kind === 'daily' ? `${money(r.day ?? 0)}/day + ${money(r.bonus ?? 0)}/sale` : `${money(r.hour ?? 0)}/hour`} · {j.pay === 'monthly' ? 'paid monthly' : 'paid 1–15 & 16–end'}</div>
+                  <div className="tiny muted num">{j.kind === 'daily' ? `${money(r.day ?? 0)}/day + bonus` : `${money(r.hour ?? 0)}/hour`} · {j.pay === 'monthly' ? 'paid monthly' : 'paid 1–15 & 16–end'}</div>
                 </span>
                 <Pencil size={17} className="faint" />
               </button>
@@ -455,7 +462,6 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
   const [kind, setKind] = useState<Job['kind']>(job?.kind ?? 'hourly');
   const [pay, setPay] = useState<Job['pay']>(job?.pay ?? 'monthly');
   const [day, setDay] = useState(r.day ? num(r.day).replace(/\./g, '') : '');
-  const [bonus, setBonus] = useState(r.bonus ? num(r.bonus).replace(/\./g, '') : '');
   const [hour, setHour] = useState(r.hour ? num(r.hour).replace(/\./g, '') : '');
   const [from, setFrom] = useState(todayISO());
   const [salary, setSalary] = useState(job?.salary_category_id ?? '');
@@ -466,13 +472,13 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
   const label = (id: string) => { const c = cats[id]; const p = c?.parent_id ? cats[c.parent_id] : null; return p ? `${p.name} · ${c!.name}` : c?.name ?? ''; };
   const opts = income.map(c => c.id).sort((a, b) => label(a).localeCompare(label(b)));
   const hasRates = !!job && (job.rates ?? []).length > 0;
-  const changed = kind === 'daily' ? parseNum(day) !== (r.day ?? 0) || parseNum(bonus) !== (r.bonus ?? 0) : parseNum(hour) !== (r.hour ?? 0);
+  const changed = kind === 'daily' ? parseNum(day) !== (r.day ?? 0) : parseNum(hour) !== (r.hour ?? 0);
 
   const save = () => {
     if (!name.trim()) return toast('Give the job a name');
     let rates = job?.rates ?? [];
     if (changed || !rates.length) {
-      const nr = kind === 'daily' ? { day: parseNum(day), bonus: parseNum(bonus) } : { hour: parseNum(hour) };
+      const nr = kind === 'daily' ? { day: parseNum(day) } : { hour: parseNum(hour) };
       rates = hasRates ? [...rates.filter(x => x.from !== from), { from, ...nr }] : [{ from: '0000-01-01', ...nr }];
     }
     put('jobs', {
@@ -491,10 +497,8 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
         <Segmented value={kind} onChange={setKind} options={[{ value: 'daily', label: 'Day rate + bonus' }, { value: 'hourly', label: 'Hourly + tips' }]} />
       </div>
       {kind === 'daily' ? (
-        <div className="row" style={{ gap: 10 }}>
-          <div className="field grow"><label>Per day</label><input className="input num" inputMode="decimal" value={day} onChange={e => setDay(e.target.value)} placeholder="0" /></div>
-          <div className="field grow"><label>Bonus per sale</label><input className="input num" inputMode="decimal" value={bonus} onChange={e => setBonus(e.target.value)} placeholder="0" /></div>
-        </div>
+        <div className="field"><label>Usual day pay</label><input className="input num" inputMode="decimal" value={day} onChange={e => setDay(e.target.value)} placeholder="0" />
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Filled in for each day; you can change it per day and add that day's bonus.</span></div>
       ) : (
         <div className="field"><label>Per hour</label><input className="input num" inputMode="decimal" value={hour} onChange={e => setHour(e.target.value)} placeholder="0" /></div>
       )}

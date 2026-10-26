@@ -19,7 +19,7 @@ export function rateAt(job: Job, date: string): JobRate {
 /** Pay for one shift, split into the base (day rate / hours) and the sales bonus. */
 export function shiftParts(job: Job, s: Shift): { base: number; bonus: number } {
   const r = rateAt(job, s.date);
-  if (job.kind === 'daily') return { base: round2(r.day ?? 0), bonus: round2((r.bonus ?? 0) * (s.sales ?? 0)) };
+  if (job.kind === 'daily') return { base: round2(s.base ?? r.day ?? 0), bonus: round2(s.bonus ?? (r.bonus ?? 0) * (s.sales ?? 0)) };
   return { base: round2((r.hour ?? 0) * (s.hours ?? 0)), bonus: 0 };
 }
 export function shiftPay(job: Job, s: Shift): number {
@@ -76,12 +76,15 @@ export function usePayPeriods(job: Job) {
       p.shifts += 1;
       p.hours += s.hours ?? 0;
     }
+    const settled = new Set<string>();
     for (const po of alive(payouts)) {
       if (po.job_id !== job.id) continue;
       const p = get(po.period_start, po.period_end);
       p.paidBase += po.amount;
       p.paidBonus += po.bonus ?? 0;
+      if (po.settled) settled.add(po.period_start);
     }
+    for (const st of settled) { const p = map.get(st); if (p) { p.paidBase = Math.max(p.paidBase, p.base); p.paidBonus = Math.max(p.paidBonus, p.bonus); } }
     const list = [...map.values()].map(p => {
       const earned = round2(p.base + p.bonus), paid = round2(p.paidBase + p.paidBonus);
       return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(p.paidBase), paidBonus: round2(p.paidBonus), earned, paid, owed: round2(earned - paid), hours: round2(p.hours) };

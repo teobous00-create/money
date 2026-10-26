@@ -191,7 +191,7 @@ function WorkCard({ anchor, month }: { anchor: string; month: string }) {
           ]
           : [
             ['Days', r.avg ? num(r.avg.shifts) : '—', num(r.now.shifts)],
-            ['Sales', r.avg ? num(r.avg.sales) : '—', num(r.now.sales)],
+            ['Bonus', r.avg ? money(r.avg.bonus) : '—', money(r.now.bonus)],
             ['Pay', r.avg ? money(r.avg.earned) : '—', money(r.now.earned)],
           ];
         return (

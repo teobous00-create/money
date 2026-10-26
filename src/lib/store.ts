@@ -231,17 +231,17 @@ const COLS: Record<Table, string[]> = {
   transactions: ['id', 'owner_id', 'type', 'date', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'recurring_id', 'seq', 'deleted_at'],
   recurring: ['id', 'owner_id', 'type', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'freq', 'anchor_day', 'next_date', 'active', 'end_date', 'skip_dates', 'deleted_at'],
   jobs: ['id', 'owner_id', 'name', 'kind', 'pay', 'rates', 'color', 'salary_category_id', 'bonus_category_id', 'tips_category_id', 'tips_account_id', 'sort', 'archived', 'deleted_at'],
-  shifts: ['id', 'owner_id', 'job_id', 'date', 'hours', 'sales', 'tips_tx_id', 'deleted_at'],
-  payouts: ['id', 'owner_id', 'job_id', 'period_start', 'period_end', 'amount', 'bonus', 'tx_id', 'bonus_tx_id', 'date', 'deleted_at'],
+  shifts: ['id', 'owner_id', 'job_id', 'date', 'hours', 'sales', 'base', 'bonus', 'tips_tx_id', 'deleted_at'],
+  payouts: ['id', 'owner_id', 'job_id', 'period_start', 'period_end', 'amount', 'bonus', 'tx_id', 'bonus_tx_id', 'settled', 'date', 'deleted_at'],
   strategies: ['id', 'owner_id', 'name', 'color', 'goal', 'sort', 'archived', 'deleted_at'],
   pnl: ['id', 'owner_id', 'strategy_id', 'date', 'pnl', 'deleted_at'],
 };
 function toDb(table: Table, row: object): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' || c === 'rates' ? [] : null);
+  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' || c === 'rates' ? [] : c === 'settled' ? false : null);
   return out;
 }
-const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount', 'hours', 'sales', 'pnl', 'bonus'];
+const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount', 'hours', 'sales', 'pnl', 'bonus', 'base'];
 function fromDb<T>(row: Record<string, unknown>): T {
   for (const k of NUMERIC) if (row[k] != null) row[k] = Number(row[k]);
   return row as T;

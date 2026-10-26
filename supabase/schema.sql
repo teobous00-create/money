@@ -396,6 +396,8 @@ create table if not exists public.shifts (
   date date not null,
   hours numeric(6,2) not null default 0,
   sales integer not null default 0,
+  base numeric(14,2),
+  bonus numeric(14,2),
   tips_tx_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -412,6 +414,7 @@ create table if not exists public.payouts (
   bonus numeric(14,2) not null default 0,
   tx_id uuid,
   bonus_tx_id uuid,
+  settled boolean not null default false,
   date date not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -446,6 +449,9 @@ create table if not exists public.pnl (
 alter table public.jobs add column if not exists bonus_category_id uuid references public.categories on delete set null;
 alter table public.payouts add column if not exists bonus numeric(14,2) not null default 0;
 alter table public.payouts add column if not exists bonus_tx_id uuid;
+alter table public.payouts add column if not exists settled boolean not null default false;
+alter table public.shifts add column if not exists base numeric(14,2);
+alter table public.shifts add column if not exists bonus numeric(14,2);
 
 alter table public.jobs enable row level security;
 alter table public.shifts enable row level security;

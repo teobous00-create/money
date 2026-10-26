@@ -99,6 +99,8 @@ export interface Shift extends Row {    // id = `${job_id}:${date}`
   date: string;
   hours: number;
   sales: number;
+  base?: number | null;               // daily jobs: what the day paid (defaults to the day rate)
+  bonus?: number | null;              // daily jobs: bonus earned that day, in €
   tips_tx_id: string | null;
 }
 
@@ -110,6 +112,7 @@ export interface Payout extends Row {   // id = `${job_id}:${period_start}`
   bonus: number;                      // bonus part received
   tx_id: string | null;
   bonus_tx_id: string | null;
+  settled?: boolean;                  // period paid in full (amount unknown, e.g. paid before using the app)
   date: string;
 }
 

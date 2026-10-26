@@ -3,7 +3,7 @@ import { useStore } from './store';
 import { useTxs, useSelection, periodStats } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
 import type { Category, Job, Tx } from './types';
-import { shiftPay } from './tracker';
+import { shiftPay, shiftParts } from './tracker';
 import { alive } from './calc';
 
 export const monthStart = (iso: string) => { const d = fromISO(iso); return toISO(new Date(d.getFullYear(), d.getMonth(), 1)); };
@@ -149,7 +149,7 @@ export function useSavings(anchor: string) {
 
 // ---------------------------------------------------------------- work
 
-export interface WorkMonth { shifts: number; hours: number; sales: number; earned: number; tips: number }
+export interface WorkMonth { shifts: number; hours: number; bonus: number; earned: number; tips: number }
 export interface WorkRow { job: Job; now: WorkMonth; avg: WorkMonth | null; perHourNow: number | null; perHourAvg: number | null }
 
 /** This month vs the average of the previous 3 months that have logged shifts. */
@@ -165,14 +165,18 @@ export function useWorkStats(anchor: string): WorkRow[] {
     return live.map(job => {
       const per = months.map(m => {
         const e = monthEnd(m);
-        const w: WorkMonth = { shifts: 0, hours: 0, sales: 0, earned: 0, tips: 0 };
+        const w: WorkMonth = { shifts: 0, hours: 0, bonus: 0, earned: 0, tips: 0 };
         for (const s of alive(shifts)) {
           if (s.job_id !== job.id || s.date < m || s.date > e || s.date > today) continue;
-          w.shifts++; w.hours += s.hours; w.sales += s.sales; w.earned += shiftPay(job, s);
-          const t = s.tips_tx_id ? txs[s.tips_tx_id] : null;
-          if (t && !t.deleted_at && t.owner_id === me) w.tips += t.amount;
+          w.shifts++; w.hours += s.hours; w.bonus += shiftParts(job, s).bonus; w.earned += shiftPay(job, s);
         }
-        w.hours = round2(w.hours); w.earned = round2(w.earned); w.tips = round2(w.tips);
+        // tips: everything in the job's tips category that month (also tips logged before the Tracker existed)
+        if (job.tips_category_id && w.shifts) {
+          for (const t of Object.values(txs)) {
+            if (!t.deleted_at && t.owner_id === me && t.type === 'income' && t.category_id === job.tips_category_id && t.date >= m && t.date <= e && t.date <= today) w.tips += t.amount;
+          }
+        }
+        w.hours = round2(w.hours); w.bonus = round2(w.bonus); w.earned = round2(w.earned); w.tips = round2(w.tips);
         return w;
       });
       const now = per[3];
@@ -180,7 +184,7 @@ export function useWorkStats(anchor: string): WorkRow[] {
       const avg = tracked.length ? {
         shifts: round2(tracked.reduce((x, w) => x + w.shifts, 0) / tracked.length),
         hours: round2(tracked.reduce((x, w) => x + w.hours, 0) / tracked.length),
-        sales: round2(tracked.reduce((x, w) => x + w.sales, 0) / tracked.length),
+        bonus: round2(tracked.reduce((x, w) => x + w.bonus, 0) / tracked.length),
         earned: round2(tracked.reduce((x, w) => x + w.earned, 0) / tracked.length),
         tips: round2(tracked.reduce((x, w) => x + w.tips, 0) / tracked.length),
       } : null;
