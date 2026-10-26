@@ -6,6 +6,8 @@ import { setUi } from '../lib/ui';
 import { IconBox, Money, Pressable, Segmented, ease, softSpring } from '../components/ui';
 import { RecurringBanner } from '../components/RecurringBanner';
 import { haptic, money } from '../lib/format';
+import { Sortable } from '../components/Sortable';
+import { saveCategoryOrder } from '../lib/store';
 import type { CatType } from '../lib/types';
 
 let lastType: CatType = 'expense';
@@ -19,6 +21,8 @@ export function CategoriesScreen() {
   // your categories plus the ones shared with you; amounts are only what you paid
   const tops = useMemo(() => cats.filter(c => c.type === type && !c.parent_id && !c.archived), [cats, type]);
   const hiddenCount = useMemo(() => cats.filter(c => c.archived).length, [cats]);
+  const byId = useMemo(() => new Map(cats.map(c => [c.id, c])), [cats]);
+  const saveOrder = (ids: string[]) => saveCategoryOrder(ids);
 
   const total = type === 'expense' ? stats.expense : stats.income;
   const other = type === 'expense' ? stats.income : stats.expense;
@@ -46,34 +50,34 @@ export function CategoriesScreen() {
         </div>
       </div>
 
-      <motion.div className="cat-grid" style={{ marginTop: 18 }} key={type}
-        initial="hidden" animate="show" variants={{ show: { transition: { staggerChildren: 0.025 } } }}>
-        {tops.map(c => {
-          const v = stats.byCat.get(c.id) ?? 0;
+      <Sortable key={type} className="cat-grid" style={{ marginTop: 18 }} ids={tops.map(c => c.id)}
+        onTap={id => { haptic(6); setUi({ addTx: { type, categoryId: id } }); }}
+        onHold={id => setUi({ catDetail: { id, type } })}
+        onCommit={ids => saveOrder(ids)}
+        render={id => {
+          const c = byId.get(id)!;
+          const v = stats.byCat.get(id) ?? 0;
           return (
-            <motion.div key={c.id} variants={{ hidden: { opacity: 0, scale: 0.85, y: 6 }, show: { opacity: 1, scale: 1, y: 0 } }} transition={softSpring}>
-              <Pressable className="cat-tile" style={{ width: '100%' }}
-                onClick={() => { haptic(6); setUi({ addTx: { type, categoryId: c.id } }); }}
-                onLongPress={() => { haptic(12); setUi({ catDetail: { id: c.id, type } }); }}>
-                <span className="cat-name">{c.name}</span>
-                <div style={{ position: 'relative' }}>
-                  <IconBox icon={c.icon} color={c.color} soft={v === 0} />
-                  {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
-                </div>
-                <span className="cat-amt num" style={{ color: v ? c.color : 'var(--ink-3)' }}>{money(v)}</span>
-              </Pressable>
-            </motion.div>
+            <div className="cat-tile">
+              <span className="cat-name">{c.name}</span>
+              <div style={{ position: 'relative' }}>
+                <IconBox icon={c.icon} color={c.color} soft={v === 0} />
+                {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
+              </div>
+              <span className="cat-amt num" style={{ color: v ? c.color : 'var(--ink-3)' }}>{money(v)}</span>
+            </div>
           );
-        })}
-        <motion.div variants={{ hidden: { opacity: 0, scale: 0.85 }, show: { opacity: 1, scale: 1 } }}>
-          <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => setUi({ category: { type } })}>
-            <span className="cat-name">New</span>
-            <div className="ico" style={{ background: 'transparent', border: '1.5px dashed var(--ink-3)', color: 'var(--ink-3)', width: 54, height: 54, borderRadius: 18 }}><Plus size={22} /></div>
-            <span className="cat-amt">&nbsp;</span>
-          </Pressable>
-        </motion.div>
-      </motion.div>
-      <p className="tiny faint" style={{ textAlign: 'center', marginTop: 22 }}>Tap a category to add · hold for details</p>
+        }}
+        after={
+          <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} transition={softSpring}>
+            <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => setUi({ category: { type } })}>
+              <span className="cat-name">New</span>
+              <div className="ico" style={{ background: 'transparent', border: '1.5px dashed var(--ink-3)', color: 'var(--ink-3)', width: 54, height: 54, borderRadius: 18 }}><Plus size={22} /></div>
+              <span className="cat-amt">&nbsp;</span>
+            </Pressable>
+          </motion.div>
+        } />
+      <p className="tiny faint" style={{ textAlign: 'center', marginTop: 22 }}>Tap to add · hold for details · hold and move to reorder</p>
       {hiddenCount > 0 && (
         <button className="row small muted" style={{ margin: '4px auto 0', gap: 6, padding: 8 }} onClick={() => setUi({ hidden: true })}>
           <EyeOff size={15} />Hidden categories · {hiddenCount}

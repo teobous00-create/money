@@ -256,3 +256,11 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .ptab.on { color: var(--accent); }
 .ptab-ind { position: absolute; left: 22%; right: 22%; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent); }
 .shared-dot { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); color: var(--ink-2); display: grid; place-items: center; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+
+/* ---------- reorder ---------- */
+.cat-tile { transition: transform .12s; }
+.cat-tile:active { transform: scale(.96); }
+.lifted .ico { box-shadow: 0 12px 28px rgba(0,0,0,.28); }
+.lifted .sub-row { box-shadow: 0 14px 32px rgba(0,0,0,.22); }
+.sub-row { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 12px 0 14px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.sub-row .grip { color: var(--ink-3); display: grid; }

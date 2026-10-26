@@ -417,3 +417,11 @@ export async function categoryPeople(categoryId: string): Promise<Person[]> {
   return ((data ?? []) as Array<{ user_id: string; email: string; display_name: string; is_owner: boolean }>)
     .map(r => ({ id: r.user_id, email: r.email, display_name: r.display_name, is_owner: r.is_owner }));
 }
+
+/** Saves a new display order (sort = position) for categories, writing only those that moved. */
+export function saveCategoryOrder(ids: string[]) {
+  const rows = ids.map((id, i) => ({ c: state.categories[id], i }))
+    .filter(({ c, i }) => c && c.sort !== i)
+    .map(({ c, i }) => ({ ...c, sort: i }));
+  putMany('categories', rows);
+}

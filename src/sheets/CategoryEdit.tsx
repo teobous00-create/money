@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Eye, EyeOff, UserPlus, Users, X } from 'lucide-react';
+import { Eye, EyeOff, GripVertical, Plus, UserPlus, Users, X, ChevronRight } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, put, shareCategory, unshareCategory, categoryPeople } from '../lib/store';
+import { useStore, put, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder } from '../lib/store';
+import { Sortable } from '../components/Sortable';
 import { useCategories } from '../lib/calc';
 import { ICON_NAMES, COLORS, guessStyle } from '../lib/icons';
 import { REMOTE } from '../lib/supabase';
@@ -64,6 +65,7 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         {isSub && <div className="small muted" style={{ marginTop: 8 }}>in {parentRec!.name}</div>}
       </div>
       <div className="field"><label>Name</label><input className="input" value={name} onChange={e => onName(e.target.value)} autoFocus={!cat} /></div>
+      {cat && !isSub && <SubList parent={cat} />}
       {!cat && !isSub && (
         <div className="field"><label>Type</label>
           <Segmented value={type} onChange={setType} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]} />
@@ -137,6 +139,34 @@ function ShareSection({ cat }: { cat: Category }) {
       <div className="tiny muted" style={{ padding: '6px 6px 0' }}>
         You both add your own part here and see each other's entries and totals (with subcategories). Each person can only edit their own entries. Your other categories and your accounts stay private.
       </div>
+    </div>
+  );
+}
+
+/** Subcategories in their display order: hold and move to reorder, tap to edit. */
+function SubList({ parent }: { parent: Category }) {
+  const cats = useCategories();
+  const subs = cats.filter(c => c.parent_id === parent.id && !c.archived);
+  const byId = new Map(subs.map(c => [c.id, c]));
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div className="section-head"><span className="section-title">Subcategories</span>{subs.length > 1 && <span className="tiny muted">Hold and move to reorder</span>}</div>
+      <Sortable ids={subs.map(c => c.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03}
+        onCommit={saveCategoryOrder}
+        onTap={id => setUi({ category: { id } })}
+        render={id => {
+          const c = byId.get(id);
+          if (!c) return null;
+          return (
+            <div className="sub-row">
+              <span className="grip"><GripVertical size={18} /></span>
+              <span style={{ color: parent.color, display: 'grid' }}><Icon name={c.icon !== 'circle' ? c.icon : parent.icon} size={20} /></span>
+              <span className="grow ellipsis" style={{ fontWeight: 550 }}>{c.name}</span>
+              <ChevronRight size={18} className="faint" />
+            </div>
+          );
+        }} />
+      <button className="btn secondary" style={{ marginTop: 8, height: 46 }} onClick={() => setUi({ category: { parentId: parent.id } })}><Plus size={18} />Add subcategory</button>
     </div>
   );
 }

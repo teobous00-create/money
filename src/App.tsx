@@ -9,6 +9,7 @@ import { label, shift, type PeriodMode } from './lib/period';
 import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
 import { AuthScreen } from './screens/Auth';
+import { isDragging } from './components/Sortable';
 import { AccountsScreen } from './screens/Accounts';
 import { CategoriesScreen } from './screens/Categories';
 import { TransactionsScreen } from './screens/Transactions';
@@ -155,7 +156,7 @@ function Swipe({ children }: { children: ReactNode }) {
   const onStart = (e: React.TouchEvent) => { const t = e.touches[0]; start.current = { x: t.clientX, y: t.clientY, t: Date.now() }; };
   const onEnd = (e: React.TouchEvent) => {
     const s = start.current; start.current = null;
-    if (!s || period.mode === 'all') return;
+    if (!s || period.mode === 'all' || isDragging()) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x, dy = t.clientY - s.y;
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8 && Date.now() - s.t < 600) {
