@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff } from 'lucide-react';
-import { Sheet, toast, ease } from '../components/ui';
+import { Sheet, Segmented, toast, ease } from '../components/ui';
+import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, signOut, sync, wipeMyData, discardFailed } from '../lib/store';
 import { exportCsv } from '../lib/import1money';
@@ -32,6 +33,7 @@ function Body() {
   useEffect(() => { const t = setInterval(() => setCanInstall(!!installEvent), 1000); return () => clearInterval(t); }, []);
   const standalone = window.matchMedia('(display-mode: standalone)').matches;
   const name = (user && profiles[user.id]?.display_name) || 'Me';
+  const theme = useTheme();
 
   const doExport = () => {
     const blob = new Blob([exportCsv()], { type: 'text/csv;charset=utf-8' });
@@ -62,6 +64,11 @@ function Body() {
           <span className="grow">{status}{failed > 0 && <div className="tiny muted">Tap to dismiss</div>}</span>
           {REMOTE && !failed && <span className="small" style={{ color: 'var(--accent)', fontWeight: 600 }}>Sync now</span>}
         </button>
+      </div>
+
+      <div className="section">
+        <div className="section-head"><span className="section-title">Appearance</span></div>
+        <Segmented value={theme} onChange={setTheme} options={[{ value: 'system', label: 'Phone' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
       </div>
 
       <div className="section list">
@@ -96,7 +103,7 @@ function Body() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="tiny faint" style={{ textAlign: 'center', marginTop: 20 }}>Money · v{__APP_VERSION__} · theme follows your phone</div>
+      <div className="tiny faint" style={{ textAlign: 'center', marginTop: 20 }}>Money · v{__APP_VERSION__}</div>
     </div>
   );
 }
