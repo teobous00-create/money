@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Eye, EyeOff, GripVertical, Plus, UserPlus, Users, X, ChevronRight } from 'lucide-react';
+import { Eye, EyeOff, Menu, Plus, UserPlus, Users, X } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, put, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder } from '../lib/store';
@@ -150,8 +150,8 @@ function SubList({ parent }: { parent: Category }) {
   const byId = new Map(subs.map(c => [c.id, c]));
   return (
     <div style={{ marginBottom: 16 }}>
-      <div className="section-head"><span className="section-title">Subcategories</span>{subs.length > 1 && <span className="tiny muted">Hold and move to reorder</span>}</div>
-      <Sortable ids={subs.map(c => c.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03}
+      <div className="section-head"><span className="section-title">Subcategories</span>{subs.length > 1 && <span className="tiny muted">Drag ≡ to reorder · tap to edit</span>}</div>
+      <Sortable ids={subs.map(c => c.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03} handle
         onCommit={saveCategoryOrder}
         onTap={id => setUi({ category: { id } })}
         render={id => {
@@ -159,10 +159,9 @@ function SubList({ parent }: { parent: Category }) {
           if (!c) return null;
           return (
             <div className="sub-row">
-              <span className="grip"><GripVertical size={18} /></span>
               <span style={{ color: parent.color, display: 'grid' }}><Icon name={c.icon !== 'circle' ? c.icon : parent.icon} size={20} /></span>
               <span className="grow ellipsis" style={{ fontWeight: 550 }}>{c.name}</span>
-              <ChevronRight size={18} className="faint" />
+              <span className="grip" data-drag-handle aria-label={`Move ${c.name}`}><Menu size={22} /></span>
             </div>
           );
         }} />

@@ -262,5 +262,6 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .cat-tile:active { transform: scale(.96); }
 .lifted .ico { box-shadow: 0 12px 28px rgba(0,0,0,.28); }
 .lifted .sub-row { box-shadow: 0 14px 32px rgba(0,0,0,.22); }
-.sub-row { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 12px 0 14px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
-.sub-row .grip { color: var(--ink-3); display: grid; }
+.sub-row { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 0 0 14px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.sub-row .grip { color: var(--ink-3); display: grid; place-items: center; width: 56px; height: 56px; touch-action: none; cursor: grab; }
+.sub-row .grip:active { color: var(--accent); }

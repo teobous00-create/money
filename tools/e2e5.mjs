@@ -61,17 +61,22 @@ await sheet.getByText('Subcategories').scrollIntoViewIfNeeded(); await p.waitFor
 const subs = async () => sheet.locator('.sub-row .grow').allInnerTexts();
 const sb = await subs();
 console.log('subs before:', sb.join(', '));
-const r0 = await sheet.locator('.sub-row').nth(0).boundingBox(); const r2 = await sheet.locator('.sub-row').nth(2).boundingBox();
-await touch('touchStart', r0.x + 60, r0.y + r0.height / 2); await p.waitForTimeout(600);
-for (let k = 1; k <= 15; k++) { await touch('touchMove', r0.x + 60, r0.y + r0.height / 2 + (r2.y - r0.y) * k / 15); await p.waitForTimeout(25); }
+const g0 = await sheet.locator('.sub-row .grip').nth(0).boundingBox(); const r0 = await sheet.locator('.sub-row').nth(0).boundingBox(); const r2 = await sheet.locator('.sub-row').nth(2).boundingBox();
+const gx = g0.x + g0.width / 2, gy = g0.y + g0.height / 2;
+await touch('touchStart', gx, gy); await p.waitForTimeout(40); // no hold needed on the handle
+for (let k = 1; k <= 15; k++) { await touch('touchMove', gx, gy + (r2.y - r0.y) * k / 15); await p.waitForTimeout(25); }
 await p.waitForTimeout(250);
 await p.screenshot({ path: OUT + '/s2-subdrag.png' });
 await touch('touchEnd', 0, 0); await p.waitForTimeout(700);
 const sa = await subs();
 console.log('subs after: ', sa.join(', '));
-ok(sa[2] === sb[0] && sa[0] === sb[1], 'subcategory moved down two places');
+ok(sa[2] === sb[0] && sa[0] === sb[1], 'subcategory moved down two places via the ≡ handle');
+// tapping the row (not the handle) opens it for editing
+await sheet.locator('.sub-row .grow').nth(1).click(); await p.waitForTimeout(800);
+ok((await p.locator('.sheet').last().innerText()).includes('Edit subcategory'), 'tapping a row opens the subcategory editor');
+await p.goBack(); await p.waitForTimeout(600);
 // chips in add screen follow
-await p.goBack(); await p.waitForTimeout(500); await p.goBack(); await p.waitForTimeout(600);
+for (let k = 0; k < 3 && await p.locator('.sheet').count(); k++) { await p.goBack(); await p.waitForTimeout(600); }
 const idx2 = (await names()).indexOf('Σπίτι');
 await p.locator('.screen .cat-grid .cat-tile').nth(idx2).click(); await p.waitForTimeout(800);
 const chips = await p.locator('.subchip').allInnerTexts();

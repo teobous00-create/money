@@ -28,6 +28,7 @@ interface Props {
   style?: CSSProperties;
   after?: ReactNode;                      // non-sortable content at the end (e.g. a "New" tile)
   liftScale?: number;
+  handle?: boolean;                       // drag only from an element marked data-drag-handle, no hold needed
 }
 
 interface Press {
@@ -41,7 +42,7 @@ interface Press {
  * Hold an item, then move it: the others slide out of the way and the order updates live.
  * Works for grids (any number of columns) and lists, because the drop target is the nearest slot.
  */
-export function Sortable({ ids, render, onCommit, onTap, onHold, className, style, after, liftScale = 1.1 }: Props) {
+export function Sortable({ ids, render, onCommit, onTap, onHold, className, style, after, liftScale = 1.1, handle = false }: Props) {
   const key = ids.join('|');
   const [order, setOrder] = useState(ids);
   const [held, setHeld] = useState<string | null>(null);
@@ -69,6 +70,9 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
 
   const begin = (id: string, e: React.PointerEvent) => {
     if ((e.pointerType === 'mouse' && e.button !== 0) || press.current) return;
+    suppressClick.current = false;
+    const onHandle = !!(e.target as HTMLElement).closest('[data-drag-handle]');
+    if (handle && !onHandle) return; // the rest of the row is a normal tap / scroll area
     const p: Press = {
       id, pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY,
       held: false, dragging: false, offX: 0, offY: 0, w: 0, h: 0, slots: [], order: order.slice(), initial: order.join('|'),
@@ -76,7 +80,8 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
     };
     press.current = p;
     suppressClick.current = false;
-    p.timer = setTimeout(() => { p.held = true; suppressClick.current = true; haptic(12); setHeld(id); }, HOLD_MS);
+    const lift = () => { p.held = true; suppressClick.current = true; haptic(12); setHeld(id); };
+    if (handle) { e.preventDefault(); lift(); } else p.timer = setTimeout(lift, HOLD_MS);
 
     const retarget = () => {
       const c = container.current;
@@ -126,7 +131,7 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
       p.x = ev.clientX; p.y = ev.clientY;
       const dist = Math.hypot(p.x - p.sx, p.y - p.sy);
       if (!p.held) { if (dist > SLOP) finish(false); return; }
-      if (!p.dragging && dist > 6) startDrag();
+      if (!p.dragging && dist > (handle ? 2 : 6)) startDrag();
       if (p.dragging) { fx.set(p.x - p.offX); fy.set(p.y - p.offY); retarget(); }
     };
     const up = (ev: PointerEvent) => { if (ev.pointerId === p.pointerId) finish(true); };
@@ -146,7 +151,7 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
         dragState.active = false;
         dragState.endedAt = Date.now();
         if (p.order.join('|') !== p.initial) { haptic(10); cb.current.onCommit(p.order); }
-      } else if (p.held && released) {
+      } else if (p.held && released && !handle) {
         cb.current.onHold?.(p.id);
       }
     };
@@ -168,7 +173,11 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
             transition={{ layout: layoutSpring, default: { duration: 0.22, delay: mounted.current ? 0 : Math.min(i, 24) * 0.02 } }}
             style={{ touchAction: 'pan-y', WebkitTouchCallout: 'none', minWidth: 0, zIndex: lifted ? 2 : undefined }}
             onPointerDown={e => begin(id, e)}
-            onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } cb.current.onTap?.(id); }}
+            onClick={e => {
+              if (suppressClick.current) { suppressClick.current = false; return; }
+              if (handle && (e.target as HTMLElement).closest('[data-drag-handle]')) return;
+              cb.current.onTap?.(id);
+            }}
             onContextMenu={e => e.preventDefault()}>
             {render(id, false)}
           </motion.div>
