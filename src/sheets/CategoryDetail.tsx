@@ -8,6 +8,7 @@ import { useTxs, useSelection, useCategories, useSharedRoots, useProjected, view
 import { label, range } from '../lib/period';
 import { money, round2, shortDate, todayISO } from '../lib/format';
 import { tint } from '../lib/icons';
+import { BudgetLine } from '../components/Budget';
 
 type Scope = 'mine' | 'theirs' | 'both';
 
@@ -34,6 +35,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const sel = useSelection();
   const sharedRoots = useSharedRoots();
   const [scope, setScope] = useState<Scope>('mine');
+  const budgets = useStore(s => s.prefs.budgets);
+  const showBudget = period.mode === 'month' && scope === 'mine' && cat?.type === 'expense';
   const [wa, wb] = viewWindow(period);
   const projected = useProjected(wa, wb);
 
@@ -97,6 +100,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
             </div>
           )}
         </div>
+        {showBudget && budgets?.[id] ? <BudgetLine spent={data.total} limit={budgets[id]} /> : null}
         {shared && <div className="tiny muted row" style={{ gap: 5, marginTop: 6 }}><Users size={12} />Shared with {partners.map(p => profiles[p]?.display_name ?? 'partner').join(', ') || 'your partner'}</div>}
       </DragZone>
 
@@ -112,10 +116,12 @@ function Detail({ id, close }: { id: string; close: () => void }) {
                         <span className="ellipsis" style={{ fontWeight: 550, opacity: r.hidden ? 0.55 : 1 }}>{r.name}{r.hidden && <span className="badge" style={{ marginLeft: 6 }}>hidden</span>}</span>
                         <span className="num bold">{money(r.v)}</span>
                       </div>
-                      <div className="row" style={{ gap: 8, marginTop: 6 }}>
-                        <div className="grow"><Bar value={r.v / max} color={cat.color} delay={i * 0.03} /></div>
-                        <span className="tiny bold num" style={{ width: 34, textAlign: 'right', color: cat.color }}>{data.total ? Math.round((r.v / data.total) * 100) : 0}%</span>
-                      </div>
+                      {showBudget && r.isSub && budgets?.[r.id] ? <BudgetLine spent={r.v} limit={budgets[r.id]} compact /> : (
+                        <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                          <div className="grow"><Bar value={r.v / max} color={cat.color} delay={i * 0.03} /></div>
+                          <span className="tiny bold num" style={{ width: 34, textAlign: 'right', color: cat.color }}>{data.total ? Math.round((r.v / data.total) * 100) : 0}%</span>
+                        </div>
+                      )}
                       {scope === 'both' && r.people.size > 0 && (
                         <div className="tiny muted" style={{ marginTop: 4 }}>{[...r.people.entries()].map(([uid, v]) => `${nameOf(uid)} ${money(v)}`).join(' · ')}</div>
                       )}

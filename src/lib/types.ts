@@ -83,3 +83,10 @@ export interface TableRow {
   transactions: Tx;
   recurring: Recurring;
 }
+
+/** Personal settings, private to each user. */
+export interface Prefs {
+  analytics?: boolean;
+  budgets?: Record<string, number>; // category id → monthly limit
+  tipsCats?: string[];              // category ids counted as tips (empty/undefined = automatic)
+}

@@ -5,9 +5,15 @@ import { usePeriodStats, useTxs, useSelection, topCategoryId } from '../lib/calc
 import { useStore } from '../lib/store';
 import { setUi } from '../lib/ui';
 import { containsToday, elapsedDays, range } from '../lib/period';
-import { IconBox, Money, Bar, ease, softSpring } from '../components/ui';
+import { IconBox, Money, Bar, Segmented, ease, softSpring } from '../components/ui';
+import { AnalyticsView } from './Analytics';
+import { BudgetLine } from '../components/Budget';
+import { useMonthSpend } from '../lib/insights';
+import { catName, catStyle, alive } from '../lib/calc';
 import { addDays, fromISO, money, num, round2, todayISO } from '../lib/format';
 import type { CatType } from '../lib/types';
+
+let lastView: 'overview' | 'analytics' = 'overview';
 
 export function OverviewScreen() {
   const [type, setType] = useState<CatType>('expense');
@@ -17,6 +23,9 @@ export function OverviewScreen() {
   const cats = useStore(s => s.categories);
   const txs = useTxs();
   const sel = useSelection();
+  const analyticsOn = useStore(s => !!s.prefs.analytics);
+  const [view, setViewState] = useState(lastView);
+  const setView = (v: typeof view) => { lastView = v; setViewState(v); };
 
   const net = round2(stats.income - stats.expense);
   const total = type === 'expense' ? stats.expense : stats.income;
@@ -86,8 +95,22 @@ export function OverviewScreen() {
   const shown = expanded ? ranked : ranked.slice(0, 5);
   const restSum = round2(ranked.slice(5).reduce((s, r) => s + r.v, 0));
 
+  const toggle = analyticsOn ? (
+    <Segmented value={view} onChange={setView} style={{ marginBottom: 12 }}
+      options={[{ value: 'overview', label: 'Overview' }, { value: 'analytics', label: 'Analytics' }]} />
+  ) : null;
+  if (analyticsOn && view === 'analytics') {
+    return (
+      <div className="screen" style={{ width: '100%' }}>
+        {toggle}
+        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.22, ease }}><AnalyticsView /></motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="screen" style={{ width: '100%' }}>
+      {toggle}
       <div style={{ textAlign: 'center', padding: '2px 0 12px' }}>
         <div className="small muted" style={{ fontWeight: 600 }}>Balance</div>
         <div style={{ fontSize: 24, fontWeight: 650 }}><Money value={net} colorize sign /></div>
@@ -144,6 +167,8 @@ export function OverviewScreen() {
         ))}
       </div>
 
+      {period.mode === 'month' && <BudgetsCard anchor={period.anchor} />}
+
       <div className="section">
         <div className="list">
           {ranked.length === 0 && <div className="list-row muted small">No {type === 'expense' ? 'expenses' : 'income'} in this period.</div>}
@@ -188,4 +213,35 @@ function niceMax(v: number) {
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]) if (m * p >= v) return m * p;
   return 10 * p;
+}
+
+/** Every category with a monthly budget, closest to (or over) its limit first. */
+function BudgetsCard({ anchor }: { anchor: string }) {
+  const budgets = useStore(s => s.prefs.budgets);
+  const cats = useStore(s => s.categories);
+  const spent = useMonthSpend(anchor);
+  const list = Object.entries(budgets ?? {})
+    .map(([id, limit]) => ({ id, limit, c: cats[id], spent: spent.get(id) ?? 0 }))
+    .filter(x => x.c && !x.c.deleted_at && !x.c.archived && alive(cats).some(c => c.id === x.id))
+    .sort((a, b) => b.spent / b.limit - a.spent / a.limit);
+  if (!list.length) return null;
+  return (
+    <div className="section">
+      <div className="section-head"><span className="section-title">Budgets</span></div>
+      <div className="list">
+        {list.map(x => {
+          const st = catStyle(x.id, cats);
+          return (
+            <button key={x.id} className="list-row" onClick={() => setUi({ catDetail: { id: x.c.parent_id ?? x.id, type: 'expense' } })}>
+              <IconBox icon={st.icon} color={st.color} round size="sm" />
+              <div className="grow">
+                <div className="ellipsis" style={{ fontWeight: 550 }}>{catName(x.id, cats)}</div>
+                <BudgetLine spent={x.spent} limit={x.limit} compact />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

@@ -107,6 +107,13 @@ create index if not exists cat_owner on public.categories (owner_id);
 create index if not exists acc_owner on public.accounts (owner_id);
 create index if not exists catmem_user on public.category_members (user_id);
 
+-- v4: personal settings (budgets, analytics) — visible only to their owner
+create table if not exists public.user_prefs (
+  user_id uuid primary key default auth.uid() references auth.users on delete cascade,
+  prefs jsonb not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
 -- ---------- updated_at trigger ----------
 
 create or replace function public.touch_updated_at() returns trigger
@@ -192,6 +199,7 @@ alter table public.category_members enable row level security;
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
 alter table public.recurring enable row level security;
+alter table public.user_prefs enable row level security;
 
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select
@@ -248,6 +256,10 @@ create policy tx_write on public.transactions for all
     and (to_account_id is null or public.owns_account(to_account_id))
     and (category_id is null or public.can_use_category(category_id))
   );
+
+drop policy if exists prefs_all on public.user_prefs;
+create policy prefs_all on public.user_prefs for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 drop policy if exists recurring_all on public.recurring;
 create policy recurring_all on public.recurring for all
@@ -348,3 +360,8 @@ begin
 exception when others then
   raise notice 'pg_cron not available (%). Recurring entries will post when the app is opened.', sqlerrm;
 end $$;
+
+-- ---------- analytics is switched on only for Teo's account ----------
+insert into public.user_prefs (user_id, prefs)
+select id, '{"analytics": true}'::jsonb from auth.users where lower(email) = 'teobous00@gmail.com'
+on conflict (user_id) do update set prefs = public.user_prefs.prefs || '{"analytics": true}'::jsonb;

@@ -2,7 +2,7 @@ import { useSyncExternalStore, useRef } from 'react';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, REMOTE } from './supabase';
-import type { Account, Category, Member, Person, Profile, Recurring, Table, TableRow, Tx } from './types';
+import type { Account, Category, Member, Person, Prefs, Profile, Recurring, Table, TableRow, Tx } from './types';
 import { addDays, todayISO, fromISO, toISO, uuid } from './format';
 import type { Period } from './period';
 
@@ -22,6 +22,7 @@ export interface State {
   syncing: boolean;
   online: boolean;
   lastSync: string | null;
+  prefs: Prefs;
   // UI state (per device)
   period: Period;
   accountFilter: string[] | null; // null = default selection
@@ -33,7 +34,7 @@ let state: State = {
   phase: 'loading',
   user: null,
   accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [],
-  pending: 0, failed: 0, syncing: false, online: navigator.onLine, lastSync: null,
+  pending: 0, failed: 0, syncing: false, online: navigator.onLine, lastSync: null, prefs: {},
   period: { mode: 'month', anchor: todayISO() },
   accountFilter: null,
 };
@@ -68,8 +69,8 @@ function scheduleSave() {
 }
 async function saveNow() {
   if (!state.user) return;
-  const { accounts, categories, transactions, recurring, profiles, members, lastSync } = state;
-  await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync });
+  const { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs } = state;
+  await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending });
   await idbSet(queueKey(), { queue, failedOps });
 }
 
@@ -94,10 +95,12 @@ async function loadCache() {
     setState({
       accounts: c.accounts ?? {}, categories: c.categories ?? {}, transactions: c.transactions ?? {},
       recurring: c.recurring ?? {}, profiles: c.profiles ?? {}, members: c.members ?? [], lastSync: c.lastSync ?? null,
+      prefs: c.prefs ?? (REMOTE ? {} : { analytics: true }),
     });
   } else {
-    setState({ accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null });
+    setState({ accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: REMOTE ? {} : { analytics: true } });
   }
+  prefsPending = !!c?.prefsPending;
   setState({ pending: queue.length, failed: failedOps.length });
 }
 
@@ -126,7 +129,8 @@ export async function boot() {
 async function onSession(session: Session | null) {
   if (!session) {
     queue = []; failedOps = [];
-    setState({ user: null, phase: 'auth', accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null });
+    prefsPending = false;
+    setState({ user: null, phase: 'auth', accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: {} });
     return;
   }
   setState({ user: { id: session.user.id, email: session.user.email ?? null } });
@@ -292,8 +296,10 @@ export function sync(): Promise<void> {
     setState({ syncing: true });
     try {
       await flush();
+      await pushPrefs();
       await runRemoteRecurring();
       await pull();
+      await pullPrefs();
     } catch (e) {
       console.warn('sync failed', e);
     } finally {
@@ -424,4 +430,40 @@ export function saveCategoryOrder(ids: string[]) {
     .filter(({ c, i }) => c && c.sort !== i)
     .map(({ c, i }) => ({ ...c, sort: i }));
   putMany('categories', rows);
+}
+
+// ---------------------------------------------------------------- personal settings
+
+let prefsPending = false;
+
+export function setPrefs(patch: Partial<Prefs>) {
+  setState({ prefs: { ...state.prefs, ...patch } });
+  prefsPending = true;
+  scheduleSave();
+  if (REMOTE) setTimeout(() => void pushPrefs(), 400);
+}
+
+export function setBudget(categoryId: string, amount: number | null) {
+  const budgets = { ...(state.prefs.budgets ?? {}) };
+  if (amount && amount > 0) budgets[categoryId] = amount; else delete budgets[categoryId];
+  setPrefs({ budgets });
+}
+
+async function pushPrefs() {
+  if (!REMOTE || !state.user || !prefsPending || !navigator.onLine) return;
+  // keep server-only flags (analytics) as they are on the server
+  const { analytics: _a, ...mine } = state.prefs;
+  void _a;
+  const { data } = await supabase!.from('user_prefs').select('prefs').eq('user_id', state.user.id).maybeSingle();
+  const merged = { ...((data?.prefs as Prefs) ?? {}), ...mine };
+  const { error } = await supabase!.from('user_prefs').upsert({ user_id: state.user.id, prefs: merged }, { onConflict: 'user_id' });
+  if (!error) { prefsPending = false; scheduleSave(); }
+}
+
+async function pullPrefs() {
+  if (!REMOTE || !state.user || prefsPending) return;
+  const { data, error } = await supabase!.from('user_prefs').select('prefs').eq('user_id', state.user.id).maybeSingle();
+  if (error) return;
+  setState({ prefs: (data?.prefs as Prefs) ?? {} });
+  scheduleSave();
 }

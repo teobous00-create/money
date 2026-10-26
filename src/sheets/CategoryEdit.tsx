@@ -3,12 +3,13 @@ import { motion } from 'motion/react';
 import { Eye, EyeOff, Menu, Plus, UserPlus, Users, X } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, put, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder } from '../lib/store';
+import { useStore, put, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder, setBudget } from '../lib/store';
+import { parseNum } from './AccountEdit';
 import { Sortable } from '../components/Sortable';
 import { useCategories } from '../lib/calc';
 import { ICON_NAMES, COLORS, guessStyle } from '../lib/icons';
 import { REMOTE } from '../lib/supabase';
-import { uuid } from '../lib/format';
+import { uuid, num } from '../lib/format';
 import type { CatType, Category, Person } from '../lib/types';
 
 export function CategorySheet() {
@@ -31,6 +32,8 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
   const [icon, setIcon] = useState(cat?.icon ?? 'circle');
   const [color, setColor] = useState(cat?.color ?? parentRec?.color ?? COLORS[(cats.length * 5) % COLORS.length]);
   const [touchedIcon, setTouchedIcon] = useState(!!cat);
+  const savedBudget = useStore(s => (cat ? s.prefs.budgets?.[cat.id] : undefined));
+  const [budget, setBudgetText] = useState(savedBudget ? String(savedBudget).replace('.', ',') : '');
   const isSub = !!parentRec;
 
   const onName = (v: string) => {
@@ -39,8 +42,13 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
   };
   const save = () => {
     if (!name.trim()) return toast('Give it a name');
+    const id = cat?.id ?? uuid();
+    if (type === 'expense') {
+      const b = budget.trim() ? parseNum(budget) : null;
+      if ((b ?? null) !== (savedBudget ?? null)) setBudget(id, b);
+    }
     put('categories', {
-      id: cat?.id ?? uuid(), owner_id: cat?.owner_id ?? '', type, name: name.trim(), parent_id: parentRec?.id ?? null,
+      id, owner_id: cat?.owner_id ?? '', type, name: name.trim(), parent_id: parentRec?.id ?? null,
       icon, color: isSub ? parentRec!.color : color, archived: cat?.archived ?? false,
       sort: cat?.sort ?? Math.max(0, ...cats.map(c => c.sort)) + 1,
     });
@@ -65,6 +73,13 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         {isSub && <div className="small muted" style={{ marginTop: 8 }}>in {parentRec!.name}</div>}
       </div>
       <div className="field"><label>Name</label><input className="input" value={name} onChange={e => onName(e.target.value)} autoFocus={!cat} /></div>
+      {type === 'expense' && (
+        <div className="field">
+          <label>Monthly budget</label>
+          <input className="input num" inputMode="decimal" placeholder="No budget" value={budget} onChange={e => setBudgetText(e.target.value)} />
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Only you see it. Counts only what you paid.</span>
+        </div>
+      )}
       {cat && !isSub && <SubList parent={cat} />}
       {!cat && !isSub && (
         <div className="field"><label>Type</label>
@@ -148,6 +163,7 @@ function SubList({ parent }: { parent: Category }) {
   const cats = useCategories();
   const subs = cats.filter(c => c.parent_id === parent.id && !c.archived);
   const byId = new Map(subs.map(c => [c.id, c]));
+  const budgets = useStore(s => s.prefs.budgets);
   return (
     <div style={{ marginBottom: 16 }}>
       <div className="section-head"><span className="section-title">Subcategories</span>{subs.length > 1 && <span className="tiny muted">Drag ≡ to reorder · tap to edit</span>}</div>
@@ -160,7 +176,7 @@ function SubList({ parent }: { parent: Category }) {
           return (
             <div className="sub-row">
               <span style={{ color: parent.color, display: 'grid' }}><Icon name={c.icon !== 'circle' ? c.icon : parent.icon} size={20} /></span>
-              <span className="grow ellipsis" style={{ fontWeight: 550 }}>{c.name}</span>
+              <span className="grow ellipsis" style={{ fontWeight: 550 }}>{c.name}{budgets?.[c.id] ? <span className="tiny muted" style={{ marginLeft: 8 }}>budget {num(budgets[c.id])} €</span> : null}</span>
               <span className="grip" data-drag-handle aria-label={`Move ${c.name}`}><Menu size={22} /></span>
             </div>
           );

@@ -7,7 +7,8 @@ import { IconBox, Money, Pressable, Segmented, ease, softSpring } from '../compo
 import { RecurringBanner } from '../components/RecurringBanner';
 import { haptic, money } from '../lib/format';
 import { Sortable } from '../components/Sortable';
-import { saveCategoryOrder } from '../lib/store';
+import { saveCategoryOrder, useStore } from '../lib/store';
+import { BudgetRing } from '../components/Budget';
 import type { CatType } from '../lib/types';
 
 let lastType: CatType = 'expense';
@@ -23,6 +24,8 @@ export function CategoriesScreen() {
   const hiddenCount = useMemo(() => cats.filter(c => c.archived).length, [cats]);
   const byId = useMemo(() => new Map(cats.map(c => [c.id, c])), [cats]);
   const saveOrder = (ids: string[]) => saveCategoryOrder(ids);
+  const budgets = useStore(s => s.prefs.budgets);
+  const monthView = useStore(s => s.period.mode === 'month');
 
   const total = type === 'expense' ? stats.expense : stats.income;
   const other = type === 'expense' ? stats.income : stats.expense;
@@ -61,7 +64,9 @@ export function CategoriesScreen() {
             <div className="cat-tile">
               <span className="cat-name">{c.name}</span>
               <div style={{ position: 'relative' }}>
-                <IconBox icon={c.icon} color={c.color} soft={v === 0} />
+                {monthView && budgets?.[id] && type === 'expense'
+                  ? <BudgetRing spent={v} limit={budgets[id]}><IconBox icon={c.icon} color={c.color} soft={v === 0} /></BudgetRing>
+                  : <IconBox icon={c.icon} color={c.color} soft={v === 0} />}
                 {shared.has(c.id) && <span className="shared-dot"><Users size={10} /></span>}
               </div>
               <span className="cat-amt num" style={{ color: v ? c.color : 'var(--ink-3)' }}>{money(v)}</span>

@@ -113,5 +113,14 @@ await as(TEO, async () => {
   ok(n3 === 3 && JSON.stringify(dates) === '[30,16,9]', 'end date + skipped occurrence respected: ' + JSON.stringify(dates));
 });
 
+await q(`insert into auth.users (id,email) values ('33333333-3333-3333-3333-333333333333','teobous00@gmail.com')`);
+await db.exec(schema);
+ok((await q(`select prefs->>'analytics' a from user_prefs where user_id = '33333333-3333-3333-3333-333333333333'`)).rows[0]?.a === 'true', 'analytics switched on for Teo\'s email');
+await as(GF, async () => {
+  ok((await q(`select count(*)::int c from user_prefs`)).rows[0].c === 0, 'Eva cannot read anyone else\'s settings');
+  await q(`insert into user_prefs (prefs) values ('{"budgets":{"x":10}}')`);
+  ok((await q(`select count(*)::int c from user_prefs`)).rows[0].c === 1, 'Eva can save her own settings');
+});
+
 const rn = (await q(`select recurring_next('2026-01-31','monthly',31)::text a, recurring_next('2026-02-28','monthly',31)::text b`)).rows[0];
 ok(rn.a === '2026-02-28' && rn.b === '2026-03-31', 'month-end anchoring');
