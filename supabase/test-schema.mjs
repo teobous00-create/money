@@ -70,6 +70,11 @@ const G = await as(GF, async () => {
   ok(((await q(`update categories set name = 'Σπίτι' where id = $1`, [T.home])).affectedRows ?? 0) === 1, 'Eva can rename the shared category');
   const rent = await q(`insert into categories (type,name,parent_id) values ('expense','Rent',$1) returning id`, [T.home]).then(r => r.rows[0].id, () => null);
   ok(!!rent, 'Eva can add a subcategory to the shared category');
+  // merge: Eva moves an entry from her own private "Σπίτι" into the shared one (upsert, like the app)
+  const own = (await q(`insert into categories (type,name) values ('expense','Σπίτι') returning id`)).rows[0].id;
+  const otx = (await q(`insert into transactions (type,date,amount,account_id,category_id) values ('expense','2026-09-01',40,$1,$2) returning id`, [mine, own])).rows[0].id;
+  ok(!(await fails(() => q(`insert into transactions (id,owner_id,type,date,amount,account_id,category_id) values ($1,$2,'expense','2026-09-01',40,$3,$4) on conflict (id) do update set category_id = excluded.category_id`, [otx, GF, mine, rent]))), 'Eva can merge her own entry into the shared subcategory');
+  await q(`delete from transactions where id = $1`, [otx]); await q(`delete from categories where id = $1`, [own]);
   // upsert path used by the app (insert ... on conflict do update) on Teo's row
   ok(!(await fails(() => q(`insert into categories (id,owner_id,type,name,parent_id,archived) values ($1,$2,'expense','Supermarket',$3,true) on conflict (id) do update set archived = excluded.archived`, [T.sm, TEO, T.home]))), 'Eva can hide a shared subcategory via upsert');
   ok(await fails(() => q(`insert into categories (type,name,parent_id) values ('expense','X',$1)`, [T.smoke])), 'Eva cannot add under Teo\'s private category');

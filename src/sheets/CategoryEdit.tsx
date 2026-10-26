@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Eye, EyeOff, Menu, Plus, UserPlus, Users, X } from 'lucide-react';
+import { Check, Eye, EyeOff, Menu, Merge, Plus, UserPlus, Users, X } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, put, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder, setBudget } from '../lib/store';
+import { useStore, getState, put, putMany, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder, setBudget } from '../lib/store';
 import { parseNum } from './AccountEdit';
 import { Sortable } from '../components/Sortable';
-import { useCategories } from '../lib/calc';
+import { useCategories, useSharedRoots } from '../lib/calc';
 import { ICON_NAMES, COLORS, guessStyle } from '../lib/icons';
 import { REMOTE } from '../lib/supabase';
 import { uuid, num } from '../lib/format';
@@ -102,6 +102,7 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         </button>
       )}
       {cat && !cat.archived && <p className="tiny muted" style={{ textAlign: 'center', marginTop: 8 }}>Hiding removes it from the grid and pickers. No transactions are lost — reports still include them.</p>}
+      {cat && !isSub && !cat.archived && <MergeSection cat={cat} close={close} />}
     </div>
   );
 }
@@ -154,6 +155,86 @@ function ShareSection({ cat }: { cat: Category }) {
       <div className="tiny muted" style={{ padding: '6px 6px 0' }}>
         You both add your own part here and see each other's entries and totals (with subcategories). Each person can only edit their own entries. Your other categories and your accounts stay private.
       </div>
+    </div>
+  );
+}
+
+const norm = (s: string) => s.trim().toLocaleLowerCase('el').normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/** Moves all my entries (and recurring rules, job links) from `src` into `dst`, matching subcategories by name. */
+export function mergeCategory(srcId: string, dstId: string): number {
+  const s = getState();
+  const me = s.user!.id;
+  const live = Object.values(s.categories).filter(c => !c.deleted_at);
+  const src = s.categories[srcId], dst = s.categories[dstId];
+  const srcSubs = live.filter(c => c.parent_id === srcId);
+  const dstSubs = live.filter(c => c.parent_id === dstId);
+  const map = new Map<string, string>([[srcId, dstId]]);
+  const newSubs: Category[] = [];
+  let sort = Math.max(0, ...dstSubs.map(c => c.sort));
+  for (const sub of srcSubs) {
+    const same = dstSubs.find(d => norm(d.name) === norm(sub.name)) ?? newSubs.find(d => norm(d.name) === norm(sub.name));
+    if (same) { map.set(sub.id, same.id); if (same.archived && !sub.archived) newSubs.push({ ...same, archived: false }); continue; }
+    const n: Category = { id: uuid(), owner_id: '', type: dst.type, name: sub.name, parent_id: dstId, icon: sub.icon, color: dst.color, archived: sub.archived, sort: ++sort };
+    newSubs.push(n);
+    map.set(sub.id, n.id);
+  }
+  putMany('categories', newSubs);
+  const txs = Object.values(s.transactions).filter(t => !t.deleted_at && t.owner_id === me && t.category_id && map.has(t.category_id));
+  putMany('transactions', txs.map(t => ({ ...t, category_id: map.get(t.category_id!)! })));
+  putMany('recurring', Object.values(s.recurring).filter(r => !r.deleted_at && r.owner_id === me && r.category_id && map.has(r.category_id))
+    .map(r => ({ ...r, category_id: map.get(r.category_id!)! })));
+  const mv = (id: string | null) => (id && map.has(id) ? map.get(id)! : id);
+  putMany('jobs', Object.values(s.jobs).filter(j => !j.deleted_at && [j.salary_category_id, j.bonus_category_id, j.tips_category_id].some(id => id && map.has(id)))
+    .map(j => ({ ...j, salary_category_id: mv(j.salary_category_id), bonus_category_id: mv(j.bonus_category_id), tips_category_id: mv(j.tips_category_id) })));
+  put('categories', { ...src, archived: true });
+  return txs.length;
+}
+
+/** "Merge into…": move this category's entries into another one (e.g. a shared one with the same name). */
+function MergeSection({ cat, close }: { cat: Category; close: () => void }) {
+  const cats = useCategories();
+  const shared = useSharedRoots();
+  const me = useStore(s => s.user?.id);
+  const txs = useStore(s => s.transactions);
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState<string | null>(null);
+  if (cat.owner_id !== me || shared.has(cat.id)) return null;     // only my own, unshared categories
+  const subIds = new Set([cat.id, ...cats.filter(c => c.parent_id === cat.id).map(c => c.id)]);
+  const count = Object.values(txs).filter(t => !t.deleted_at && t.owner_id === me && t.category_id && subIds.has(t.category_id)).length;
+  const options = cats.filter(c => !c.parent_id && !c.archived && c.id !== cat.id && c.type === cat.type)
+    .sort((a, b) => Number(norm(b.name) === norm(cat.name)) - Number(norm(a.name) === norm(cat.name)) || Number(shared.has(b.id)) - Number(shared.has(a.id)));
+  if (!options.length) return null;
+  const dst = target ? cats.find(c => c.id === target) : null;
+  const run = () => {
+    if (!dst) return;
+    const n = mergeCategory(cat.id, dst.id);
+    toast(`${n} ${n === 1 ? 'entry' : 'entries'} moved to ${dst.name}`);
+    setUi({ catDetail: null });
+    close();
+  };
+  return (
+    <div style={{ marginTop: 18 }}>
+      {!open ? (
+        <button className="btn secondary" style={{ height: 46 }} onClick={() => setOpen(true)}><Merge size={18} />Merge into another category</button>
+      ) : (
+        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="section-head"><span className="section-title row" style={{ gap: 6 }}><Merge size={14} />Merge into</span></div>
+          <div className="list">
+            {options.map(c => (
+              <button key={c.id} className="list-row" onClick={() => setTarget(c.id)}>
+                <IconBox icon={c.icon} color={c.color} round size="sm" />
+                <span className="grow" style={{ fontWeight: 550 }}>{c.name}{shared.has(c.id) && <span className="badge" style={{ marginLeft: 6 }}><Users size={11} /> shared</span>}</span>
+                {target === c.id && <Check size={18} style={{ color: 'var(--accent)' }} />}
+              </button>
+            ))}
+          </div>
+          <div className="tiny muted" style={{ padding: '6px 6px 10px' }}>
+            Your {count} {count === 1 ? 'entry moves' : 'entries move'} there. Subcategories with the same name are joined, the others are added. Then “{cat.name}” is hidden.
+          </div>
+          <button className="btn" disabled={!dst} onClick={run}>{dst ? `Move ${count} ${count === 1 ? 'entry' : 'entries'} to ${dst.name}` : 'Choose a category'}</button>
+        </motion.div>
+      )}
     </div>
   );
 }
