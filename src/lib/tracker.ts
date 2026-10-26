@@ -91,7 +91,9 @@ export function usePayPeriods(job: Job) {
     })
       .sort((a, b) => b.start.localeCompare(a.start));
     const owed = round2(list.reduce((s, p) => s + p.owed, 0));
-    return { list, owed, current: list.find(p => p.current)! };
+    const owedBase = round2(list.reduce((s, p) => s + p.base - p.paidBase, 0));
+    const owedBonus = round2(list.reduce((s, p) => s + p.bonus - p.paidBonus, 0));
+    return { list, owed, owedBase, owedBonus, current: list.find(p => p.current)! };
   }, [job, shifts, payouts]);
 }
 

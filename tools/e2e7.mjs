@@ -50,7 +50,7 @@ for (let i = 0; i < 10; i++) await top().locator('.card', { hasText: 'Evening' }
 await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(900);
 const w = await p.locator('.screen').last().innerText();
 await shot('w2-work');
-ok(/46 €/.test(w) && /66 €/.test(w), 'owed: morning 46 €, evening 66 €');
+ok(/40 € \+ 6 €/.test(w) && /66 €/.test(w), 'owed: morning 40 € + 6 € (salary + bonus), evening 66 €');
 // morning: salary + bonus paid separately
 await p.locator('.card', { hasText: 'Morning' }).getByText('Got paid').click(); await p.waitForTimeout(700);
 const ms = top();

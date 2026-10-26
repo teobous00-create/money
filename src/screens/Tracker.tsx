@@ -161,7 +161,8 @@ function Work() {
 }
 
 function JobCard({ job, onPay, onSettings }: { job: Job; onPay: () => void; onSettings: () => void }) {
-  const { owed, current } = usePayPeriods(job);
+  const { owed, owedBase, owedBonus, current } = usePayPeriods(job);
+  const split = job.kind === 'daily';
   const r = rateAt(job, todayISO());
   const noRate = job.kind === 'daily' ? !r.day : !r.hour;
   const Icon = job.kind === 'daily' ? Sun : Moon;
@@ -178,11 +179,20 @@ function JobCard({ job, onPay, onSettings }: { job: Job; onPay: () => void; onSe
         <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
           <div className="grow">
             <div className="tiny muted" style={{ fontWeight: 600 }}>Owed to you</div>
-            <div className="num" style={{ fontSize: 24, fontWeight: 650, letterSpacing: '-0.02em', color: owed > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>{money(owed)}</div>
+            {split ? (
+              <>
+                <div className="num" style={{ fontSize: 22, fontWeight: 650, letterSpacing: '-0.02em', color: owed > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>
+                  {money(owedBase)} <span className="muted" style={{ fontWeight: 500 }}>+</span> {money(owedBonus)}
+                </div>
+                <div className="tiny muted">salary + bonus</div>
+              </>
+            ) : (
+              <div className="num" style={{ fontSize: 24, fontWeight: 650, letterSpacing: '-0.02em', color: owed > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>{money(owed)}</div>
+            )}
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="tiny muted" style={{ fontWeight: 600 }}>This period · {periodLabel(current)}</div>
-            <div className="num bold">{money(current.earned)}</div>
+            <div className="num bold">{split ? `${money(current.base)} + ${money(current.bonus)}` : money(current.earned)}</div>
             <div className="tiny muted num">{current.shifts} {job.kind === 'daily' ? (current.shifts === 1 ? 'day' : 'days') : `${current.shifts === 1 ? 'shift' : 'shifts'} · ${num(current.hours)}h`}</div>
           </div>
         </div>
