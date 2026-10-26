@@ -9,7 +9,7 @@ import { fromISO, round2, toISO } from './format';
 import { NUMWORDS, MONTHS, clean, norm, parseNumber, parseQuick, sameWord, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
 
-export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[] }
+export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[]; hasShift?: (jobId: string, date: string) => boolean }
 
 export type Cmd =
   | { kind: 'tx'; p: Parsed; repeat: Freq | null; until: string | null }
@@ -165,16 +165,16 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
   const nums = labelled(ws);
   const labelledNum = nums.some(n => n.label !== null);
   // "καφές το πρωί 2" is a coffee, not a shift: a job word only counts with shift words, labelled numbers, or no category
+  // "3€ bonus σήμερα", "6 ώρες": work words alone are enough; "tips 25" alone only adds to a shift already logged that day
+  const onlyOf = (kind: Job['kind']) => { const of = ctx.jobs.filter(j => j.kind === kind); return of.length === 1 ? of[0] : null; };
+  const workLabel = nums.some(n => n.label === 'bonus' || n.label === 'hours' || n.label === 'base');
+  const eve = onlyOf('hourly');
+  const tipsToShift = nums.some(n => n.label === 'tips') && !!eve && !!ctx.hasShift?.(eve.id, date());
   const shiftish = (ref && (has(ws, SHIFT_WORDS) || labelledNum || !parseQuick(text, ctx).categoryId))
-    || (has(ws, SHIFT_WORDS) && labelledNum);
+    || (has(ws, SHIFT_WORDS) && labelledNum) || workLabel || tipsToShift;
   if (shiftish) {
     let job = ref?.job ?? null;
-    if (!job) {
-      const wantDaily = nums.some(n => n.label === 'bonus' || n.label === 'base');
-      const kind = wantDaily ? 'daily' : 'hourly';
-      const of = ctx.jobs.filter(j => j.kind === kind);
-      job = of.length === 1 ? of[0] : null;
-    }
+    if (!job) job = onlyOf(nums.some(n => n.label === 'bonus' || n.label === 'base') ? 'daily' : 'hourly');
     if (job) {
       const hours = nums.find(n => n.label === 'hours')?.v ?? (job.kind === 'hourly' ? nums.find(n => n.label === null)?.v ?? null : null);
       return [{

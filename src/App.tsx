@@ -9,6 +9,7 @@ import { label, shift, type PeriodMode } from './lib/period';
 import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
 import { AuthScreen } from './screens/Auth';
+import { VoiceButton } from './components/QuickEntry';
 import { isDragging } from './components/Sortable';
 import { AccountsScreen } from './screens/Accounts';
 import { CategoriesScreen } from './screens/Categories';
@@ -42,7 +43,7 @@ function useShortcut() {
   const analytics = useStore(s => !!s.prefs.analytics);
   useEffect(() => {
     const a = new URLSearchParams(location.search).get('a');
-    if (!a) return;
+    if (!a) { if (analytics) setUi({ tab: 'transactions' }); return; }   // your account always opens on Transactions
     history.replaceState(null, '', location.pathname);
     if (a === 'voice') setUi({ addTx: { voice: true } });
     else if (a === 'expense') setUi({ addTx: { type: 'expense' } });
@@ -111,11 +112,13 @@ function TopBar() {
   const pending = useStore(s => s.pending);
   const failed = useStore(s => s.failed);
   const tab = useUi(u => u.tab);
+  const analytics = useStore(s => !!s.prefs.analytics);
   const name = (user && profiles[user.id]?.display_name) || user?.email || 'Me';
   const right: Record<UiState['tab'], ReactNode> = {
     accounts: <button className="iconbtn" aria-label="Add account" onClick={() => setUi({ account: {} })}><Plus size={24} /></button>,
     categories: <button className="iconbtn" aria-label="New category" onClick={() => setUi({ category: {} })}><Pencil size={20} /></button>,
-    transactions: <button className="iconbtn" aria-label="Search" onClick={() => setUi({ search: true })}><Search size={22} /></button>,
+    // your account: a mic for voice commands; others keep search
+    transactions: analytics ? <VoiceButton /> : <button className="iconbtn" aria-label="Search" onClick={() => setUi({ search: true })}><Search size={22} /></button>,
     overview: <span />,
     tracker: <span />,
   };

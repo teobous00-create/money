@@ -36,7 +36,7 @@ let fail = 0;
 const morning = { id: 'j1', name: 'Morning', kind: 'daily', pay: 'monthly', rates: [{ from: '2026-01-01', day: 35 }], salary_category_id: 'income:PDA Salary', bonus_category_id: 'income:PDA Bonus' };
 const evening = { id: 'j2', name: 'Evening', kind: 'hourly', pay: 'semimonthly', rates: [{ from: '2026-01-01', hour: 6 }], salary_category_id: 'income:Μισθός>Cake & Roll', tips_category_id: 'income:Μισθός>Tips' };
 const ddg = { id: 's1', name: 'DEEP DIP GOLD' }, gs = { id: 's2', name: 'Gold Sniper' };
-const vctx = { ...ctx, jobs: [morning, evening], strategies: [ddg, gs] };
+const vctx = { ...ctx, jobs: [morning, evening], strategies: [ddg, gs], hasShift: (j, d) => j === 'j2' && d === '2026-10-26' };
 const desc = c => c.kind === 'tx' ? `tx ${show(c.p)}${c.repeat ? ' repeat ' + c.repeat : ''}${c.until ? ' until ' + c.until : ''}`
   : c.kind === 'shift' ? `shift ${c.job.name} ${c.date} h=${c.hours} tips=${c.tips} bonus=${c.bonus} base=${c.base}`
   : c.kind === 'pnl' ? `pnl ${c.strategy.name} ${c.date} ${c.value}` : `payout ${c.job.name} ${c.date} amount=${c.amount} bonus=${c.bonus}`;
@@ -61,6 +61,10 @@ const vcases = [
   ['ενοίκιο 400 μηνιαία', /^tx expense 400€ .*Ενοίκιο.* repeat monthly/],
   ['καφές το πρωί 2', /^tx expense 2€ .*Καφές/],
   ['tips 15', /^tx income 15€ Μισθός › Tips/],
+  ['tips 30 χθες', /^shift Evening 2026-10-26 h=null tips=30/],
+  ['3€ bonus σήμερα', /^shift Morning 2026-10-27 h=null tips=null bonus=3/],
+  ['bonus 12 χθες', /^shift Morning 2026-10-26 .* bonus=12/],
+  ['6 ώρες tips 20', /^shift Evening .* h=6 tips=20/],
 ];
 for (const [txt, re] of vcases) { const cs = interpret(txt, vctx); const s = cs.map(desc).join(' || '); const okk = cs.length === 1 && re.test(s); if (!okk) fail++; console.log((okk ? 'ok  ' : 'FAIL') + ' ' + txt.padEnd(36) + ' → ' + s); }
 const multi = [

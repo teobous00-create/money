@@ -54,6 +54,7 @@ export function useVoiceCtx(): Omit<VoiceCtx, 'learned' | 'today'> {
       // work + trading only for the account that has the Tracker
       jobs: analytics ? alive(jobs).filter(j => !j.archived) : [],
       strategies: analytics ? alive(strategies).filter(s => !s.archived) : [],
+      hasShift: (jobId: string, date: string) => { const sh = getState().shifts[shiftId(jobId, date)]; return !!sh && !sh.deleted_at; },
     };
   }, [accounts, categories, txs, jobs, strategies, me, analytics]);
 }

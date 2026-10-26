@@ -328,3 +328,10 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .quick-btn.go { background: var(--accent); color: var(--accent-ink); }
 .quick-btn.mic.on { background: var(--expense); color: #fff; }
 .quick-pulse { position: absolute; inset: 0; border-radius: 13px; background: var(--expense); z-index: -1; }
+.voice-btn { position: relative; isolation: isolate; }
+.voice-btn.on { color: #fff; }
+.voice-btn.on::before { content: ''; position: absolute; inset: 4px; border-radius: 999px; background: var(--expense); z-index: -1; }
+.voice-btn .quick-pulse { inset: 4px; }
+.voice-pill { position: fixed; z-index: 70; left: 16px; right: 16px; top: calc(var(--safe-t) + 76px); display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); font-weight: 600; font-size: 16px; color: var(--ink); }
+.voice-dot { width: 10px; height: 10px; border-radius: 99px; background: var(--expense); flex: none; animation: vdot 1s ease-in-out infinite; }
+@keyframes vdot { 50% { opacity: .35; transform: scale(.8); } }
