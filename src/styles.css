@@ -317,3 +317,14 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .pm { width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); font-size: 22px; font-weight: 700; flex: none; }
 .tstats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .tstats .stat { text-align: left; }
+
+/* quick entry ("type or say") */
+.quick { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 6px 0 14px; margin-bottom: 16px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); border: 1.5px solid transparent; transition: border-color .25s, box-shadow .25s; }
+.quick:focus-within, .quick.on { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.quick-spark { color: var(--accent); flex: none; }
+.quick-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15.5px; height: 100%; }
+.quick-input::placeholder { color: var(--ink-3); }
+.quick-btn { position: relative; width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center; flex: none; color: var(--ink-2); }
+.quick-btn.go { background: var(--accent); color: var(--accent-ink); }
+.quick-btn.mic.on { background: var(--expense); color: #fff; }
+.quick-pulse { position: absolute; inset: 0; border-radius: 13px; background: var(--expense); z-index: -1; }

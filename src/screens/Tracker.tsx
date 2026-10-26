@@ -4,6 +4,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Delete, Pencil, Plus, Settings2
 import { Segmented, Sheet, toast, ease } from '../components/ui';
 import { useStore, put, putMany, remove, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
+import { getUi, setUi } from '../lib/ui';
 import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
@@ -27,7 +28,7 @@ const periodLabel = (p: { start: string; end: string }) => `${fromISO(p.start).g
 let lastSection: 'work' | 'trading' = (lsGet('money:tracker') as 'work' | 'trading') || 'work';
 
 export function TrackerScreen() {
-  const [section, setSectionState] = useState(lastSection);
+  const [section, setSectionState] = useState(() => (getUi().shiftToday ? 'work' : lastSection));
   const setSection = (s: typeof section) => { lastSection = s; lsSet('money:tracker', s); setSectionState(s); };
   return (
     <div className="screen" style={{ width: '100%' }}>
@@ -106,6 +107,7 @@ function Work() {
   const shifts = useJobShifts();
   const [anchor, setAnchor] = useState(todayISO());
   const [day, setDay] = useState<string | null>(null);
+  useEffect(() => { if (getUi().shiftToday) { setUi({ shiftToday: false }); setDay(todayISO()); } }, []);
   const [payJob, setPayJob] = useState<Job | null>(null);
   const [settings, setSettings] = useState(false);
   const byDay = useMemo(() => {

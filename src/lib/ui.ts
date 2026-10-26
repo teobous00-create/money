@@ -7,6 +7,7 @@ export interface AddTxArgs {
   categoryId?: string;
   accountId?: string;
   date?: string;
+  voice?: boolean;   // start listening right away (app-icon shortcut)
 }
 
 export interface UiState {
@@ -23,6 +24,7 @@ export interface UiState {
   importer: boolean;
   search: boolean;
   hidden: boolean;
+  shiftToday?: boolean;   // open today's shift (app-icon shortcut)
 }
 
 const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview', 'tracker'];

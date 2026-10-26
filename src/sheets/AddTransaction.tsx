@@ -8,6 +8,8 @@ import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
+import { QuickEntry } from '../components/QuickEntry';
+import { learn, type Parsed } from '../lib/quickparse';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
 const TYPE_LABEL: Record<TxType, string> = { expense: 'Expense', income: 'Income', transfer: 'Transfer' };
@@ -71,8 +73,34 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const [picker, setPicker] = useState<null | 'from' | 'repeat'>(null);
   const [picking, setPicking] = useState(!editing && (type === 'transfer' ? !toAccountId : !categoryId));
   const dateRef = useRef<HTMLInputElement>(null);
+  const parsed = useRef<{ words: string[]; categoryId: string | null } | null>(null);
+
+  /** Fill the form from a typed/spoken phrase; go straight to the amount screen when the category is known. */
+  const applyParsed = (p: Parsed) => {
+    const t = p.type ?? type;
+    setType(t);
+    if (p.amount !== null) setExpr(num(p.amount).replace(/\./g, ''));
+    if (p.date) setDate(p.date);
+    if (p.note) setNote(p.note);
+    if (t === 'transfer') {
+      if (p.toAccountId) setToAccountId(p.toAccountId);
+      setAccountId(p.accountId ?? defaultAcc('transfer', p.toAccountId));
+      setPicking(!p.toAccountId);
+    } else {
+      if (p.categoryId) setCategoryId(p.categoryId);
+      setAccountId(p.accountId ?? accountId ?? defaultAcc(t));
+      setPicking(!p.categoryId);
+    }
+    parsed.current = { words: p.words, categoryId: p.categoryId };
+  };
 
   const parent = categoryId ? (catRec[categoryId]?.parent_id ?? categoryId) : null;
+  // a chosen subcategory far right in the chip row scrolls into view
+  useEffect(() => {
+    if (picking) return;
+    const t = setTimeout(() => document.querySelector('.subchip[data-on]')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }), 260);
+    return () => clearTimeout(t);
+  }, [picking, categoryId]);
   const subs = useMemo(() => cats.filter(c => c.parent_id === parent && !c.archived), [cats, parent]);
 
   const amount = evalExpr(expr);
@@ -124,6 +152,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   };
   const finish = (msg: string) => {
     try { localStorage.setItem('money:lastacc:' + type, accountId!); } catch { /* ignore */ }
+    // you corrected the category the phrase gave → remember those words for next time
+    if (parsed.current && type !== 'transfer' && categoryId && parsed.current.categoryId !== categoryId) learn(parsed.current.words, categoryId);
     haptic(12);
     toast(msg);
     close();
@@ -261,7 +291,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
       {picking ? (
         <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
           initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
-          <Picker type={type} onType={setType} onPick={onPick} exclude={accountId} />
+          <Picker type={type} onType={setType} onPick={onPick} exclude={accountId}
+            quick={!editing ? <QuickEntry onParsed={applyParsed} autoListen={!!args.voice} /> : null} />
         </motion.div>
       ) : (
         <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
@@ -288,7 +319,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
                 {subs.map(s => {
                   const on = categoryId === s.id;
                   return (
-                    <motion.button key={s.id} className="subchip" whileTap={{ scale: 0.95 }}
+                    <motion.button key={s.id} className="subchip" whileTap={{ scale: 0.95 }} data-on={on || undefined}
                       style={{ borderColor: rightColor, color: on ? '#fff' : rightColor, background: on ? rightColor : 'transparent' }}
                       onClick={() => { haptic(4); setCategoryId(on ? parent : s.id); }}>
                       <Icon name={s.icon !== 'circle' ? s.icon : catStyle(parent, catRec).icon} size={17} />{s.name}
@@ -381,7 +412,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
 }
 
 /** Step 1: Income / Expense / Transfer tabs with the category (or destination account) grid. */
-function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: TxType) => void; onPick: (t: TxType, id: string) => void; exclude: string | null }) {
+function Picker({ type, onType, onPick, exclude, quick }: { type: TxType; onType: (t: TxType) => void; onPick: (t: TxType, id: string) => void; exclude: string | null; quick?: React.ReactNode }) {
   const cats = useCategories();
   const accounts = useAccounts();
   const me = useStore(s => s.user?.id);
@@ -403,6 +434,7 @@ function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: T
         ))}
       </DragZone>
       <div className="sheet-body" style={{ paddingTop: 14 }}>
+        {quick}
         <div className="small muted" style={{ margin: '0 4px 12px', fontWeight: 600 }}>{type === 'transfer' ? 'Transfer to' : 'Choose a category'}</div>
         <motion.div className="cat-grid" key={type} initial="h" animate="s" variants={{ s: { transition: { staggerChildren: 0.018 } } }}>
           {type === 'transfer'

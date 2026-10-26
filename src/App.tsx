@@ -37,9 +37,23 @@ export default function App() {
   );
 }
 
+/** App-icon shortcuts (long-press the icon): ?a=voice | expense | shift */
+function useShortcut() {
+  const analytics = useStore(s => !!s.prefs.analytics);
+  useEffect(() => {
+    const a = new URLSearchParams(location.search).get('a');
+    if (!a) return;
+    history.replaceState(null, '', location.pathname);
+    if (a === 'voice') setUi({ addTx: { voice: true } });
+    else if (a === 'expense') setUi({ addTx: { type: 'expense' } });
+    else if (a === 'shift' && analytics) setUi({ tab: 'tracker', shiftToday: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 function Shell() {
   const tab = useUi(u => u.tab);
   const dir = useUi(u => u.tabDir);
+  useShortcut();
   return (
     <div className="app">
       <TopBar />
