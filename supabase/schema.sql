@@ -365,3 +365,92 @@ end $$;
 insert into public.user_prefs (user_id, prefs)
 select id, '{"analytics": true}'::jsonb from auth.users where lower(email) = 'teobous00@gmail.com'
 on conflict (user_id) do update set prefs = public.user_prefs.prefs || '{"analytics": true}'::jsonb;
+
+-- ============================================================
+-- v5: personal tracker — work shifts and trading results (private to each user)
+-- ============================================================
+
+create table if not exists public.jobs (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users on delete cascade,
+  name text not null,
+  kind text not null default 'hourly' check (kind in ('daily','hourly')),
+  pay text not null default 'monthly' check (pay in ('monthly','semimonthly')),
+  rates jsonb not null default '[]',
+  color text not null default '#3E63DD',
+  salary_category_id uuid references public.categories on delete set null,
+  tips_category_id uuid references public.categories on delete set null,
+  tips_account_id uuid references public.accounts on delete set null,
+  sort integer not null default 0,
+  archived boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.shifts (
+  id text primary key,
+  owner_id uuid not null default auth.uid() references auth.users on delete cascade,
+  job_id uuid not null references public.jobs on delete cascade,
+  date date not null,
+  hours numeric(6,2) not null default 0,
+  sales integer not null default 0,
+  tips_tx_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.payouts (
+  id text primary key,
+  owner_id uuid not null default auth.uid() references auth.users on delete cascade,
+  job_id uuid not null references public.jobs on delete cascade,
+  period_start date not null,
+  period_end date not null,
+  amount numeric(14,2) not null default 0,
+  tx_id uuid,
+  date date not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.strategies (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users on delete cascade,
+  name text not null,
+  color text not null default '#30A46C',
+  goal numeric(14,2),
+  sort integer not null default 0,
+  archived boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.pnl (
+  id text primary key,
+  owner_id uuid not null default auth.uid() references auth.users on delete cascade,
+  strategy_id uuid not null references public.strategies on delete cascade,
+  date date not null,
+  pnl numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create index if not exists shifts_owner on public.shifts (owner_id, updated_at);
+create index if not exists pnl_owner on public.pnl (owner_id, updated_at);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['jobs','shifts','payouts','strategies','pnl'] loop
+    execute format('drop trigger if exists touch on public.%I', t);
+    execute format('create trigger touch before insert or update on public.%I for each row execute function public.touch_updated_at()', t);
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists own_rows on public.%I', t);
+    execute format('create policy own_rows on public.%I for all using (owner_id = auth.uid()) with check (owner_id = auth.uid())', t);
+    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
+  end loop;
+end $$;

@@ -2,7 +2,9 @@ import { useMemo } from 'react';
 import { useStore } from './store';
 import { useTxs, useSelection, periodStats } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
-import type { Category, Tx } from './types';
+import type { Category, Job, Tx } from './types';
+import { shiftPay } from './tracker';
+import { alive } from './calc';
 
 export const monthStart = (iso: string) => { const d = fromISO(iso); return toISO(new Date(d.getFullYear(), d.getMonth(), 1)); };
 export const monthEnd = (iso: string) => { const d = fromISO(iso); return toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)); };
@@ -143,4 +145,47 @@ export function useSavings(anchor: string) {
       avgSaved: round2((pInc - pExp) / 3), avgIncome: round2(pInc / 3),
     };
   }, [txs, me, anchor]);
+}
+
+// ---------------------------------------------------------------- work
+
+export interface WorkMonth { shifts: number; hours: number; sales: number; earned: number; tips: number }
+export interface WorkRow { job: Job; now: WorkMonth; avg: WorkMonth | null; perHourNow: number | null; perHourAvg: number | null }
+
+/** This month vs the average of the previous 3 months that have logged shifts. */
+export function useWorkStats(anchor: string): WorkRow[] {
+  const jobs = useStore(s => s.jobs);
+  const shifts = useStore(s => s.shifts);
+  const txs = useStore(s => s.transactions);
+  const me = useStore(s => s.user?.id ?? '');
+  return useMemo(() => {
+    const today = todayISO();
+    const months = [addMonths(monthStart(anchor), -3), addMonths(monthStart(anchor), -2), addMonths(monthStart(anchor), -1), monthStart(anchor)];
+    const live = alive(jobs).filter(j => !j.archived).sort((a, b) => a.sort - b.sort);
+    return live.map(job => {
+      const per = months.map(m => {
+        const e = monthEnd(m);
+        const w: WorkMonth = { shifts: 0, hours: 0, sales: 0, earned: 0, tips: 0 };
+        for (const s of alive(shifts)) {
+          if (s.job_id !== job.id || s.date < m || s.date > e || s.date > today) continue;
+          w.shifts++; w.hours += s.hours; w.sales += s.sales; w.earned += shiftPay(job, s);
+          const t = s.tips_tx_id ? txs[s.tips_tx_id] : null;
+          if (t && !t.deleted_at && t.owner_id === me) w.tips += t.amount;
+        }
+        w.hours = round2(w.hours); w.earned = round2(w.earned); w.tips = round2(w.tips);
+        return w;
+      });
+      const now = per[3];
+      const tracked = per.slice(0, 3).filter(w => w.shifts > 0);
+      const avg = tracked.length ? {
+        shifts: round2(tracked.reduce((x, w) => x + w.shifts, 0) / tracked.length),
+        hours: round2(tracked.reduce((x, w) => x + w.hours, 0) / tracked.length),
+        sales: round2(tracked.reduce((x, w) => x + w.sales, 0) / tracked.length),
+        earned: round2(tracked.reduce((x, w) => x + w.earned, 0) / tracked.length),
+        tips: round2(tracked.reduce((x, w) => x + w.tips, 0) / tracked.length),
+      } : null;
+      const ph = (w: WorkMonth | null) => (w && w.hours > 0 ? round2((w.earned + w.tips) / w.hours) : null);
+      return { job, now, avg, perHourNow: ph(now), perHourAvg: ph(avg) };
+    });
+  }, [jobs, shifts, txs, me, anchor]);
 }

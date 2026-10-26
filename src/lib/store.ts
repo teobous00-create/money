@@ -2,7 +2,7 @@ import { useSyncExternalStore, useRef } from 'react';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, REMOTE } from './supabase';
-import type { Account, Category, Member, Person, Prefs, Profile, Recurring, Table, TableRow, Tx } from './types';
+import type { Account, Category, Job, Member, Payout, Person, Pnl, Prefs, Profile, Recurring, Shift, Strategy, Table, TableRow, Tx } from './types';
 import { addDays, todayISO, fromISO, toISO, uuid } from './format';
 import type { Period } from './period';
 
@@ -15,6 +15,11 @@ export interface State {
   categories: Rec<Category>;
   transactions: Rec<Tx>;
   recurring: Rec<Recurring>;
+  jobs: Rec<Job>;
+  shifts: Rec<Shift>;
+  payouts: Rec<Payout>;
+  strategies: Rec<Strategy>;
+  pnl: Rec<Pnl>;
   profiles: Rec<Profile>;
   members: Member[]; // shared category memberships visible to me
   pending: number;
@@ -33,11 +38,14 @@ interface Op { table: Table; row: Record<string, unknown> }
 let state: State = {
   phase: 'loading',
   user: null,
-  accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [],
+  accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], ...emptyTracker(),
   pending: 0, failed: 0, syncing: false, online: navigator.onLine, lastSync: null, prefs: {},
   period: { mode: 'month', anchor: todayISO() },
   accountFilter: null,
 };
+
+function emptyTracker() { return { jobs: {}, shifts: {}, payouts: {}, strategies: {}, pnl: {} }; }
+const TRACKER: Table[] = ['jobs', 'shifts', 'payouts', 'strategies', 'pnl'];
 
 const listeners = new Set<() => void>();
 export const getState = () => state;
@@ -69,8 +77,8 @@ function scheduleSave() {
 }
 async function saveNow() {
   if (!state.user) return;
-  const { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs } = state;
-  await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending });
+  const { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, jobs, shifts, payouts, strategies, pnl } = state;
+  await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending, jobs, shifts, payouts, strategies, pnl });
   await idbSet(queueKey(), { queue, failedOps });
 }
 
@@ -96,9 +104,10 @@ async function loadCache() {
       accounts: c.accounts ?? {}, categories: c.categories ?? {}, transactions: c.transactions ?? {},
       recurring: c.recurring ?? {}, profiles: c.profiles ?? {}, members: c.members ?? [], lastSync: c.lastSync ?? null,
       prefs: c.prefs ?? (REMOTE ? {} : { analytics: true }),
+      jobs: c.jobs ?? {}, shifts: c.shifts ?? {}, payouts: c.payouts ?? {}, strategies: c.strategies ?? {}, pnl: c.pnl ?? {},
     });
   } else {
-    setState({ accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: REMOTE ? {} : { analytics: true } });
+    setState({ accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: REMOTE ? {} : { analytics: true }, ...emptyTracker() });
   }
   prefsPending = !!c?.prefsPending;
   setState({ pending: queue.length, failed: failedOps.length });
@@ -130,7 +139,7 @@ async function onSession(session: Session | null) {
   if (!session) {
     queue = []; failedOps = [];
     prefsPending = false;
-    setState({ user: null, phase: 'auth', accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: {} });
+    setState({ user: null, phase: 'auth', accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: {}, ...emptyTracker() });
     return;
   }
   setState({ user: { id: session.user.id, email: session.user.email ?? null } });
@@ -218,13 +227,18 @@ const COLS: Record<Table, string[]> = {
   categories: ['id', 'owner_id', 'type', 'name', 'parent_id', 'icon', 'color', 'sort', 'archived', 'deleted_at'],
   transactions: ['id', 'owner_id', 'type', 'date', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'recurring_id', 'seq', 'deleted_at'],
   recurring: ['id', 'owner_id', 'type', 'amount', 'account_id', 'to_account_id', 'category_id', 'note', 'freq', 'anchor_day', 'next_date', 'active', 'end_date', 'skip_dates', 'deleted_at'],
+  jobs: ['id', 'owner_id', 'name', 'kind', 'pay', 'rates', 'color', 'salary_category_id', 'tips_category_id', 'tips_account_id', 'sort', 'archived', 'deleted_at'],
+  shifts: ['id', 'owner_id', 'job_id', 'date', 'hours', 'sales', 'tips_tx_id', 'deleted_at'],
+  payouts: ['id', 'owner_id', 'job_id', 'period_start', 'period_end', 'amount', 'tx_id', 'date', 'deleted_at'],
+  strategies: ['id', 'owner_id', 'name', 'color', 'goal', 'sort', 'archived', 'deleted_at'],
+  pnl: ['id', 'owner_id', 'strategy_id', 'date', 'pnl', 'deleted_at'],
 };
 function toDb(table: Table, row: object): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' ? [] : null);
+  for (const c of COLS[table]) out[c] = (row as Record<string, unknown>)[c] ?? (c === 'skip_dates' || c === 'rates' ? [] : null);
   return out;
 }
-const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount'];
+const NUMERIC = ['opening_balance', 'credit_limit', 'goal', 'amount', 'hours', 'sales', 'pnl'];
 function fromDb<T>(row: Record<string, unknown>): T {
   for (const k of NUMERIC) if (row[k] != null) row[k] = Number(row[k]);
   return row as T;
@@ -245,7 +259,7 @@ async function flush(): Promise<void> {
   if (flushing) return flushing;
   flushing = (async () => {
     try {
-      const order: Table[] = ['accounts', 'categories', 'transactions', 'recurring'];
+      const order: Table[] = ['accounts', 'categories', 'transactions', 'recurring', 'jobs', 'shifts', 'payouts', 'strategies', 'pnl'];
       while (queue.length && navigator.onLine) {
         const snapshot = queue.slice();
         // coalesce: last write per (table,id) wins
@@ -351,7 +365,12 @@ async function pull() {
   };
   const profiles: Rec<Profile> = {};
   for (const p of (prof.data ?? []) as Profile[]) profiles[p.id] = p;
+  // personal tracker tables (they may not exist yet if the latest database script wasn't run)
+  const extra = await Promise.all(TRACKER.map(t => fetchAll(t, since).catch(() => null)));
+  const trackerPatch: Partial<State> = {};
+  TRACKER.forEach((t, i) => { const rows = extra[i]; if (rows) (trackerPatch as Record<string, unknown>)[t] = merge(t, state[t] as Rec<{ id: string }>, rows); });
   setState({
+    ...trackerPatch,
     accounts: merge('accounts', state.accounts, acc),
     categories: merge('categories', state.categories, cat),
     transactions: merge('transactions', state.transactions, tx),

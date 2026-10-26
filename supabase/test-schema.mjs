@@ -122,5 +122,19 @@ await as(GF, async () => {
   ok((await q(`select count(*)::int c from user_prefs`)).rows[0].c === 1, 'Eva can save her own settings');
 });
 
+const J = await as(TEO, async () => {
+  const j = (await q(`insert into jobs (name,kind,pay,rates) values ('Evening','hourly','semimonthly','[{"from":"2026-01-01","hour":6}]') returning id`)).rows[0].id;
+  await q(`insert into shifts (id,job_id,date,hours) values ($1,$2,'2026-10-20',6)`, [j + ':2026-10-20', j]);
+  const s = (await q(`insert into strategies (name,goal) values ('DDG',50) returning id`)).rows[0].id;
+  await q(`insert into pnl (id,strategy_id,date,pnl) values ($1,$2,'2026-10-21',12.58)`, [s + ':2026-10-21', s]);
+  ok((await q(`select count(*)::int c from shifts`)).rows[0].c === 1 && (await q(`select pnl from pnl`)).rows[0].pnl == 12.58, 'Teo saves shifts and trading results');
+  return { j, s };
+});
+await as(GF, async () => {
+  const counts = await Promise.all(['jobs', 'shifts', 'payouts', 'strategies', 'pnl'].map(t => q(`select count(*)::int c from ${t}`).then(r => r.rows[0].c)));
+  ok(counts.every(c => c === 0), 'Eva sees none of Teo\'s work or trading data');
+  ok(await fails(() => q(`insert into shifts (id,owner_id,job_id,date,hours) values ('x',$1,$2,'2026-10-21',3)`, [TEO, J.j])), 'Eva cannot write into Teo\'s tracker');
+});
+
 const rn = (await q(`select recurring_next('2026-01-31','monthly',31)::text a, recurring_next('2026-02-28','monthly',31)::text b`)).rows[0];
 ok(rn.a === '2026-02-28' && rn.b === '2026-03-31', 'month-end anchoring');

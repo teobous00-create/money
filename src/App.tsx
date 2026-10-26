@@ -1,6 +1,6 @@
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
 import { useUi, setUi, type UiState } from './lib/ui';
 import { useHeaderTotalBase, usePlanned } from './lib/calc';
@@ -14,6 +14,7 @@ import { AccountsScreen } from './screens/Accounts';
 import { CategoriesScreen } from './screens/Categories';
 import { TransactionsScreen } from './screens/Transactions';
 import { OverviewScreen } from './screens/Overview';
+import { TrackerScreen } from './screens/Tracker';
 import { AddTransactionSheet } from './sheets/AddTransaction';
 import { AccountSheet } from './sheets/AccountEdit';
 import { CategorySheet } from './sheets/CategoryEdit';
@@ -43,7 +44,7 @@ function Shell() {
     <div className="app">
       <TopBar />
       <AnimatePresence initial={false}>
-        {tab !== 'accounts' && (
+        {tab !== 'accounts' && tab !== 'tracker' && (
           <motion.div key="pb" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.28, ease }} style={{ overflow: 'hidden', flex: 'none' }}>
             <PeriodBar />
@@ -63,6 +64,7 @@ function Shell() {
             {tab === 'categories' && <Swipe><CategoriesScreen /></Swipe>}
             {tab === 'transactions' && <Swipe><TransactionsScreen /></Swipe>}
             {tab === 'overview' && <Swipe><OverviewScreen /></Swipe>}
+            {tab === 'tracker' && <TrackerScreen />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -101,6 +103,7 @@ function TopBar() {
     categories: <button className="iconbtn" aria-label="New category" onClick={() => setUi({ category: {} })}><Pencil size={20} /></button>,
     transactions: <button className="iconbtn" aria-label="Search" onClick={() => setUi({ search: true })}><Search size={22} /></button>,
     overview: <span />,
+    tracker: <span />,
   };
   return (
     <div className="topbar">
@@ -186,12 +189,15 @@ function Swipe({ children }: { children: ReactNode }) {
 
 function BottomNav() {
   const tab = useUi(u => u.tab);
+  const tracker = useStore(s => !!s.prefs.analytics);
   const items: Array<[UiState['tab'], string, typeof Wallet]> = [
     ['accounts', 'Accounts', Wallet], ['categories', 'Categories', Shapes],
     ['transactions', 'Transactions', ReceiptText], ['overview', 'Overview', ChartColumn],
   ];
+  if (tracker) items.push(['tracker', 'Tracker', CalendarCheck]);
+  useEffect(() => { if (!tracker && tab === 'tracker') setUi({ tab: 'categories' }); }, [tracker, tab]);
   return (
-    <nav className="nav">
+    <nav className={`nav ${tracker ? 'five' : ''}`}>
       {items.map(([id, text, I]) => (
         <motion.button key={id} className={`nav-item ${tab === id ? 'on' : ''}`} whileTap={{ scale: 0.94 }} onClick={() => setUi({ tab: id })}>
           {tab === id && <motion.div layoutId="navind" className="nav-ind" transition={softSpring} />}

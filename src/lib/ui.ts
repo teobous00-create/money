@@ -10,7 +10,7 @@ export interface AddTxArgs {
 }
 
 export interface UiState {
-  tab: 'accounts' | 'categories' | 'transactions' | 'overview';
+  tab: 'accounts' | 'categories' | 'transactions' | 'overview' | 'tracker';
   tabDir: number;
   addTx: AddTxArgs | null;
   account: { id?: string } | null;
@@ -25,7 +25,7 @@ export interface UiState {
   hidden: boolean;
 }
 
-const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview'];
+const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview', 'tracker'];
 
 let ui: UiState = {
   tab: 'categories', tabDir: 0, addTx: null, account: null, category: null, catDetail: null,

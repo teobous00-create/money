@@ -76,12 +76,65 @@ export interface Person extends Profile {
   is_owner: boolean;
 }
 
-export type Table = 'accounts' | 'categories' | 'transactions' | 'recurring';
+// ---------- personal tracker (work + trading), private to the owner ----------
+
+export interface JobRate { from: string; day?: number; bonus?: number; hour?: number }
+
+export interface Job extends Row {
+  name: string;
+  kind: 'daily' | 'hourly';           // daily: day rate + bonus per sale · hourly: hourly rate (+ tips)
+  pay: 'monthly' | 'semimonthly';     // semimonthly: 1–15 and 16–end
+  rates: JobRate[];
+  color: string;
+  salary_category_id: string | null;  // where pay-outs are recorded as income
+  tips_category_id: string | null;
+  tips_account_id: string | null;
+  sort: number;
+  archived: boolean;
+}
+
+export interface Shift extends Row {    // id = `${job_id}:${date}`
+  job_id: string;
+  date: string;
+  hours: number;
+  sales: number;
+  tips_tx_id: string | null;
+}
+
+export interface Payout extends Row {   // id = `${job_id}:${period_start}`
+  job_id: string;
+  period_start: string;
+  period_end: string;
+  amount: number;
+  tx_id: string | null;
+  date: string;
+}
+
+export interface Strategy extends Row {
+  name: string;
+  color: string;
+  goal: number | null;                // monthly goal
+  sort: number;
+  archived: boolean;
+}
+
+export interface Pnl extends Row {      // id = `${strategy_id}:${date}`
+  strategy_id: string;
+  date: string;
+  pnl: number;
+}
+
+export type Table = 'accounts' | 'categories' | 'transactions' | 'recurring' | 'jobs' | 'shifts' | 'payouts' | 'strategies' | 'pnl';
 export interface TableRow {
   accounts: Account;
   categories: Category;
   transactions: Tx;
   recurring: Recurring;
+  jobs: Job;
+  shifts: Shift;
+  payouts: Payout;
+  strategies: Strategy;
+  pnl: Pnl;
 }
 
 /** Personal settings, private to each user. */

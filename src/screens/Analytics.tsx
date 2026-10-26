@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, Coins, PiggyBank, Shapes, Settings2, Check } from 'lucide-react';
+import { ChevronDown, Coins, PiggyBank, Shapes, Settings2, Check, Briefcase } from 'lucide-react';
 import { useStore, setPrefs } from '../lib/store';
-import { useTips, useCategoryCompare, useSavings, prev3, tipsCategoryIds, type CatCompare } from '../lib/insights';
+import { useTips, useCategoryCompare, useSavings, useWorkStats, prev3, tipsCategoryIds, type CatCompare } from '../lib/insights';
 import { catStyle } from '../lib/calc';
 import { IconBox, Sheet, ease, softSpring } from '../components/ui';
 import { fromISO, money, num } from '../lib/format';
@@ -20,6 +20,7 @@ export function AnalyticsView() {
     <div>
       <div className="small muted" style={{ margin: '0 4px 10px' }}>{month} compared with the 3 months before ({range})</div>
       <TipsCard anchor={anchor} month={month} />
+      <WorkCard anchor={anchor} month={month} />
       <SavingsCard anchor={anchor} month={month} />
       <CompareCard anchor={anchor} month={month} />
     </div>
@@ -171,5 +172,46 @@ function CompareRow({ r, sub = false, onClick, expanded }: { r: CatCompare; sub?
       <span className={`num ${sub ? 'small' : ''}`} style={{ width: 92, textAlign: 'right', fontWeight: 650, whiteSpace: 'nowrap', color: higher ? 'var(--expense)' : undefined }}>{money(r.now)}</span>
       <span className={`num muted ${sub ? 'small' : ''}`} style={{ width: 84, textAlign: 'right', whiteSpace: 'nowrap' }}>{money(r.avg)}</span>
     </button>
+  );
+}
+
+function WorkCard({ anchor, month }: { anchor: string; month: string }) {
+  const rows = useWorkStats(anchor).filter(r => r.now.shifts > 0 || r.avg);
+  if (!rows.length) return null;
+  const m3 = month.slice(0, 3);
+  return (
+    <motion.div className="card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease, delay: 0.03 }}>
+      <CardHead icon={<Briefcase size={20} />} title="Work" />
+      {rows.map((r, i) => {
+        const lines: Array<[string, string, string]> = r.job.kind === 'hourly'
+          ? [
+            ['Hours', r.avg ? `${num(r.avg.hours)}h` : '—', `${num(r.now.hours)}h`],
+            ['Pay', r.avg ? money(r.avg.earned) : '—', money(r.now.earned)],
+            ['Per hour with tips', r.perHourAvg != null ? money(r.perHourAvg) : '—', r.perHourNow != null ? money(r.perHourNow) : '—'],
+          ]
+          : [
+            ['Days', r.avg ? num(r.avg.shifts) : '—', num(r.now.shifts)],
+            ['Sales', r.avg ? num(r.avg.sales) : '—', num(r.now.sales)],
+            ['Pay', r.avg ? money(r.avg.earned) : '—', money(r.now.earned)],
+          ];
+        return (
+          <div key={r.job.id} style={{ marginTop: i ? 14 : 0 }}>
+            <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+              <span className="dot" style={{ background: r.job.color }} /><span className="grow bold small">{r.job.name}</span>
+              <span className="tiny muted" style={{ width: 84, textAlign: 'right', fontWeight: 600 }}>3-mo avg</span>
+              <span className="tiny muted" style={{ width: 84, textAlign: 'right', fontWeight: 600 }}>{m3}</span>
+            </div>
+            {lines.map(([l, a, n]) => (
+              <div key={l} className="row small" style={{ padding: '3px 0' }}>
+                <span className="grow muted">{l}</span>
+                <span className="num" style={{ width: 84, textAlign: 'right' }}>{a}</span>
+                <span className="num bold" style={{ width: 84, textAlign: 'right' }}>{n}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+      <div className="tiny faint" style={{ marginTop: 10 }}>The average uses only months where you logged shifts.</div>
+    </motion.div>
   );
 }
