@@ -336,7 +336,6 @@ function PayoutSheet({ job, onClose }: { job: Job | null; onClose: () => void })
 
 function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
   const { list } = usePayPeriods(job);
-  const payouts = useStore(s => s.payouts);
   const me = useStore(s => s.user?.id);
   const accounts = useAccounts().filter(a => a.owner_id === me && !a.archived);
   const split = job.kind === 'daily' && !!job.bonus_category_id;   // salary and bonus go to different categories
@@ -362,8 +361,8 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
     const amt = amount.trim() ? parseNum(amount) : 0;
     const bon = split && bonus.trim() ? parseNum(bonus) : 0;
     if (amt <= 0 && bon <= 0) return toast('Enter the amount you got');
-    const id = payoutId(job.id, pick.start);
-    const prev = payouts[id] && !payouts[id].deleted_at ? payouts[id] : null;
+    // one row per payment, each linked to its own income entries (delete the entry → it's owed again)
+    const id = `${payoutId(job.id, pick.start)}:${uuid().slice(0, 8)}`;
     let txId: string | null = null, bonusTx: string | null = null;
     if (account) {
       if (amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '');
@@ -372,8 +371,8 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
     }
     put('payouts', {
       id, owner_id: '', job_id: job.id, period_start: pick.start, period_end: pick.end,
-      amount: round2((prev?.amount ?? 0) + amt), bonus: round2((prev?.bonus ?? 0) + bon),
-      tx_id: txId ?? prev?.tx_id ?? null, bonus_tx_id: bonusTx ?? prev?.bonus_tx_id ?? null, date,
+      amount: round2(amt), bonus: round2(bon),
+      tx_id: txId, bonus_tx_id: bonusTx, date,
     });
     haptic(12);
     toast(txId || bonusTx ? `${money(round2(amt + bon))} added to your income` : 'Payment saved');

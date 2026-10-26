@@ -56,7 +56,14 @@ export function useJobShifts(jobId?: string) {
 export function usePayPeriods(job: Job) {
   const shifts = useJobShifts(job.id);
   const payouts = useStore(s => s.payouts);
+  const txs = useStore(s => s.transactions);
   return useMemo(() => {
+    // a payment linked to an income entry counts what that entry says now — deleted entry = not paid
+    const part = (txId: string | null, stored: number) => {
+      if (!txId) return stored;
+      const t = txs[txId];
+      return t && !t.deleted_at ? t.amount : 0;
+    };
     const map = new Map<string, PayPeriod>();
     const today = todayISO();
     const [cs, ce] = periodOf(job, today);
@@ -80,8 +87,8 @@ export function usePayPeriods(job: Job) {
     for (const po of alive(payouts)) {
       if (po.job_id !== job.id) continue;
       const p = get(po.period_start, po.period_end);
-      p.paidBase += po.amount;
-      p.paidBonus += po.bonus ?? 0;
+      p.paidBase += part(po.tx_id, po.amount);
+      p.paidBonus += part(po.bonus_tx_id, po.bonus ?? 0);
       if (po.settled) settled.add(po.period_start);
     }
     for (const st of settled) { const p = map.get(st); if (p) { p.paidBase = Math.max(p.paidBase, p.base); p.paidBonus = Math.max(p.paidBonus, p.bonus); } }
@@ -94,7 +101,7 @@ export function usePayPeriods(job: Job) {
     const owedBase = round2(list.reduce((s, p) => s + p.base - p.paidBase, 0));
     const owedBonus = round2(list.reduce((s, p) => s + p.bonus - p.paidBonus, 0));
     return { list, owed, owedBase, owedBonus, current: list.find(p => p.current)! };
-  }, [job, shifts, payouts]);
+  }, [job, shifts, payouts, txs]);
 }
 
 // ================================================================ trading

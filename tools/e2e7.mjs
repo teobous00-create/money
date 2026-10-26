@@ -72,6 +72,14 @@ const tx = await p.locator('.screen').last().innerText();
 ok(/Tips/.test(tx) && /\+12/.test(tx), 'tips 12 € added to income automatically');
 ok(/Cake & Roll/.test(tx) && /\+66/.test(tx), 'salary 66 € added in Cake & Roll');
 ok(/PDA Salary/.test(tx) && /\+40/.test(tx) && /Επιδόματα/.test(tx) && /\+6/.test(tx), 'morning: 40 € in PDA Salary and 6 € bonus in its own category');
+// deleting the salary entry makes it owed again
+await p.locator('.screen').last().locator('.list-row', { hasText: 'Cake & Roll' }).filter({ hasText: '66' }).first().click(); await p.waitForTimeout(800);
+await top().locator('[aria-label=Delete]').first().click(); await p.waitForTimeout(900);
+await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(900);
+ok((await p.locator('.card', { hasText: 'Evening' }).innerText()).includes('66 €'), 'deleted salary entry → evening owed 66 € again');
+await p.locator('.card', { hasText: 'Evening' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+await top().getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
+{ const t = await p.locator('.card', { hasText: 'Evening' }).innerText(); ok(/Owed to you\s*0 €/.test(t), 'paid again → 0 owed'); }
 
 // ---------------- trading
 await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(800);
