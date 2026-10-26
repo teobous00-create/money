@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Delete, Repeat, Trash2, Users } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Delete, Repeat, Star, Trash2, Users } from 'lucide-react';
 import { Sheet, DragZone, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
 import { useUi, setUi, type AddTxArgs } from '../lib/ui';
 import { useStore, put, putMany, remove, restore, getState, nextOccurrence } from '../lib/store';
@@ -10,6 +10,7 @@ import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
 import { QuickEntry, useVoiceHandler } from '../components/QuickEntry';
 import { unmarkVoice } from '../lib/voiceRun';
+import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
 import { learn, type Parsed } from '../lib/quickparse';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
@@ -46,6 +47,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const accRec = useStore(s => s.accounts);
   const accounts = useAccounts();
   const cats = useCategories();
+  const favs = useFavorites();
   const virt = args.editId ? parseVirtualId(args.editId) : null;
   const virtRule = virt ? recRec[virt.ruleId] : undefined;
   const editing: Tx | null = args.editId ? (virt ? (virtRule ? ruleToTx(virtRule, virt.date) : null) : txRec[args.editId] ?? null) : null;
@@ -289,6 +291,15 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     setPicking(false);
   };
 
+  // ☆ keeps these values as a one-tap favorite on Transactions
+  const shape = { type, amount, account_id: accountId ?? '', to_account_id: type === 'transfer' ? toAccountId : null, category_id: type === 'transfer' ? null : categoryId, note: note.trim() || null };
+  const fav = amount > 0 && favs.some(f => findFavorite(shape)?.id === f.id);
+  const star = () => {
+    if (!validate()) return;
+    haptic(8);
+    toast(toggleFavorite(shape) ? 'Added to favorites · tap it on Transactions' : 'Removed from favorites');
+  };
+
   const shown = expr ? expr.replace(/-/g, '−').replace(/\*/g, '×').replace(/\//g, '÷') : '0';
   const fontSize = Math.max(28, 52 - Math.max(0, shown.length - 6) * 3.4);
 
@@ -364,9 +375,14 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
               <input ref={dateRef} type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)}
                 style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
             </button>
+            <button className="iconbtn" style={{ width: 40, height: 34, color: fav ? 'var(--warn)' : 'var(--ink-3)' }} onClick={star} aria-label={fav ? 'Remove from favorites' : 'Add to favorites'}>
+              <motion.span key={String(fav)} initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 500, damping: 18 }} style={{ display: 'grid' }}>
+                <Star size={21} fill={fav ? 'currentColor' : 'none'} />
+              </motion.span>
+            </button>
             {editing
               ? <button className="iconbtn" style={{ color: 'var(--expense)', width: 40, height: 34 }} onClick={del} aria-label="Delete"><Trash2 size={20} /></button>
-              : <span style={{ width: 92 }} />}
+              : <span style={{ width: 52 }} />}
           </div>
 
           <Sheet open={!!askScope} onClose={() => setAskScope(null)} title={askScope === 'delete' ? 'Delete which ones?' : 'Change which ones?'} z={1}>

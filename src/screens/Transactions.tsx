@@ -3,6 +3,7 @@ import { AnimatePresence, motion, type PanInfo } from 'motion/react';
 import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic } from 'lucide-react';
 import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
 import { useVoiceMarks } from '../lib/voiceRun';
+import { FavoritesBar } from '../components/Favorites';
 import { useStore, remove, restore } from '../lib/store';
 import { setUi, useUi } from '../lib/ui';
 import { range } from '../lib/period';
@@ -80,6 +81,7 @@ export function TransactionsScreen() {
         )}
       </AnimatePresence>
       {!search && <RecurringBanner />}
+      {!search && <FavoritesBar />}
       {groups.length === 0 && (
         <div className="empty">
           <IconBox icon="receipt" color="#64748B" size="lg" />

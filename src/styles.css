@@ -335,3 +335,12 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .voice-pill { position: fixed; z-index: 70; left: 16px; right: 16px; top: calc(var(--safe-t) + 76px); display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); font-weight: 600; font-size: 16px; color: var(--ink); }
 .voice-dot { width: 10px; height: 10px; border-radius: 99px; background: var(--expense); flex: none; animation: vdot 1s ease-in-out infinite; }
 @keyframes vdot { 50% { opacity: .35; transform: scale(.8); } }
+
+/* favorites */
+.favs { overflow: hidden; margin: 0 -16px; }
+.favs-row { display: flex; gap: 8px; overflow-x: auto; padding: 2px 16px 14px; scrollbar-width: none; }
+.favs-row::-webkit-scrollbar { display: none; }
+.fav { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px 0 6px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); font-weight: 600; font-size: 14px; color: var(--ink); }
+.fav-ico { width: 32px; height: 32px; border-radius: 99px; display: grid; place-items: center; background: var(--c); color: #fff; }
+.fav-name { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fav-amt { color: var(--c); }

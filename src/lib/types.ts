@@ -148,4 +148,15 @@ export interface Prefs {
   analytics?: boolean;
   budgets?: Record<string, number>; // category id → monthly limit
   tipsCats?: string[];              // category ids counted as tips (empty/undefined = automatic)
+  favorites?: Favorite[];           // one-tap entries on Transactions
+}
+
+export interface Favorite {
+  id: string;
+  type: TxType;
+  amount: number;
+  account_id: string;
+  to_account_id: string | null;
+  category_id: string | null;
+  note: string | null;
 }
