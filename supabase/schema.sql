@@ -439,6 +439,12 @@ create table if not exists public.pnl (
   deleted_at timestamptz
 );
 
+alter table public.jobs enable row level security;
+alter table public.shifts enable row level security;
+alter table public.payouts enable row level security;
+alter table public.strategies enable row level security;
+alter table public.pnl enable row level security;
+
 create index if not exists shifts_owner on public.shifts (owner_id, updated_at);
 create index if not exists pnl_owner on public.pnl (owner_id, updated_at);
 
