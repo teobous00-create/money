@@ -8,7 +8,8 @@ import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
-import { QuickEntry } from '../components/QuickEntry';
+import { QuickEntry, useVoiceHandler } from '../components/QuickEntry';
+import { unmarkVoice } from '../lib/voiceRun';
 import { learn, type Parsed } from '../lib/quickparse';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
@@ -76,7 +77,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const parsed = useRef<{ words: string[]; categoryId: string | null } | null>(null);
 
   /** Fill the form from a typed/spoken phrase; go straight to the amount screen when the category is known. */
-  const applyParsed = (p: Parsed) => {
+  const applyParsed = (p: Parsed, rep: Freq | null = null, untilDate: string | null = null) => {
+    if (rep) { setRepeat(rep); setUntil(untilDate); }
     const t = p.type ?? type;
     setType(t);
     if (p.amount !== null) setExpr(num(p.amount).replace(/\./g, ''));
@@ -93,6 +95,9 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     }
     parsed.current = { words: p.words, categoryId: p.categoryId };
   };
+  const onVoice = useVoiceHandler(c => applyParsed(c.p, c.repeat, c.until), () => close());
+  // opened from elsewhere with a phrase that still needs you
+  useEffect(() => { if (args.prefill) applyParsed(args.prefill.p, args.prefill.repeat, args.prefill.until); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parent = categoryId ? (catRec[categoryId]?.parent_id ?? categoryId) : null;
   // a chosen subcategory far right in the chip row scrolls into view
@@ -154,6 +159,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     try { localStorage.setItem('money:lastacc:' + type, accountId!); } catch { /* ignore */ }
     // you corrected the category the phrase gave → remember those words for next time
     if (parsed.current && type !== 'transfer' && categoryId && parsed.current.categoryId !== categoryId) learn(parsed.current.words, categoryId);
+    if (editing) unmarkVoice(editing.id);   // checked: the 🎤 mark goes away
     haptic(12);
     toast(msg);
     close();
@@ -292,7 +298,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
         <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
           initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
           <Picker type={type} onType={setType} onPick={onPick} exclude={accountId}
-            quick={!editing ? <QuickEntry onParsed={applyParsed} autoListen={!!args.voice} /> : null} />
+            quick={!editing ? <QuickEntry onText={onVoice} autoListen={!!args.voice} /> : null} />
         </motion.div>
       ) : (
         <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}

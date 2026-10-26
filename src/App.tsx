@@ -46,7 +46,7 @@ function useShortcut() {
     history.replaceState(null, '', location.pathname);
     if (a === 'voice') setUi({ addTx: { voice: true } });
     else if (a === 'expense') setUi({ addTx: { type: 'expense' } });
-    else if (a === 'shift' && analytics) setUi({ tab: 'tracker', shiftToday: true });
+    else if (a === 'shift' && analytics) setUi({ tab: 'tracker', shiftDay: todayISO() });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 }
 

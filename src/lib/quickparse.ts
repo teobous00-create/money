@@ -26,7 +26,7 @@ export interface ParseCtx {
 
 /** lower case, no accents, no punctuation around */
 export const norm = (s: string) => s.toLocaleLowerCase('el').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ς/g, 'σ');
-const clean = (s: string) => norm(s).replace(/[^\p{L}\p{N}.,/+-]/gu, '');
+export const clean = (s: string) => norm(s).replace(/[^\p{L}\p{N}.,/+-]/gu, '');
 
 const STOP = new Set(['το', 'τα', 'τον', 'την', 'τη', 'της', 'του', 'των', 'ο', 'η', 'οι', 'ενα', 'μια', 'για', 'σε', 'στο', 'στη', 'στην', 'στα', 'στον', 'στις', 'στουσ',
   'απο', 'απ', 'και', 'με', 'μεσω', 'ευρω', 'ευρο', 'euro', 'euros', 'eur', '€', 'λεπτα', 'σημερα', 'the', 'for', 'on', 'from', 'to', 'at', 'in', 'a']);
@@ -37,13 +37,13 @@ const EXPENSE = ['εδωσα', 'πληρωσα', 'ξοδεψα', 'αγορασα
 const TRANSFER = ['μεταφορα', 'μεταφερα', 'μετεφερα', 'transfer', 'αναληψη', 'καταθεση'];
 const FILLER = ['πηρα', 'got', 'paid', 'πληρωμη'];
 
-const NUMWORDS: Record<string, number> = {
+export const NUMWORDS: Record<string, number> = {
   μηδεν: 0, δυο: 2, τρια: 3, τρεισ: 3, τεσσερα: 4, τεσσερισ: 4, πεντε: 5, εξι: 6, επτα: 7, εφτα: 7, οκτω: 8, οχτω: 8,
   εννια: 9, εννεα: 9, δεκα: 10, εντεκα: 11, δωδεκα: 12, δεκατρια: 13, δεκατεσσερα: 14, δεκαπεντε: 15, δεκαεξι: 16, δεκαεπτα: 17, δεκαεφτα: 17,
   δεκαοκτω: 18, δεκαοχτω: 18, δεκαεννια: 19, δεκαεννεα: 19, εικοσι: 20, τριαντα: 30, σαραντα: 40, πενηντα: 50, εξηντα: 60, εβδομηντα: 70,
-  ογδοντα: 80, ενενηντα: 90, εκατο: 100, εκατον: 100, διακοσια: 200, τριακοσια: 300, τετρακοσια: 400, πεντακοσια: 500, χιλια: 1000, μισο: 0.5,
+  ογδοντα: 80, ενενηντα: 90, εκατο: 100, εκατον: 100, διακοσια: 200, τριακοσια: 300, τετρακοσια: 400, πεντακοσια: 500, χιλια: 1000, μισο: 0.5, μιση: 0.5,
 };
-const MONTHS: Array<[string[], number]> = [
+export const MONTHS: Array<[string[], number]> = [
   [['ιαν', 'jan'], 0], [['φεβ', 'feb'], 1], [['μαρ', 'mar'], 2], [['απρ', 'apr'], 3], [['μαι', 'may'], 4], [['ιουν', 'jun'], 5],
   [['ιουλ', 'jul'], 6], [['αυγ', 'aug'], 7], [['σεπ', 'sep'], 8], [['οκτ', 'oct'], 9], [['νοε', 'nov'], 10], [['δεκ', 'dec'], 11],
 ];
@@ -68,7 +68,7 @@ export function sameWord(a: string, b: string) {
 
 interface Tok { raw: string; n: string; used: boolean }
 
-function parseNumber(t: string): number | null {
+export function parseNumber(t: string): number | null {
   const s = t.replace(/€|ευρω|eur/g, '');
   if (!/^\d+([.,]\d+)*$/.test(s)) return null;
   // 1.200 / 1.200,50 → thousands; 3.5 / 3,5 → decimals
@@ -211,7 +211,7 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   }
   if (!cat) {
     const scored: Array<{ c: Category; score: number; use: number; at: number }> = [];
-    // a word that is also one of your account names counts for the account, unless nothing else matches
+    // a word that is also one of your account names counts for the account
     const accountish = (n: string) => ctx.accounts.some(a => accTokens(a).some(w => sameWord(n, w)));
     for (const c of ctx.categories) {
       if (!fits(c)) continue;
@@ -222,7 +222,7 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
       const parent = c.parent_id ? byId.get(c.parent_id) : null;
       let score = matched.join('').length + (matched.length === words.length ? 10 : 0);    // "delivery" still finds "Delivery καφές"
       if (parent && catWords(parent).some(w => toks.some(t => !t.used && sameWord(t.n, w)))) score += 40;   // "σπίτι delivery" → that subcategory
-      if (matched.every((_, k) => accountish(toks[hits.filter(h => h >= 0)[k]].n))) score -= 100;
+      if (matched.every((_, k) => accountish(toks[hits.filter(h => h >= 0)[k]].n))) continue;   // "revolut" is the account, not Εφαρμογές › Revolut
       scored.push({ c, score, use: ctx.usage.get(c.id) ?? 0, at: Math.min(...hits.filter(h => h >= 0)) });
     }
     scored.sort((a, b) => b.score - a.score || b.use - a.use || Number(!!b.c.parent_id) - Number(!!a.c.parent_id));

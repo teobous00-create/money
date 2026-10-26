@@ -4,6 +4,7 @@ const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceSc
 // fake speech recognition: "says" whatever window.__say holds
 await ctx.addInitScript(() => {
   window.__say = 'delivery 12 ευρώ και 50 χθες revolut';
+  localStorage.setItem('money:voice-auto', '0');   // this test checks the filled-in form
   window.SpeechRecognition = window.webkitSpeechRecognition = class {
     start() { setTimeout(() => { const t = window.__say; this.onresult?.({ results: [Object.assign([{ transcript: t }], { isFinal: true })] }); this.onend?.(); }, 300); }
     stop() {} abort() {}

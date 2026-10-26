@@ -145,9 +145,9 @@ export function Segmented<T extends string>({ value, options, onChange, style }:
 
 // ------------------------------------------------------------- toast
 
-type ToastMsg = { id: number; text: string; action?: { label: string; run: () => void } };
+type ToastMsg = { id: number; text: string; action?: { label: string; run: () => void }; onTap?: () => void; ms?: number };
 let pushToast: (t: Omit<ToastMsg, 'id'>) => void = () => {};
-export const toast = (text: string, action?: ToastMsg['action']) => pushToast({ text, action });
+export const toast = (text: string, action?: ToastMsg['action'], more?: { onTap?: () => void; ms?: number }) => pushToast({ text, action, ...more });
 
 export function ToastHost() {
   const [msg, setMsg] = useState<ToastMsg | null>(null);
@@ -156,7 +156,7 @@ export function ToastHost() {
     pushToast = t => {
       clearTimeout(timer.current);
       setMsg({ ...t, id: Date.now() });
-      timer.current = setTimeout(() => setMsg(null), t.action ? 4500 : 2600);
+      timer.current = setTimeout(() => setMsg(null), t.ms ?? (t.action ? 4500 : 2600));
     };
   }, []);
   return (
@@ -164,7 +164,7 @@ export function ToastHost() {
       {msg && (
         <motion.div key={msg.id} className="toast" initial={{ opacity: 0, y: 24, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }} transition={softSpring}>
-          <span className="grow">{msg.text}</span>
+          <span className="grow" role={msg.onTap ? 'button' : undefined} onClick={msg.onTap ? () => { msg.onTap!(); setMsg(null); } : undefined}>{msg.text}</span>
           {msg.action && <button onClick={() => { msg.action!.run(); setMsg(null); }}>{msg.action.label}</button>}
         </motion.div>
       )}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, type PanInfo } from 'motion/react';
-import { ArrowLeftRight, Search, Trash2, X, Repeat } from 'lucide-react';
+import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic } from 'lucide-react';
 import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
+import { useVoiceMarks } from '../lib/voiceRun';
 import { useStore, remove, restore } from '../lib/store';
 import { setUi, useUi } from '../lib/ui';
 import { range } from '../lib/period';
@@ -121,6 +122,7 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
   const acc = accs[t.account_id];
   const to = t.to_account_id ? accs[t.to_account_id] : null;
   const ownerName = profiles[t.owner_id]?.display_name ?? 'Partner';
+  const voice = useVoiceMarks().has(t.id);   // added by voice, not checked yet
 
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.x < -100 || info.velocity.x < -700) {
@@ -149,6 +151,7 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
               ? <>{acc?.name ?? ownerName}<ArrowLeftRight size={12} />{to?.name ?? '—'}</>
               : <><Icon name={acc?.icon ?? 'wallet'} size={13} />{acc?.name ?? '—'}</>}
             {t.recurring_id && <Repeat size={12} />}
+            {voice && <Mic size={12} style={{ color: 'var(--accent)' }} aria-label="Added by voice" />}
             {planned && <span className="badge" style={{ marginLeft: 4 }}>Planned</span>}
             {!mine && <span className="badge" style={{ marginLeft: 4 }}>by {ownerName}</span>}
           </div>

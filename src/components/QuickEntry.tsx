@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, Mic, Sparkles } from 'lucide-react';
-import { useStore } from '../lib/store';
-import { addDays, haptic, todayISO } from '../lib/format';
-import { loadLearned, parseQuick, type Parsed } from '../lib/quickparse';
+import { haptic } from '../lib/format';
 import { toast } from './ui';
+import { interpret, type Cmd } from '../lib/voice';
+import { fullCtx, openFor, runVoice, understood, useVoiceCtx } from '../lib/voiceRun';
 
 type Rec = {
   lang: string; interimResults: boolean; continuous: boolean; maxAlternatives: number;
@@ -16,38 +16,19 @@ type Rec = {
 const SR = (window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec }).SpeechRecognition
   ?? (window as unknown as { webkitSpeechRecognition?: new () => Rec }).webkitSpeechRecognition;
 
-/** "Type or say…" box: turns a phrase into a filled-in transaction. */
-export function QuickEntry({ onParsed, autoListen = false }: { onParsed: (p: Parsed, text: string) => void; autoListen?: boolean }) {
-  const accounts = useStore(s => s.accounts);
-  const categories = useStore(s => s.categories);
-  const txs = useStore(s => s.transactions);
-  const me = useStore(s => s.user?.id);
+/** "Type or say…" box. `onText` gets the phrase; voice/typed commands are handled by the caller. */
+export function QuickEntry({ onText, autoListen = false, placeholder }: { onText: (text: string) => void; autoListen?: boolean; placeholder?: string }) {
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const rec = useRef<Rec | null>(null);
   const finalText = useRef('');
 
-  const ctx = useMemo(() => {
-    const live = Object.values(categories).filter(c => !c.deleted_at);
-    const visible = live.filter(c => !c.archived && !(c.parent_id && categories[c.parent_id]?.archived));
-    const since = addDays(todayISO(), -120);
-    const usage = new Map<string, number>();
-    for (const t of Object.values(txs)) {
-      if (t.deleted_at || t.owner_id !== me || !t.category_id || t.date < since) continue;
-      usage.set(t.category_id, (usage.get(t.category_id) ?? 0) + 1);
-      const p = categories[t.category_id]?.parent_id;
-      if (p) usage.set(p, (usage.get(p) ?? 0) + 1);
-    }
-    return { accounts: Object.values(accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === me), categories: visible, usage };
-  }, [accounts, categories, txs, me]);
-
   const submit = (t = text) => {
     const s = t.trim();
     if (!s) return;
-    const p = parseQuick(s, { ...ctx, learned: loadLearned(), today: todayISO() });
-    if (p.amount === null && !p.categoryId && !p.accountId && !p.toAccountId) { toast('Didn’t catch that — try e.g. “coffee 3,5 revolut”'); return; }
     haptic(10);
-    onParsed(p, s);
+    onText(s);
+    setText('');
   };
 
   const listen = () => {
@@ -83,7 +64,7 @@ export function QuickEntry({ onParsed, autoListen = false }: { onParsed: (p: Par
   return (
     <div className={`quick ${listening ? 'on' : ''}`}>
       <Sparkles size={17} className="quick-spark" />
-      <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : 'Type or say: coffee 3,5 revolut'}
+      <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : placeholder ?? 'Type or say: καφές 3,5 revolut'}
         onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }} enterKeyHint="go" />
       <AnimatePresence initial={false}>
         {text.trim() && !listening && (
@@ -101,4 +82,17 @@ export function QuickEntry({ onParsed, autoListen = false }: { onParsed: (p: Par
       )}
     </div>
   );
+}
+
+/** One handler for every place with a quick-entry box. Returns a function that takes the phrase. */
+export function useVoiceHandler(fillTx: (c: Extract<Cmd, { kind: 'tx' }>) => void, onSaved?: () => void) {
+  const ctx = useVoiceCtx();
+  return (text: string) => {
+    const cmds = interpret(text, fullCtx(ctx));
+    if (!understood(cmds)) { toast('Didn’t catch that — try e.g. “καφές 3,5 revolut”'); return; }
+    const open = runVoice(cmds);
+    if (!open) onSaved?.();
+    else if (open.kind === 'tx') fillTx(open);
+    else openFor(open);
+  };
 }

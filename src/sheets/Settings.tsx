@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff } from 'lucide-react';
-import { Sheet, Segmented, toast, ease } from '../components/ui';
+import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic } from 'lucide-react';
+import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
+import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, signOut, sync, wipeMyData, discardFailed } from '../lib/store';
@@ -34,6 +35,7 @@ function Body() {
   const standalone = window.matchMedia('(display-mode: standalone)').matches;
   const name = (user && profiles[user.id]?.display_name) || 'Me';
   const theme = useTheme();
+  const [voiceAuto, setVoiceAuto] = useState(voiceAutoSave);
 
   const doExport = () => {
     const blob = new Blob([exportCsv()], { type: 'text/csv;charset=utf-8' });
@@ -69,6 +71,14 @@ function Body() {
       <div className="section">
         <div className="section-head"><span className="section-title">Appearance</span></div>
         <Segmented value={theme} onChange={setTheme} options={[{ value: 'system', label: 'Phone' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
+      </div>
+
+      <div className="section list">
+        <div className="list-row">
+          <Mic size={21} />
+          <span className="grow">Voice: save right away<div className="tiny muted">Off: what you say opens filled in, you tap ✓</div></span>
+          <Toggle on={voiceAuto} onChange={v => { setVoiceAutoSave(v); setVoiceAuto(v); }} />
+        </div>
       </div>
 
       <div className="section list">

@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChevronDown, ChevronLeft, ChevronRight, Delete, Pencil, Plus, Settings2, Check, Sun, Moon, Wallet } from 'lucide-react';
 import { Segmented, Sheet, toast, ease } from '../components/ui';
-import { useStore, put, putMany, remove, getState } from '../lib/store';
+import { useStore, put, putMany, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
-import { getUi, setUi } from '../lib/ui';
+import { getUi, setUi, useUi } from '../lib/ui';
+import { QuickEntry, useVoiceHandler } from '../components/QuickEntry';
 import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
 import {
-  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, payoutId, rateAt,
+  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, savePnl,
   useStrategies, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
@@ -23,15 +24,18 @@ const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const lsGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
 const signed = (v: number) => (v > 0 ? '+' : v < 0 ? '−' : '') + num(Math.abs(v));
-const periodLabel = (p: { start: string; end: string }) => `${fromISO(p.start).getDate()}–${shortFmt.format(fromISO(p.end))}`;
 
 let lastSection: 'work' | 'trading' = (lsGet('money:tracker') as 'work' | 'trading') || 'work';
 
 export function TrackerScreen() {
-  const [section, setSectionState] = useState(() => (getUi().shiftToday ? 'work' : lastSection));
+  const [section, setSectionState] = useState(() => (getUi().shiftDay || getUi().payJob ? 'work' : lastSection));
   const setSection = (s: typeof section) => { lastSection = s; lsSet('money:tracker', s); setSectionState(s); };
+  const onVoice = useVoiceHandler(c => setUi({ addTx: { prefill: { p: c.p, repeat: c.repeat, until: c.until } } }));
+  const wants = useUi(u => !!(u.shiftDay || u.payJob));
+  useEffect(() => { if (wants) setSectionState('work'); }, [wants]);
   return (
     <div className="screen" style={{ width: '100%' }}>
+      <QuickEntry onText={onVoice} placeholder={section === 'work' ? 'Say: απογευματινή 6 ώρες tips 25' : 'Say: DDG συν 8 · DDG μείον 12,40'} />
       <Segmented value={section} onChange={setSection} style={{ margin: '4px 0 12px' }}
         options={[{ value: 'work', label: 'Work' }, { value: 'trading', label: 'Trading' }]} />
       <AnimatePresence mode="wait" initial={false}>
@@ -107,8 +111,12 @@ function Work() {
   const shifts = useJobShifts();
   const [anchor, setAnchor] = useState(todayISO());
   const [day, setDay] = useState<string | null>(null);
-  useEffect(() => { if (getUi().shiftToday) { setUi({ shiftToday: false }); setDay(todayISO()); } }, []);
   const [payJob, setPayJob] = useState<Job | null>(null);
+  // opened from a shortcut or a voice command
+  const wantDay = useUi(u => u.shiftDay);
+  const wantPay = useUi(u => u.payJob);
+  useEffect(() => { if (wantDay) { setUi({ shiftDay: null }); setDay(wantDay); } }, [wantDay]);
+  useEffect(() => { if (wantPay) { setUi({ payJob: null }); setPayJob(jobs.find(j => j.id === wantPay) ?? null); } }, [wantPay, jobs]);
   const [settings, setSettings] = useState(false);
   const byDay = useMemo(() => {
     const m = new Map<string, Array<{ job: Job; hours: number; bonus: number }>>();
@@ -243,26 +251,11 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
   const save = () => {
     for (const j of jobs) {
       const f = v[j.id];
-      const id = shiftId(j.id, date);
-      const existing = shifts[id] && !shifts[id].deleted_at ? shifts[id] : null;
-      const active = j.kind === 'daily' ? f.worked : f.hours > 0;
-      const tipAmt = j.kind === 'hourly' ? parseNum(f.tips) : 0;
-      let tipsTx = existing?.tips_tx_id ?? null;
-      if (j.kind === 'hourly' && j.tips_category_id && active && tipAmt > 0 && f.account) {
-        tipsTx = tipsTx ?? uuid();
-        put('transactions', {
-          id: tipsTx, owner_id: '', type: 'income', date, amount: tipAmt, account_id: f.account, to_account_id: null,
-          category_id: j.tips_category_id, note: null, recurring_id: null, seq: txs[tipsTx]?.seq ?? Date.now() % 100000,
-        });
-      } else if (tipsTx && txs[tipsTx] && !txs[tipsTx].deleted_at) {
-        remove('transactions', tipsTx);
-        tipsTx = null;
-      }
-      if (active) put('shifts', {
-        id, owner_id: '', job_id: j.id, date, hours: j.kind === 'hourly' ? f.hours : 1, sales: 0,
-        base: j.kind === 'daily' ? parseNum(f.base) : null, bonus: j.kind === 'daily' ? (f.bonus.trim() ? parseNum(f.bonus) : 0) : null, tips_tx_id: tipsTx,
+      writeShift(j, date, {
+        worked: f.worked, hours: f.hours, base: j.kind === 'daily' ? parseNum(f.base) : null,
+        bonus: j.kind === 'daily' ? (f.bonus.trim() ? parseNum(f.bonus) : 0) : null,
+        tips: j.kind === 'hourly' ? parseNum(f.tips) : 0, tipsAccount: f.account || null,
       });
-      else if (existing) remove('shifts', id);
     }
     haptic(10);
     toast('Saved');
@@ -350,32 +343,13 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
   const [account, setAccount] = useState(lsGet('money:payacc:' + job.id) ?? accounts.find(a => /eurobank|τράπεζ|bank/i.test(a.name))?.id ?? accounts[0]?.id ?? '');
   const [date, setDate] = useState(todayISO());
   const choose = (p: PayPeriod) => { setPick(p); const [a, b] = initial(p); setAmount(a); setBonus(b); };
-  const income = (category: string, amt: number, what: string) => {
-    const id = uuid();
-    put('transactions', {
-      id, owner_id: '', type: 'income', date, amount: amt, account_id: account, to_account_id: null,
-      category_id: category, note: `${job.name} ${what}${periodLabel(pick!)}`, recurring_id: null, seq: Date.now() % 100000,
-    });
-    return id;
-  };
   const save = () => {
     if (!pick) return;
     const amt = amount.trim() ? parseNum(amount) : 0;
     const bon = split && bonus.trim() ? parseNum(bonus) : 0;
     if (amt <= 0 && bon <= 0) return toast('Enter the amount you got');
-    // one row per payment, each linked to its own income entries (delete the entry → it's owed again)
-    const id = `${payoutId(job.id, pick.start)}:${uuid().slice(0, 8)}`;
-    let txId: string | null = null, bonusTx: string | null = null;
-    if (account) {
-      if (amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '');
-      if (bon > 0 && job.bonus_category_id) bonusTx = income(job.bonus_category_id, bon, 'bonus ');
-      lsSet('money:payacc:' + job.id, account);
-    }
-    put('payouts', {
-      id, owner_id: '', job_id: job.id, period_start: pick.start, period_end: pick.end,
-      amount: round2(amt), bonus: round2(bon),
-      tx_id: txId, bonus_tx_id: bonusTx, date,
-    });
+    const { txId, bonusTx } = writePayout(job, pick, amt, bon, account || null, date);
+    if (account) lsSet('money:payacc:' + job.id, account);
     haptic(12);
     toast(txId || bonusTx ? `${money(round2(amt + bon))} added to your income` : 'Payment saved');
     onClose();
@@ -712,12 +686,6 @@ function PnlEntrySheet({ date, sel, onClose }: { date: string | null; sel: strin
   );
 }
 
-function savePnl(sid: string, date: string, value: number | null) {
-  const id = pnlId(sid, date);
-  const existing = getState().pnl[id];
-  if (value == null) { if (existing && !existing.deleted_at) remove('pnl', id); return; }
-  put('pnl', { id, owner_id: '', strategy_id: sid, date, pnl: round2(value) });
-}
 
 function PnlOneForm({ date, sid, onClose }: { date: string; sid: string; onClose: () => void }) {
   const s = useStore(st => st.strategies[sid]);

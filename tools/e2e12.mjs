@@ -1,0 +1,106 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
+const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: process.env.SCHEME || 'light' });
+const p = await ctx.newPage();
+const errors = []; p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
+const OUT = process.env.OUT;
+const shot = async n => { await p.waitForTimeout(700); await p.screenshot({ path: `${OUT}/${n}.png` }); };
+const top = () => p.locator('.sheet').last();
+await p.goto(process.env.URL); await p.waitForTimeout(700);
+await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
+await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
+await p.setInputFiles('input[type=file]', process.env.CSV); await p.waitForTimeout(300);
+await p.getByRole('button', { name: 'Import', exact: true }).click(); await p.waitForTimeout(400);
+await p.getByText('Go to accounts').click(); await p.waitForTimeout(600);
+ok(await p.locator('.nav-item').count() === 5, 'Tracker tab shown (5 tabs)');
+await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(1200);
+ok((await p.locator('.screen').last().innerText()).includes('Morning') && (await p.locator('.screen').last().innerText()).includes('Evening'), 'default jobs created');
+await shot('w0');
+// set rates
+await p.click('[aria-label="Job settings"]'); await p.waitForTimeout(600);
+await top().getByText('Morning').click(); await p.waitForTimeout(600);
+await top().locator('.field', { hasText: 'Usual day pay' }).locator('input').fill('40');
+const salSel = top().locator('.field', { hasText: 'Salary goes to category' }).locator('select');
+const opts = await salSel.locator('option').allInnerTexts();
+const pda = opts.find(o => /PDA/.test(o)); if (pda) await salSel.selectOption({ label: pda });
+const bonSel = top().locator('.field', { hasText: 'Bonus goes to category' }).locator('select');
+const bopt = (await bonSel.locator('option').allInnerTexts()).find(o => /Επιδόματα/.test(o));
+await bonSel.selectOption({ label: bopt });
+await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(600);
+await top().getByText('Evening').click(); await p.waitForTimeout(600);
+const ev = await top().innerText();
+ok(/Cake & Roll/.test(await top().locator('.field', { hasText: 'Salary goes to category' }).locator('select').inputValue().then(v => top().locator(`option[value="${v}"]`).first().innerText())), 'Evening salary category guessed: Cake & Roll');
+await top().locator('.field', { hasText: 'Per hour' }).locator('input').fill('6');
+await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(600);
+await p.goBack(); await p.waitForTimeout(700);
+const say = async (t) => { await p.locator('.screen .quick-input').fill(t); await p.locator('.screen .quick-input').press('Enter'); await p.waitForTimeout(900); };
+const toastText = () => p.locator('.toast').innerText().catch(() => '');
+// shift by voice from the Tracker
+await say('απογευματινή 6 ώρες tips 25');
+let tt = await toastText();
+ok(/Evening · 6h · tips 25 €/.test(tt), 'shift saved: ' + tt);
+const cellToday = p.locator('.cal-cell.today');
+ok(/6h/.test(await cellToday.innerText()), 'calendar shows 6h today');
+ok(/36 €/.test(await p.locator('.card', { hasText: 'Evening' }).innerText()), 'evening owed 36 € (6h × 6)');
+await say('πρωινή bonus 18');
+ok(/Morning · bonus 18 €/.test(await toastText()), 'morning with bonus 18');
+ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'morning owed 40 € + 18 €');
+// payment by voice
+await say('πληρώθηκα από την πρωινή');
+tt = await toastText();
+ok(/Morning paid 40 € \+ 18 €/.test(tt), 'payout: ' + tt);
+ok(/Owed to you\s*0 € \+ 0 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'morning owed 0 after voice payment');
+await p.locator('.toast button').click(); await p.waitForTimeout(700);
+ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'Undo → owed again');
+// P&L by voice
+await p.locator('.seg button', { hasText: 'Trading' }).click(); await p.waitForTimeout(700);
+await p.getByRole('button', { name: 'Add strategy' }).click(); await p.waitForTimeout(800);
+await top().getByPlaceholder('e.g. DEEP DIP GOLD').fill('DEEP DIP GOLD');
+await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(900);
+await say('DDG μείον 12,40');
+ok(/DEEP DIP GOLD −12,40 €/.test(await toastText()), 'pnl: ' + await toastText());
+ok(/−12,4/.test(await p.locator('.cal-cell.today').innerText()), 'today −12,4 on the trading calendar');
+await say('ddg συν 8');
+ok(/\+8 € \(was −12,40 €\)/.test(await toastText()), 'replaced, says what it was: ' + await toastText());
+// entries by voice in "+" (auto-save, 🎤 mark, Undo)
+await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(800);
+await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
+await top().locator('.quick-input').fill('delivery 12,50 χθες revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+ok(await p.locator('.sheet').count() === 0 || !(await p.locator('.sheet').last().isVisible()), 'sheet closed after saving');
+ok(/Delivery.*Revolut 12,50 € · yesterday/.test(await toastText()), 'toast: ' + await toastText());
+const row = p.locator('.screen .list-row', { hasText: 'Delivery' }).first();
+ok(await row.locator('[aria-label="Added by voice"]').count() === 1, '🎤 mark on the new row');
+await p.locator('.toast .grow').click(); await p.waitForTimeout(1200);
+await shot('v-tap');
+ok(/12,5/.test((await top().locator('.amount').innerText()).replace(/\s/g, '')), 'tap toast → opens it for editing');
+await top().locator('.key.go').click(); await p.waitForTimeout(900);
+ok(await p.locator('.screen .list-row', { hasText: 'Delivery' }).first().locator('[aria-label="Added by voice"]').count() === 0, 'saved after checking → 🎤 gone');
+// several at once
+await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
+await top().locator('.quick-input').fill('καφές 3, supermarket 20 και τσιγάρα 5,5'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+ok(/✓ 3 entries · 28,50 €/.test(await toastText()), 'multi: ' + await toastText());
+const before = await p.locator('.screen .list-row').count();
+await p.locator('.toast button').click(); await p.waitForTimeout(900);
+ok(await p.locator('.screen .list-row').count() === before - 3, 'Undo removes all three');
+// recurring
+await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
+await top().locator('.quick-input').fill('claude 20 κάθε μήνα'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+ok(/Claude · .* 20 € · every month/.test(await toastText()), 'recurring: ' + await toastText());
+// incomplete → opens filled in
+await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
+await top().locator('.quick-input').fill('netflix 12,49 revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+ok(/Choose a category/.test(await top().innerText()), 'no category → asks for it');
+await top().locator('.cat-tile', { hasText: 'Εφαρμογές' }).click(); await p.waitForTimeout(700);
+ok(/12,49/.test((await top().locator('.amount').innerText()).replace(/\s/g, '')) && /Revolut/.test(await top().innerText()), 'amount + account kept');
+await p.goBack(); await p.waitForTimeout(500);
+// setting off → opens filled in, not saved
+await p.click('[aria-label=Settings]'); await p.waitForTimeout(500);
+await top().locator('.list-row', { hasText: 'Voice: save right away' }).locator('.toggle').click(); await p.waitForTimeout(300);
+await p.goBack(); await p.waitForTimeout(500);
+await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
+await top().locator('.quick-input').fill('καφές 2 revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+ok(/Expense/.test(await top().innerText()) && await top().locator('.key.go').count() === 1, 'auto-save off → form filled, waiting for ✓');
+await shot('v-off');
+console.log('errors:', errors.length ? errors : 'none');
+await b.close();

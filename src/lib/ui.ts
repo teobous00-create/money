@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import type { CatType, TxType } from './types';
+import type { CatType, Freq, TxType } from './types';
+import type { Parsed } from './quickparse';
 
 export interface AddTxArgs {
   editId?: string;
@@ -8,6 +9,7 @@ export interface AddTxArgs {
   accountId?: string;
   date?: string;
   voice?: boolean;   // start listening right away (app-icon shortcut)
+  prefill?: { p: Parsed; repeat: Freq | null; until: string | null };   // a spoken entry that still needs you
 }
 
 export interface UiState {
@@ -24,7 +26,8 @@ export interface UiState {
   importer: boolean;
   search: boolean;
   hidden: boolean;
-  shiftToday?: boolean;   // open today's shift (app-icon shortcut)
+  shiftDay?: string | null;   // open this day's shift (shortcut, voice)
+  payJob?: string | null;     // open "got paid" for this job (voice)
 }
 
 const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview', 'tracker'];

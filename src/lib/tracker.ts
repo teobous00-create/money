@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { useStore } from './store';
+import { useStore, getState, put, remove } from './store';
 import { alive } from './calc';
-import { addDays, fromISO, round2, toISO, todayISO } from './format';
-import type { Job, JobRate, Pnl, Shift, Strategy } from './types';
+import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
+import type { Job, JobRate, Payout, Pnl, Shift, Strategy, Tx } from './types';
 
 // ================================================================ work
 
@@ -53,55 +53,131 @@ export function useJobShifts(jobId?: string) {
 }
 
 /** Every pay period from the first logged shift until today, with what you earned and what was paid. */
+export function payPeriods(job: Job, shifts: Shift[], payouts: Record<string, Payout>, txs: Record<string, Tx>) {
+  // a payment linked to an income entry counts what that entry says now — deleted entry = not paid
+  const part = (txId: string | null, stored: number) => {
+    if (!txId) return stored;
+    const t = txs[txId];
+    return t && !t.deleted_at ? t.amount : 0;
+  };
+  const map = new Map<string, PayPeriod>();
+  const today = todayISO();
+  const [cs, ce] = periodOf(job, today);
+  const get = (start: string, end: string) => {
+    let p = map.get(start);
+    if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs, base: 0, bonus: 0, paidBase: 0, paidBonus: 0 }));
+    return p;
+  };
+  get(cs, ce);
+  for (const s of shifts) {
+    if (s.job_id !== job.id || s.deleted_at || s.date > today) continue;
+    const [a, b] = periodOf(job, s.date);
+    const p = get(a, b);
+    const parts = shiftParts(job, s);
+    p.base += parts.base;
+    p.bonus += parts.bonus;
+    p.shifts += 1;
+    p.hours += s.hours ?? 0;
+  }
+  const settled = new Set<string>();
+  for (const po of alive(payouts)) {
+    if (po.job_id !== job.id) continue;
+    const p = get(po.period_start, po.period_end);
+    p.paidBase += part(po.tx_id, po.amount);
+    p.paidBonus += part(po.bonus_tx_id, po.bonus ?? 0);
+    if (po.settled) settled.add(po.period_start);
+  }
+  for (const st of settled) { const p = map.get(st); if (p) { p.paidBase = Math.max(p.paidBase, p.base); p.paidBonus = Math.max(p.paidBonus, p.bonus); } }
+  const list = [...map.values()].map(p => {
+    const earned = round2(p.base + p.bonus), paid = round2(p.paidBase + p.paidBonus);
+    return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(p.paidBase), paidBonus: round2(p.paidBonus), earned, paid, owed: round2(earned - paid), hours: round2(p.hours) };
+  })
+    .sort((a, b) => b.start.localeCompare(a.start));
+  const owed = round2(list.reduce((s, p) => s + p.owed, 0));
+  const owedBase = round2(list.reduce((s, p) => s + p.base - p.paidBase, 0));
+  const owedBonus = round2(list.reduce((s, p) => s + p.bonus - p.paidBonus, 0));
+  return { list, owed, owedBase, owedBonus, current: list.find(p => p.current)! };
+}
+
 export function usePayPeriods(job: Job) {
   const shifts = useJobShifts(job.id);
   const payouts = useStore(s => s.payouts);
   const txs = useStore(s => s.transactions);
-  return useMemo(() => {
-    // a payment linked to an income entry counts what that entry says now — deleted entry = not paid
-    const part = (txId: string | null, stored: number) => {
-      if (!txId) return stored;
-      const t = txs[txId];
-      return t && !t.deleted_at ? t.amount : 0;
-    };
-    const map = new Map<string, PayPeriod>();
-    const today = todayISO();
-    const [cs, ce] = periodOf(job, today);
-    const get = (start: string, end: string) => {
-      let p = map.get(start);
-      if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs, base: 0, bonus: 0, paidBase: 0, paidBonus: 0 }));
-      return p;
-    };
-    get(cs, ce);
-    for (const s of shifts) {
-      if (s.date > today) continue;
-      const [a, b] = periodOf(job, s.date);
-      const p = get(a, b);
-      const parts = shiftParts(job, s);
-      p.base += parts.base;
-      p.bonus += parts.bonus;
-      p.shifts += 1;
-      p.hours += s.hours ?? 0;
-    }
-    const settled = new Set<string>();
-    for (const po of alive(payouts)) {
-      if (po.job_id !== job.id) continue;
-      const p = get(po.period_start, po.period_end);
-      p.paidBase += part(po.tx_id, po.amount);
-      p.paidBonus += part(po.bonus_tx_id, po.bonus ?? 0);
-      if (po.settled) settled.add(po.period_start);
-    }
-    for (const st of settled) { const p = map.get(st); if (p) { p.paidBase = Math.max(p.paidBase, p.base); p.paidBonus = Math.max(p.paidBonus, p.bonus); } }
-    const list = [...map.values()].map(p => {
-      const earned = round2(p.base + p.bonus), paid = round2(p.paidBase + p.paidBonus);
-      return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(p.paidBase), paidBonus: round2(p.paidBonus), earned, paid, owed: round2(earned - paid), hours: round2(p.hours) };
-    })
-      .sort((a, b) => b.start.localeCompare(a.start));
-    const owed = round2(list.reduce((s, p) => s + p.owed, 0));
-    const owedBase = round2(list.reduce((s, p) => s + p.base - p.paidBase, 0));
-    const owedBonus = round2(list.reduce((s, p) => s + p.bonus - p.paidBonus, 0));
-    return { list, owed, owedBase, owedBonus, current: list.find(p => p.current)! };
-  }, [job, shifts, payouts, txs]);
+  return useMemo(() => payPeriods(job, shifts, payouts, txs), [job, shifts, payouts, txs]);
+}
+
+/** The period a "got paid" is most likely for: the oldest finished one still owed, else the current one. */
+export function periodToPay(list: PayPeriod[]): PayPeriod | null {
+  const owed = list.filter(p => p.owed > 0.004);
+  return owed.filter(p => !p.current).pop() ?? owed[0] ?? null;
+}
+
+export interface ShiftInput { hours: number; base: number | null; bonus: number | null; tips: number; tipsAccount: string | null; worked: boolean }
+
+/** Saves one job's shift for a day (with its tips as an income entry). Returns what to put back for an undo. */
+export function writeShift(job: Job, date: string, f: ShiftInput) {
+  const st = getState();
+  const id = shiftId(job.id, date);
+  const existing = st.shifts[id] && !st.shifts[id].deleted_at ? st.shifts[id] : null;
+  const prevTip = existing?.tips_tx_id ? st.transactions[existing.tips_tx_id] ?? null : null;
+  const active = job.kind === 'daily' ? f.worked : f.hours > 0;
+  let tipsTx = existing?.tips_tx_id ?? null;
+  if (job.kind === 'hourly' && job.tips_category_id && active && f.tips > 0 && f.tipsAccount) {
+    tipsTx = tipsTx ?? uuid();
+    put('transactions', {
+      id: tipsTx, owner_id: '', type: 'income', date, amount: round2(f.tips), account_id: f.tipsAccount, to_account_id: null,
+      category_id: job.tips_category_id, note: null, recurring_id: null, seq: st.transactions[tipsTx]?.seq ?? Date.now() % 100000,
+    });
+  } else if (tipsTx && st.transactions[tipsTx] && !st.transactions[tipsTx].deleted_at) {
+    remove('transactions', tipsTx);
+    tipsTx = null;
+  }
+  if (active) put('shifts', {
+    id, owner_id: '', job_id: job.id, date, hours: job.kind === 'hourly' ? f.hours : 1, sales: 0,
+    base: job.kind === 'daily' ? f.base : null, bonus: job.kind === 'daily' ? (f.bonus ?? 0) : null, tips_tx_id: tipsTx,
+  });
+  else if (existing) remove('shifts', id);
+  return () => {
+    if (existing) put('shifts', existing); else remove('shifts', id);
+    if (prevTip) put('transactions', prevTip);
+    else if (tipsTx) remove('transactions', tipsTx);
+  };
+}
+
+/** Records a payment for a pay period, adding the salary and bonus to your income. Returns an undo. */
+export function writePayout(job: Job, period: { start: string; end: string }, amt: number, bon: number, account: string | null, date: string) {
+  const label = periodLabel(period);
+  const income = (category: string, a: number, what: string) => {
+    const id = uuid();
+    put('transactions', {
+      id, owner_id: '', type: 'income', date, amount: a, account_id: account!, to_account_id: null,
+      category_id: category, note: `${job.name} ${what}${label}`, recurring_id: null, seq: Date.now() % 100000,
+    });
+    return id;
+  };
+  let txId: string | null = null, bonusTx: string | null = null;
+  if (account) {
+    if (amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '');
+    if (bon > 0 && job.bonus_category_id) bonusTx = income(job.bonus_category_id, bon, 'bonus ');
+  }
+  // one row per payment, each linked to its own income entries (delete the entry → it's owed again)
+  const id = `${payoutId(job.id, period.start)}:${uuid().slice(0, 8)}`;
+  put('payouts', { id, owner_id: '', job_id: job.id, period_start: period.start, period_end: period.end, amount: round2(amt), bonus: round2(bon), tx_id: txId, bonus_tx_id: bonusTx, date });
+  return { txId, bonusTx, undo: () => { remove('payouts', id); if (txId) remove('transactions', txId); if (bonusTx) remove('transactions', bonusTx); } };
+}
+
+const pShort = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+/** "16–31 Oct" */
+export const periodLabel = (p: { start: string; end: string }) => `${fromISO(p.start).getDate()}–${pShort.format(fromISO(p.end))}`;
+
+/** Saves a strategy's P&L for a day (null clears it). Returns the previous value for an undo. */
+export function savePnl(sid: string, date: string, value: number | null) {
+  const id = pnlId(sid, date);
+  const existing = getState().pnl[id];
+  const prev = existing && !existing.deleted_at ? existing : null;
+  if (value == null) { if (prev) remove('pnl', id); return prev; }
+  put('pnl', { id, owner_id: '', strategy_id: sid, date, pnl: round2(value) });
+  return prev;
 }
 
 // ================================================================ trading
