@@ -103,6 +103,7 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
       )}
       {cat && !cat.archived && <p className="tiny muted" style={{ textAlign: 'center', marginTop: 8 }}>Hiding removes it from the grid and pickers. No transactions are lost — reports still include them.</p>}
       {cat && !isSub && !cat.archived && <MergeSection cat={cat} close={close} />}
+      {cat && isSub && !cat.archived && <SubMergeSection cat={cat} name={name} close={close} />}
     </div>
   );
 }
@@ -164,7 +165,6 @@ const norm = (s: string) => s.trim().toLocaleLowerCase('el').normalize('NFD').re
 /** Moves all my entries (and recurring rules, job links) from `src` into `dst`, matching subcategories by name. */
 export function mergeCategory(srcId: string, dstId: string): number {
   const s = getState();
-  const me = s.user!.id;
   const live = Object.values(s.categories).filter(c => !c.deleted_at);
   const src = s.categories[srcId], dst = s.categories[dstId];
   const srcSubs = live.filter(c => c.parent_id === srcId);
@@ -180,6 +180,15 @@ export function mergeCategory(srcId: string, dstId: string): number {
     map.set(sub.id, n.id);
   }
   putMany('categories', newSubs);
+  const moved = moveEntries(map);
+  put('categories', { ...src, archived: true });
+  return moved;
+}
+
+/** Re-files my entries, recurring rules and job links by `map` (old category id → new). Returns how many entries moved. */
+function moveEntries(map: Map<string, string>): number {
+  const s = getState();
+  const me = s.user!.id;
   const txs = Object.values(s.transactions).filter(t => !t.deleted_at && t.owner_id === me && t.category_id && map.has(t.category_id));
   putMany('transactions', txs.map(t => ({ ...t, category_id: map.get(t.category_id!)! })));
   putMany('recurring', Object.values(s.recurring).filter(r => !r.deleted_at && r.owner_id === me && r.category_id && map.has(r.category_id))
@@ -187,8 +196,72 @@ export function mergeCategory(srcId: string, dstId: string): number {
   const mv = (id: string | null) => (id && map.has(id) ? map.get(id)! : id);
   putMany('jobs', Object.values(s.jobs).filter(j => !j.deleted_at && [j.salary_category_id, j.bonus_category_id, j.tips_category_id].some(id => id && map.has(id)))
     .map(j => ({ ...j, salary_category_id: mv(j.salary_category_id), bonus_category_id: mv(j.bonus_category_id), tips_category_id: mv(j.tips_category_id) })));
-  put('categories', { ...src, archived: true });
   return txs.length;
+}
+
+/** Joins sibling subcategories into `dstId`. An emptied subcategory is hidden; one that still has someone else's entries stays. */
+export function mergeSubs(dstId: string, srcIds: string[]): { moved: number; kept: number } {
+  const moved = moveEntries(new Map(srcIds.map(id => [id, dstId])));
+  const s = getState();
+  let kept = 0;
+  for (const id of srcIds) {
+    const left = Object.values(s.transactions).some(t => !t.deleted_at && t.category_id === id);
+    if (left) kept++; else put('categories', { ...s.categories[id], archived: true });
+  }
+  return { moved, kept };
+}
+
+/** In a subcategory: pick siblings to merge into this one (e.g. all the "Delivery …" ones). */
+function SubMergeSection({ cat, name, close }: { cat: Category; name: string; close: () => void }) {
+  const cats = useCategories();
+  const txs = useStore(s => s.transactions);
+  const me = useStore(s => s.user?.id);
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const words = new Set(norm(cat.name).split(/\s+/).filter(w => w.length > 2));
+  const alike = (c: Category) => norm(c.name).split(/\s+/).some(w => words.has(w));
+  const sibs = cats.filter(c => c.parent_id === cat.parent_id && c.id !== cat.id && !c.archived)
+    .sort((a, b) => Number(alike(b)) - Number(alike(a)) || a.sort - b.sort);
+  if (!sibs.length) return null;
+  const mine = (id: string) => Object.values(txs).filter(t => !t.deleted_at && t.category_id === id && t.owner_id === me).length;
+  const theirs = (id: string) => Object.values(txs).filter(t => !t.deleted_at && t.category_id === id && t.owner_id !== me).length;
+  const n = [...sel].reduce((x, id) => x + mine(id), 0);
+  const other = [...sel].reduce((x, id) => x + theirs(id), 0);
+  const toggle = (id: string) => setSel(s => { const x = new Set(s); if (x.has(id)) x.delete(id); else x.add(id); return x; });
+  const title = name.trim() || cat.name;
+  const run = () => {
+    if (title !== cat.name) put('categories', { ...cat, name: title });   // a new name typed above is kept
+    const r = mergeSubs(cat.id, [...sel]);
+    toast(`${r.moved} ${r.moved === 1 ? 'entry' : 'entries'} moved to ${title}`);
+    close();
+  };
+  return (
+    <div style={{ marginTop: 18 }}>
+      {!open ? (
+        <button className="btn secondary" style={{ height: 46 }} onClick={() => setOpen(true)}><Merge size={18} />Merge other subcategories into this</button>
+      ) : (
+        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="section-head"><span className="section-title row" style={{ gap: 6 }}><Merge size={14} />Merge into “{title}”</span></div>
+          <div className="list">
+            {sibs.map(c => (
+              <button key={c.id} className="list-row" onClick={() => toggle(c.id)}>
+                <span className={'check' + (sel.has(c.id) ? ' on' : '')} style={{ width: 22, height: 22, borderRadius: 7, display: 'grid', placeItems: 'center', flex: 'none', background: sel.has(c.id) ? 'var(--accent)' : 'var(--surface-2)', color: 'var(--accent-ink)' }}>
+                  {sel.has(c.id) && <Check size={15} strokeWidth={3} />}
+                </span>
+                <span className="grow" style={{ fontWeight: 550 }}>{c.name}</span>
+                <span className="tiny muted">{mine(c.id)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="tiny muted" style={{ padding: '6px 6px 10px' }}>
+            {sel.size ? `Your ${n} ${n === 1 ? 'entry moves' : 'entries move'} to “${title}” and the chosen ones are hidden.` : 'Choose one or more. You can also change the name above (e.g. “Delivery”) — it is kept.'}
+            {other > 0 && ` ${other} ${other === 1 ? 'entry' : 'entries'} by your partner stay where they are until they merge them too, so those subcategories stay visible.`}
+          </div>
+          <button className="btn" disabled={!sel.size} onClick={run}>{sel.size ? `Merge ${sel.size} into ${title}` : 'Choose subcategories'}</button>
+        </motion.div>
+      )}
+    </div>
+  );
 }
 
 /** "Merge into…": move this category's entries into another one (e.g. a shared one with the same name). */
