@@ -62,7 +62,7 @@ export const fullCtx = (c: Omit<VoiceCtx, 'learned' | 'today'>): VoiceCtx => ({ 
 
 // ---------------------------------------------------------------- run
 
-function defaultAccount(type: TxType, not?: string | null): string | null {
+export function defaultAccount(type: TxType, not?: string | null): string | null {
   const st = getState();
   const mine = Object.values(st.accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === st.user?.id && a.id !== not);
   let last: string | null = null;

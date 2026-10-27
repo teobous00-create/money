@@ -20,8 +20,8 @@ export type Cmd =
 const words = (text: string) => text.split(/\s+/).filter(Boolean).map(raw => ({ raw, n: clean(raw) }));
 
 // how you call each job ("πρωινή" → the day-rate job, "απογευματινή / βράδυ" → the hourly one)
-const DAY_ALIASES = ['πρωινη', 'πρωινο', 'πρωι', 'morning'];
-const EVE_ALIASES = ['απογευματινη', 'απογευματινο', 'απογευμα', 'βραδινη', 'βραδινο', 'βραδυ', 'evening', 'night'];
+export const DAY_ALIASES = ['πρωινη', 'πρωινο', 'πρωι', 'morning'];
+export const EVE_ALIASES = ['απογευματινη', 'απογευματινο', 'απογευμα', 'βραδινη', 'βραδινο', 'βραδυ', 'evening', 'night'];
 const PAY_WORDS = ['πληρωθηκα', 'πληρωθηκε', 'πληρωμη', 'μισθοσ', 'μισθο', 'μισθου', 'salary', 'payday', 'πληρωσαν'];
 const SHIFT_WORDS = ['βαρδια', 'βαρδιεσ', 'δουλεψα', 'shift', 'worked'];
 const HOURS = /^(ωρα|ωρεσ|ωρων|h|hours?|ωρ)$/;

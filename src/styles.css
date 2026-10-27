@@ -375,3 +375,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .review-h { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin-top: 6px; }
 .input.about { height: auto; min-height: 120px; padding: 12px 14px; line-height: 1.4; resize: vertical; font: inherit; }
+.pcard { margin-top: 10px; border-radius: 14px; padding: 10px 12px; background: var(--surface-2); border: 1.5px solid var(--accent); }
+.pcard.applied, .pcard.cancelled, .pcard.undone { border-color: transparent; opacity: .8; }
+.prow { font-size: 14px; padding: 5px 0; border-top: 1px solid var(--line); }
+.prow:first-of-type { border-top: 0; }

@@ -5,7 +5,8 @@ import { askClaude, aiErrorText, aiRemaining, loadChat, saveChat, type ChatItem,
 import { useListen } from './QuickEntry';
 import { setUi } from '../lib/ui';
 import { haptic, money, num, shortDate } from '../lib/format';
-import { ease } from './ui';
+import { ease, toast } from './ui';
+import { applyProposal, type Proposal } from '../lib/aiActions';
 
 const IDEAS = ['Τι να κόψω αυτόν τον μήνα;', 'Πόσα έδωσα σε delivery φέτος;', 'Ποια βάρδια μου αποδίδει περισσότερο;', 'Πώς πάει το trading σε σχέση με τη δουλειά;'];
 
@@ -75,7 +76,7 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
             {IDEAS.map(q => <button key={q} className="chip" style={{ margin: '0 6px 8px 0' }} onClick={() => void send(q)}>{q}</button>)}
           </div>
         )}
-        {items.map((m, i) => <Bubble key={i} m={m} />)}
+        {items.map((m, i) => <Bubble key={i} m={m} onProposal={status => { const next = items.map((x, k) => (k === i && x.proposal ? { ...x, proposal: { ...x.proposal, status } } : x)); setItems(next); saveChat(next); }} />)}
         {busy && <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
       </div>
       <div className="chat-input">
@@ -107,13 +108,43 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-function Bubble({ m }: { m: ChatItem }) {
+function Bubble({ m, onProposal }: { m: ChatItem; onProposal: (s: Proposal['status']) => void }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}
       className={`bubble ${m.role === 'user' ? 'me' : 'ai'} ${m.error ? 'err' : ''}`}>
       {m.results?.filter(r => r.count > 0).map((r, i) => <ResultCard key={i} r={r} />)}
       <Rich text={m.text} />
+      {m.proposal && <ProposalCard p={m.proposal} onStatus={onProposal} />}
     </motion.div>
+  );
+}
+
+/** What the AI wants to change. Nothing is saved until Apply; then one Undo takes it all back. */
+function ProposalCard({ p, onStatus }: { p: Proposal; onStatus: (s: Proposal['status']) => void }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? p.items : p.items.slice(0, 8);
+  const apply = () => {
+    haptic(12);
+    const undo = applyProposal(p);
+    onStatus('applied');
+    toast(`✓ ${p.items.length} ${p.items.length === 1 ? 'change' : 'changes'} saved`, { label: 'Undo', run: () => { undo(); onStatus('undone'); } }, { ms: 7000 });
+  };
+  return (
+    <div className={`pcard ${p.status}`}>
+      {p.summary && <div className="small bold" style={{ marginBottom: 6 }}>{p.summary}</div>}
+      {shown.map((it, i) => <div key={i} className="prow">{it.label}</div>)}
+      {p.items.length > shown.length && <button className="tiny bold" style={{ color: 'var(--accent)', marginTop: 4 }} onClick={() => setAll(true)}>Show all {p.items.length}</button>}
+      {p.status === 'pending' ? (
+        <div className="row" style={{ gap: 8, marginTop: 10 }}>
+          <button className="btn" style={{ height: 42, flex: 1 }} onClick={apply}>Apply</button>
+          <button className="btn secondary" style={{ height: 42, flex: 1 }} onClick={() => onStatus('cancelled')}>Cancel</button>
+        </div>
+      ) : (
+        <div className="tiny bold" style={{ marginTop: 8, color: p.status === 'applied' ? 'var(--income)' : 'var(--ink-3)' }}>
+          {p.status === 'applied' ? '✓ Applied' : p.status === 'undone' ? 'Undone' : 'Cancelled'}
+        </div>
+      )}
+    </div>
   );
 }
 

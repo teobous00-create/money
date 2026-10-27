@@ -10,6 +10,7 @@ import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
 import { payPeriods, rateAt, shiftParts, shiftPay } from './tracker';
 import { chatDetail } from './aiFacts';
+import { CHANGES_TOOL, resolveChanges, type Proposal } from './aiActions';
 import type { Category, Tx } from './types';
 
 // ---------------------------------------------------------------- transport
@@ -235,7 +236,7 @@ export function runQuery(q: QueryInput, s: State = getState(), today = todayISO(
   };
 }
 
-const forClaude = (r: QueryResult) => JSON.stringify({ count: r.count, total: r.total, average: r.count ? r2(r.total / r.count) : 0, first_date: r.from, last_date: r.to, groups: r.groups.slice(0, 40).map(g => ({ ...g, average: g.count ? r2(g.total / g.count) : 0 })), latest: r.rows.slice(0, 12).map(x => `${x.date} ${x.amount} ${x.what}${x.note ? ` "${x.note}"` : ''}`) });
+const forClaude = (r: QueryResult) => JSON.stringify({ count: r.count, total: r.total, average: r.count ? r2(r.total / r.count) : 0, first_date: r.from, last_date: r.to, groups: r.groups.slice(0, 40).map(g => ({ ...g, average: g.count ? r2(g.total / g.count) : 0 })), latest: r.rows.slice(0, 12).map(x => `id ${x.id}: ${x.date} ${x.amount} ${x.what} (${x.account})${x.note ? ` "${x.note}"` : ''}`) });
 
 // ---------------------------------------------------------------- work and trading tools
 
@@ -321,12 +322,17 @@ Advice (what to cut, how to earn more, is X worth it)
 - Be direct when something is a problem. If he is doing fine, say so in one line and stop.
 - Trading: report results and trade-offs from his data (P&L against hours of work, consistency, worst stretches). Do not tell him to buy, sell, or change position size.
 
+Changes
+- When he asks to add, change or remove shifts, entries (also repeating ones), budgets or P&L, call propose_changes. For existing entries find their ids with query_transactions first.
+- Nothing is saved until he taps Apply on the card. After proposing, say in one line what the card contains and that he needs to tap Apply. Never say it is done.
+- If the tool reports problems, fix them (another call) or ask him one short question.
+
 Context
 - Shared categories (with his girlfriend): his totals are only his part. For questions about joint spending use who "partner" or "both" in the tool.
 - Future-dated (planned) entries do not count until their date.
 - The current month is not over: compare by pace, not by totals.`;
 
-export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; error?: boolean; at: string }
+export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; proposal?: Proposal; error?: boolean; at: string }
 
 const CHAT_KEY = 'money:chat';
 export function loadChat(): ChatItem[] { try { return JSON.parse(localStorage.getItem(CHAT_KEY) ?? '[]'); } catch { return []; } }
@@ -364,7 +370,8 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
   ];
   const past: ApiMsg[] = history.filter(h => !h.error).slice(-16).map(h => ({
     role: h.role,
-    content: (h.text || '…') + (h.role === 'assistant' && h.results?.length ? `\n[Looked up: ${h.results.map(memo).join(' | ')}]` : ''),
+    content: (h.text || '…') + (h.role === 'assistant' && h.results?.length ? `\n[Looked up: ${h.results.map(memo).join(' | ')}]` : '')
+      + (h.proposal ? `\n[Card: ${h.proposal.items.map(i => i.label).join(' | ')} — ${h.proposal.status === 'applied' ? 'he applied it' : h.proposal.status === 'pending' ? 'not applied yet' : 'not applied'}]` : ''),
   }));
   // the API wants turns to alternate, starting with the user
   const msgs: ApiMsg[] = [];
@@ -373,15 +380,21 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
     else if (msgs.length || m.role === 'user') msgs.push(m);
   }
   const results: QueryResult[] = [];
+  let proposal: Proposal | null = null;
   for (let step = 0; step < 8; step++) {
-    const r = await complete(system, msgs, [QUERY_TOOL, WORK_TOOL, TRADING_TOOL]);
+    const r = await complete(system, msgs, [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL]);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
-    if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, at: new Date().toISOString() };
+    if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: clean(r.content) });
     msgs.push({
       role: 'user', content: uses.map(u => {
         if (u.name === WORK_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runWork(u.input as WorkInput) };
         if (u.name === TRADING_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runTrading(u.input as TradingInput) };
+        if (u.name === CHANGES_TOOL.name) {
+          const { proposal: p, errors } = resolveChanges(u.input as { summary?: string; changes?: Record<string, unknown>[] });
+          if (p.items.length) proposal = p;   // a corrected call replaces the earlier card
+          return { type: 'tool_result' as const, tool_use_id: u.id, content: JSON.stringify({ card_shown_to_him: p.items.map(i => i.label), problems: errors, saved: false, note: 'Nothing is saved until he taps Apply on the card.' }) };
+        }
         const res = runQuery(u.input as QueryInput);
         results.push(res);
         return { type: 'tool_result' as const, tool_use_id: u.id, content: forClaude(res) };
