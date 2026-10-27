@@ -55,7 +55,11 @@ export function ReviewCard({ anchor }: { anchor: string }) {
       ) : saved ? (
         <div className="review-text" style={{ opacity: busy ? 0.5 : 1 }}>{saved.text.split('\n').filter(l => l.trim()).map((l, i) => <div key={i}>{l}</div>)}</div>
       ) : null}
-      {err && <div className="small" style={{ color: 'var(--expense)', marginTop: 6 }}>{err}</div>}
+      {err && (
+        <div className="small" style={{ color: 'var(--expense)', marginTop: 6 }}>
+          {err} <button className="small bold" style={{ color: 'var(--accent)' }} onClick={() => void make()}>Try again</button>
+        </div>
+      )}
       {saved && <div className="tiny faint" style={{ marginTop: 8 }}>{saved.upTo < b ? `Up to ${shortDate(saved.upTo)}` : 'Whole month'} · written by Claude from your numbers</div>}
     </motion.div>
   );

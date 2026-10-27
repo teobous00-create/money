@@ -18,7 +18,7 @@ export interface ApiMsg { role: 'user' | 'assistant'; content: string | Block[] 
 interface ApiReply { content: Block[]; stop_reason: string; remaining?: number }
 
 export class AiError extends Error {
-  constructor(public code: 'not_setup' | 'limit' | 'not_allowed' | 'offline' | 'claude' | 'other', msg = '') { super(msg || code); }
+  constructor(public code: 'not_setup' | 'no_function' | 'no_key' | 'jwt' | 'unreachable' | 'limit' | 'not_allowed' | 'offline' | 'claude' | 'other', msg = '') { super(msg || code); }
 }
 
 type Mock = (body: unknown) => Promise<ApiReply>;
@@ -32,13 +32,19 @@ async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unkno
   if (!navigator.onLine) throw new AiError('offline');
   const { data, error } = await supabase.functions.invoke('ai', { body });
   if (error) {
-    let info: { error?: string; message?: string; remaining?: number } = {};
-    try { info = await (error as { context?: Response }).context?.json(); } catch { /* not json */ }
+    // say exactly which setup step is missing
+    const ctxRes = (error as { context?: Response }).context;
+    const status = ctxRes?.status ?? 0;
+    let info: { error?: string; message?: string; msg?: string; code?: string } = {};
+    try { info = await ctxRes?.clone().json(); } catch { /* not json */ }
     if (info.error === 'limit') { lastRemaining = 0; throw new AiError('limit'); }
     if (info.error === 'not_allowed') throw new AiError('not_allowed');
     if (info.error === 'claude') throw new AiError('claude', info.message);
-    if (info.error === 'no_key' || /not found|404|Failed to send/i.test(String(error.message))) throw new AiError('not_setup');
-    throw new AiError('other', error.message);
+    if (info.error === 'no_key') throw new AiError('no_key');
+    if (info.error === 'auth' || status === 401) throw new AiError('jwt', info.message ?? info.msg ?? '');
+    if (status === 404) throw new AiError('no_function');
+    if (error.name === 'FunctionsFetchError' || /Failed to send/i.test(String(error.message))) throw new AiError('unreachable');
+    throw new AiError('other', `${status || ''} ${info.message ?? info.msg ?? info.error ?? error.message}`.trim());
   }
   const r = data as ApiReply;
   if (typeof r.remaining === 'number') lastRemaining = r.remaining;
@@ -48,11 +54,15 @@ async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unkno
 export function aiErrorText(e: unknown): string {
   const code = e instanceof AiError ? e.code : 'other';
   if (code === 'not_setup') return 'The AI isn’t set up yet (Edge Function + key in Supabase).';
+  if (code === 'no_function') return 'Supabase has no Edge Function named “ai” yet — deploy it (step 2).';
+  if (code === 'no_key') return 'The “ai” function is there, but the key is missing: add ANTHROPIC_API_KEY in Edge Function Secrets (step 3).';
+  if (code === 'jwt') return 'The “ai” function refused the login: turn OFF “Verify JWT” in its settings, then try again.';
+  if (code === 'unreachable') return 'Can’t reach the “ai” function — it may not be deployed, or the pasted code has an error. Deploy it again (step 2).';
   if (code === 'limit') return 'You’ve used today’s 60 messages. It resets tomorrow.';
   if (code === 'not_allowed') return 'The AI is only on for your account.';
   if (code === 'offline') return 'No connection right now.';
   if (code === 'claude') return `Claude couldn’t answer: ${(e as AiError).message || 'try again'}`;
-  return 'Something went wrong — try again.';
+  return `Something went wrong${(e as Error)?.message ? ` (${(e as Error).message})` : ''} — try again.`;
 }
 
 // ---------------------------------------------------------------- summary of your money (what Claude sees)
