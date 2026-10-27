@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowDownLeft, ArrowUpRight, ChevronDown } from 'lucide-react';
 import { usePeriodStats, useTxs, useSelection, topCategoryId } from '../lib/calc';
@@ -6,7 +6,7 @@ import { useStore } from '../lib/store';
 import { setUi } from '../lib/ui';
 import { containsToday, elapsedDays, range } from '../lib/period';
 import { IconBox, Money, Bar, Segmented, ease, softSpring } from '../components/ui';
-import { AnalyticsView } from './Analytics';
+const AnalyticsView = lazy(() => import('./Analytics').then(m => ({ default: m.AnalyticsView })));
 import { BudgetLine } from '../components/Budget';
 import { useBudgetSpend } from '../lib/insights';
 import { catName, catStyle, alive } from '../lib/calc';
@@ -103,7 +103,7 @@ export function OverviewScreen() {
     return (
       <div className="screen" style={{ width: '100%' }}>
         {toggle}
-        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.22, ease }}><AnalyticsView /></motion.div>
+        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.22, ease }}><Suspense fallback={null}><AnalyticsView /></Suspense></motion.div>
       </div>
     );
   }

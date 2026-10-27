@@ -1,5 +1,4 @@
 /** Saves voice/typed commands right away (with Undo), or tells the caller which form to open. */
-import { useMemo } from 'react';
 import { getState, put, remove, nextOccurrence, useStore } from './store';
 import { setUi } from './ui';
 import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } from './format';
@@ -22,43 +21,42 @@ const saveMarks = (ids: string[]) => { try { localStorage.setItem(MARKS, JSON.st
 export const isVoiceMarked = (id: string) => marks().includes(id);
 export const unmarkVoice = (id: string) => { const m = marks(); if (m.includes(id)) saveMarks(m.filter(x => x !== id)); };
 const mark = (id: string) => saveMarks([...marks().filter(x => x !== id), id]);
+let markCache: { tick: unknown; set: Set<string> } | null = null;
+/** read once per change of the transactions, shared by every row */
 export function useVoiceMarks() {
-  const tick = useStore(s => s.transactions); // re-read when transactions change
-  return useMemo(() => new Set(marks()), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tick = useStore(s => s.transactions);
+  if (!markCache || markCache.tick !== tick) markCache = { tick, set: new Set(marks()) };
+  return markCache.set;
 }
 
 // ---------------------------------------------------------------- context
 
-export function useVoiceCtx(): Omit<VoiceCtx, 'learned' | 'today'> {
-  const accounts = useStore(s => s.accounts);
-  const categories = useStore(s => s.categories);
-  const txs = useStore(s => s.transactions);
-  const jobs = useStore(s => s.jobs);
-  const strategies = useStore(s => s.strategies);
-  const me = useStore(s => s.user?.id);
-  const analytics = useStore(s => !!s.prefs.analytics);
-  return useMemo(() => {
-    const live = Object.values(categories).filter(c => !c.deleted_at);
-    const visible = live.filter(c => !c.archived && !(c.parent_id && categories[c.parent_id]?.archived));
-    const since = addDays(todayISO(), -120);
-    const usage = new Map<string, number>();
-    for (const t of Object.values(txs)) {
-      if (t.deleted_at || t.owner_id !== me || !t.category_id || t.date < since) continue;
-      usage.set(t.category_id, (usage.get(t.category_id) ?? 0) + 1);
-      const p = categories[t.category_id]?.parent_id;
-      if (p) usage.set(p, (usage.get(p) ?? 0) + 1);
-    }
-    return {
-      accounts: Object.values(accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === me),
-      categories: visible, usage,
-      // work + trading only for the account that has the Tracker
-      jobs: analytics ? alive(jobs).filter(j => !j.archived) : [],
-      strategies: analytics ? alive(strategies).filter(s => !s.archived) : [],
-      hasShift: (jobId: string, date: string) => { const sh = getState().shifts[shiftId(jobId, date)]; return !!sh && !sh.deleted_at; },
-    };
-  }, [accounts, categories, txs, jobs, strategies, me, analytics]);
+/** Everything the phrase is matched against — built when you speak, not on every change (that slowed saving down). */
+export function voiceCtxNow(): VoiceCtx {
+  const st = getState();
+  const { accounts, categories, transactions: txs, jobs, strategies } = st;
+  const me = st.user?.id;
+  const analytics = !!st.prefs.analytics;
+  const live = Object.values(categories).filter(c => !c.deleted_at);
+  const visible = live.filter(c => !c.archived && !(c.parent_id && categories[c.parent_id]?.archived));
+  const since = addDays(todayISO(), -120);
+  const usage = new Map<string, number>();
+  for (const t of Object.values(txs)) {
+    if (t.deleted_at || t.owner_id !== me || !t.category_id || t.date < since) continue;
+    usage.set(t.category_id, (usage.get(t.category_id) ?? 0) + 1);
+    const p = categories[t.category_id]?.parent_id;
+    if (p) usage.set(p, (usage.get(p) ?? 0) + 1);
+  }
+  return {
+    accounts: Object.values(accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === me),
+    categories: visible, usage,
+    // work + trading only for the account that has the Tracker
+    jobs: analytics ? alive(jobs).filter(j => !j.archived) : [],
+    strategies: analytics ? alive(strategies).filter(s => !s.archived) : [],
+    hasShift: (jobId: string, date: string) => { const sh = getState().shifts[shiftId(jobId, date)]; return !!sh && !sh.deleted_at; },
+    learned: loadLearned(), today: todayISO(),
+  };
 }
-export const fullCtx = (c: Omit<VoiceCtx, 'learned' | 'today'>): VoiceCtx => ({ ...c, learned: loadLearned(), today: todayISO() });
 
 // ---------------------------------------------------------------- run
 

@@ -71,9 +71,24 @@ const queueKey = () => `money:queue:${state.user?.id ?? 'none'}`;
 const uiKey = 'money:ui';
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let idleSave: number | undefined;
+type IdleWin = { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+/** The small list of unsent changes is written right away; the full copy of your data waits for an idle moment
+ *  (copying everything during an animation made the app stutter after saving). */
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 250);
+  saveTimer = setTimeout(() => {
+    saveTimer = undefined;
+    void saveQueue();
+    const w = window as unknown as IdleWin;
+    if (idleSave !== undefined) w.cancelIdleCallback?.(idleSave);
+    if (w.requestIdleCallback) idleSave = w.requestIdleCallback(() => { idleSave = undefined; void saveNow(); }, { timeout: 2000 });
+    else void saveNow();
+  }, 250);
+}
+async function saveQueue() {
+  if (!state.user) return;
+  await idbSet(queueKey(), { queue, failedOps });
 }
 async function saveNow() {
   if (!state.user) return;
@@ -81,6 +96,14 @@ async function saveNow() {
   await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending, jobs, shifts, payouts, strategies, pnl });
   await idbSet(queueKey(), { queue, failedOps });
 }
+// leaving the app (switching away, locking the phone): write everything now
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden' || (saveTimer === undefined && idleSave === undefined)) return;
+  clearTimeout(saveTimer); saveTimer = undefined;
+  const w = window as unknown as IdleWin;
+  if (idleSave !== undefined) { w.cancelIdleCallback?.(idleSave); idleSave = undefined; }
+  void saveNow();
+});
 
 function saveUi() {
   try { localStorage.setItem(uiKey, JSON.stringify({ accountFilter: state.accountFilter, mode: state.period.mode })); } catch { /* ignore */ }

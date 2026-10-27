@@ -51,7 +51,7 @@ export function CategoriesScreen() {
         </div>
         <div className="sharebar" style={{ marginTop: 12 }}>
           {ranked.map(({ c, v }) => (
-            <motion.div key={c.id} layout style={{ background: c.color }} initial={{ flexGrow: 0 }} animate={{ flexGrow: v }} transition={{ duration: 0.7, ease }} />
+            <motion.div key={c.id} style={{ background: c.color }} initial={{ flexGrow: 0 }} animate={{ flexGrow: v }} transition={{ duration: 0.7, ease }} />
           ))}
         </div>
       </div>

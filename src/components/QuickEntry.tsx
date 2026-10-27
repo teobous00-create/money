@@ -6,7 +6,7 @@ import { ArrowRight, Mic, Sparkles } from 'lucide-react';
 import { haptic } from '../lib/format';
 import { toast } from './ui';
 import { interpret, type Cmd } from '../lib/voice';
-import { fullCtx, openFor, runVoice, understood, useVoiceCtx } from '../lib/voiceRun';
+import { openFor, runVoice, understood, voiceCtxNow } from '../lib/voiceRun';
 
 type Rec = {
   lang: string; interimResults: boolean; continuous: boolean; maxAlternatives: number;
@@ -96,9 +96,8 @@ export function QuickEntry({ onText, autoListen = false, placeholder }: { onText
 
 /** One handler for every place with a quick-entry box. Returns a function that takes the phrase. */
 export function useVoiceHandler(fillTx: (c: Extract<Cmd, { kind: 'tx' }>) => void, onSaved?: () => void) {
-  const ctx = useVoiceCtx();
   return (text: string) => {
-    const cmds = interpret(text, fullCtx(ctx));
+    const cmds = interpret(text, voiceCtxNow());
     if (!understood(cmds)) { toast('Didn’t catch that — try e.g. “καφές 3,5 revolut”'); return; }
     const open = runVoice(cmds);
     if (!open) onSaved?.();

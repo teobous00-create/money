@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
@@ -10,13 +10,16 @@ import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
 import { AuthScreen } from './screens/Auth';
 import { VoiceButton } from './components/QuickEntry';
-import { ChatPanel, PullHint, usePullToChat } from './components/Chat';
+import { PullHint, usePullToChat } from './components/PullToChat';
 import { isDragging } from './components/Sortable';
 import { AccountsScreen } from './screens/Accounts';
 import { CategoriesScreen } from './screens/Categories';
 import { TransactionsScreen } from './screens/Transactions';
 import { OverviewScreen } from './screens/Overview';
-import { TrackerScreen } from './screens/Tracker';
+// loaded when first needed, so the app opens faster
+const TrackerScreen = lazy(() => import('./screens/Tracker').then(m => ({ default: m.TrackerScreen })));
+const ChatPanel = lazy(() => import('./components/Chat').then(m => ({ default: m.ChatPanel })));
+const ImportSheet = lazy(() => import('./sheets/Import').then(m => ({ default: m.ImportSheet })));
 import { AddTransactionSheet } from './sheets/AddTransaction';
 import { AccountSheet } from './sheets/AccountEdit';
 import { CategorySheet } from './sheets/CategoryEdit';
@@ -25,7 +28,6 @@ import { SettingsSheet } from './sheets/Settings';
 import { FilterSheet } from './sheets/Filter';
 import { PeriodSheet } from './sheets/PeriodPicker';
 import { RecurringSheet } from './sheets/Recurring';
-import { ImportSheet } from './sheets/Import';
 import { HiddenSheet } from './sheets/Hidden';
 
 const MODE_SHORT: Record<PeriodMode, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year', all: 'All' };
@@ -58,7 +60,8 @@ function Shell() {
   useShortcut();
   const ai = useStore(s => !!s.prefs.analytics);   // the chat is only on your account
   const [chat, setChat] = useState(false);
-  const pull = usePullToChat(ai && !chat, () => setChat(true), isDragging);
+  const [chatEver, setChatEver] = useState(false);
+  const pull = usePullToChat(ai && !chat, () => { setChatEver(true); setChat(true); }, isDragging);
   return (
     <div className="app">
       <TopBar />
@@ -84,7 +87,7 @@ function Shell() {
             {tab === 'categories' && <Swipe><CategoriesScreen /></Swipe>}
             {tab === 'transactions' && <Swipe><TransactionsScreen /></Swipe>}
             {tab === 'overview' && <Swipe><OverviewScreen /></Swipe>}
-            {tab === 'tracker' && <TrackerScreen />}
+            {tab === 'tracker' && <Suspense fallback={null}><TrackerScreen /></Suspense>}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -98,7 +101,7 @@ function Shell() {
         )}
       </AnimatePresence>
       <BottomNav />
-      {ai && <ChatPanel open={chat} onClose={() => setChat(false)} />}
+      {ai && chatEver && <Suspense fallback={null}><ChatPanel open={chat} onClose={() => setChat(false)} /></Suspense>}
       <ToastHost />
       <Sheets />
     </div>
@@ -157,7 +160,7 @@ function PeriodBar() {
         onClick={() => setPeriod(shift(period, -1))} style={{ opacity: period.mode === 'all' ? 0.3 : 1 }}>
         <ChevronLeft size={24} />
       </motion.button>
-      <motion.button className="period-pill" whileTap={{ scale: 0.97 }} onClick={() => setUi({ periodPicker: true })} layout transition={softSpring}>
+      <motion.button className="period-pill" whileTap={{ scale: 0.97 }} onClick={() => setUi({ periodPicker: true })}>
         <span className="mode">{MODE_SHORT[period.mode]}</span>
         <AnimatePresence mode="wait" initial={false}>
           <motion.span key={label(period)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
@@ -223,16 +226,20 @@ function BottomNav() {
     <nav className={`nav ${tracker ? 'five' : ''}`}>
       {items.map(([id, text, I]) => (
         <motion.button key={id} className={`nav-item ${tab === id ? 'on' : ''}`} whileTap={{ scale: 0.94 }} onClick={() => setUi({ tab: id })}>
-          {tab === id && <motion.div layoutId="navind" className="nav-ind" transition={softSpring} />}
           <I size={22} strokeWidth={tab === id ? 2.2 : 1.8} />
           {text}
         </motion.button>
       ))}
+      <div className="nav-ind" style={{ left: `calc(10px + (100% - 20px) * ${Math.max(0, items.findIndex(x => x[0] === tab)) + 0.5} / ${items.length})` }} />
     </nav>
   );
 }
 
 function Sheets() {
+  // the importer is rarely used: load it the first time it's opened, then keep it
+  const importer = useUi(u => u.importer);
+  const [importerEver, setImporterEver] = useState(false);
+  useEffect(() => { if (importer) setImporterEver(true); }, [importer]);
   return (
     <>
       <AddTransactionSheet />
@@ -243,7 +250,7 @@ function Sheets() {
       <FilterSheet />
       <PeriodSheet />
       <RecurringSheet />
-      <ImportSheet />
+      {importerEver && <Suspense fallback={null}><ImportSheet /></Suspense>}
       <HiddenSheet />
     </>
   );

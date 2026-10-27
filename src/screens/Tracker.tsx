@@ -255,7 +255,7 @@ function JobCard({ job, onPay, onSettings }: { job: Job; onPay: () => void; onSe
   const noRate = job.kind === 'daily' ? !r.day : !r.hour;
   const Icon = job.kind === 'daily' ? Sun : Moon;
   return (
-    <motion.div className="card" layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }} style={{ padding: 14 }}>
+    <motion.div className="card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }} style={{ padding: 14 }}>
       <div className="row" style={{ gap: 10 }}>
         <span className="ico sm" style={{ background: job.color }}><Icon size={18} /></span>
         <span className="grow bold">{job.name}</span>

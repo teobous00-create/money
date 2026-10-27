@@ -126,16 +126,17 @@ export function Sheet({ open, onClose, title, children, full = false, right, z =
 
 // ------------------------------------------------------------- segmented control
 
-let segUid = 0;
+/** The sliding thumb is moved with a CSS transition: shared-layout animations made every screen re-measure itself. */
 export function Segmented<T extends string>({ value, options, onChange, style }: {
   value: T; options: Array<{ value: T; label: ReactNode }>; onChange: (v: T) => void; style?: CSSProperties;
 }) {
-  const [id] = useState(() => 'seg' + segUid++);
+  const i = Math.max(0, options.findIndex(o => o.value === value));
+  const n = options.length || 1;
   return (
     <div className="seg" style={style}>
+      <div className="seg-thumb" style={{ left: `calc(4px + (100% - 8px) * ${i} / ${n})`, width: `calc((100% - 8px) / ${n})` }} />
       {options.map(o => (
         <button key={o.value} className={o.value === value ? 'on' : ''} onClick={() => onChange(o.value)}>
-          {o.value === value && <motion.div layoutId={id} className="seg-thumb" transition={softSpring} />}
           {o.label}
         </button>
       ))}

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion, type PanInfo } from 'motion/react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic } from 'lucide-react';
 import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
 import { useVoiceMarks } from '../lib/voiceRun';
 import { FavoritesBar } from '../components/Favorites';
+import { dragState } from '../components/Sortable';
 import { useStore, remove, restore } from '../lib/store';
 import { setUi, useUi } from '../lib/ui';
 import { range } from '../lib/period';
@@ -22,7 +23,7 @@ export function TransactionsScreen() {
   const accs = useStore(s => s.accounts);
   const search = useUi(u => u.search);
   const [q, setQ] = useState('');
-  const [limit, setLimit] = useState(30);
+  const [limit, setLimit] = useState(12);   // days drawn at first; more load as you scroll
   const [wa, wb] = viewWindow(period);
   const projected = useProjected(wa, wb);
 
@@ -53,12 +54,12 @@ export function TransactionsScreen() {
     return out;
   }, [txs, projected, sel, period, q, cats, accs]);
 
-  useEffect(() => setLimit(30), [period, q]);
+  useEffect(() => setLimit(12), [period, q]);
   const more = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = more.current;
     if (!el) return;
-    const io = new IntersectionObserver(e => { if (e[0].isIntersecting) setLimit(l => l + 30); }, { rootMargin: '400px' });
+    const io = new IntersectionObserver(e => { if (e[0].isIntersecting) setLimit(l => l + 20); }, { rootMargin: '800px' });
     io.observe(el);
     return () => io.disconnect();
   }, [groups.length, limit]);
@@ -113,7 +114,7 @@ export function TransactionsScreen() {
   );
 }
 
-function TxRow({ t, index }: { t: Tx; index: number }) {
+const TxRow = memo(function TxRow({ t, index }: { t: Tx; index: number }) {
   const cats = useStore(s => s.categories);
   const accs = useStore(s => s.accounts);
   const me = useStore(s => s.user?.id);
@@ -126,21 +127,45 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
   const ownerName = profiles[t.owner_id]?.display_name ?? 'Partner';
   const voice = useVoiceMarks().has(t.id);   // added by voice, not checked yet
 
-  const onDragEnd = (_: unknown, info: PanInfo) => {
-    if (info.offset.x < -100 || info.velocity.x < -700) {
+  // swipe left to delete — a light hand-made gesture (a full drag engine on every row made the list slow)
+  const btn = useRef<HTMLButtonElement>(null);
+  const g = useRef<{ x: number; y: number; t: number; on: boolean; dx: number } | null>(null);
+  const moved = useRef(false);
+  const setX = (x: number, ease = false) => { const el = btn.current; if (!el) return; el.style.transition = ease ? 'transform .28s cubic-bezier(.2,.8,.2,1)' : 'none'; el.style.transform = x ? `translateX(${x}px)` : ''; };
+  const onPointerDown = (e: React.PointerEvent) => { if (!canSwipe || e.button > 0) return; g.current = { x: e.clientX, y: e.clientY, t: Date.now(), on: false, dx: 0 }; moved.current = false; };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const s = g.current;
+    if (!s) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (!s.on) {
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) { s.on = true; moved.current = true; dragState.active = true; try { btn.current?.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
+      else if (Math.abs(dy) > 8) { g.current = null; return; }
+      else return;
+    }
+    s.dx = dx;
+    setX(Math.min(0, dx) * 0.5);   // same feel as before: follows the finger at half speed, only to the left
+  };
+  const onPointerUp = () => {
+    const s = g.current;
+    g.current = null;
+    if (!s?.on) return;
+    dragState.active = false; dragState.endedAt = Date.now();   // a row swipe is not a month swipe
+    const v = s.dx / Math.max(1, Date.now() - s.t);   // px per ms
+    if (s.dx < -100 || v < -0.7) {
       haptic(14);
       remove('transactions', t.id);
       toast('Transaction deleted', { label: 'Undo', run: () => restore('transactions', t.id) });
-    }
+    } else setX(0, true);
   };
   const anim = index < 14;
   const planned = t.date > todayISO();
+  const Wrap = anim ? motion.div : 'div';
   return (
-    <motion.div className="swipe-wrap" style={planned ? { opacity: 0.6 } : undefined}
-      initial={anim ? { opacity: 0, y: 6 } : false} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease, delay: anim ? index * 0.022 : 0 }}>
+    <Wrap className="swipe-wrap" style={planned ? { opacity: 0.6 } : undefined}
+      {...(anim ? { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.28, ease, delay: index * 0.022 } } : {})}>
       {canSwipe && <div className="swipe-bg"><Trash2 size={20} /></div>}
-      <motion.button className="list-row" drag={canSwipe ? 'x' : false} dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.5, right: 0 }}
-        dragDirectionLock onDragEnd={onDragEnd} onClick={() => setUi({ addTx: { editId: t.id } })} style={{ touchAction: 'pan-y' }}>
+      <button ref={btn} className="list-row" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => { if (g.current?.on) { dragState.active = false; dragState.endedAt = Date.now(); } g.current = null; setX(0, true); }}
+        onClick={() => { if (moved.current) { moved.current = false; return; } setUi({ addTx: { editId: t.id } }); }} style={{ touchAction: 'pan-y' }}>
         {t.type === 'transfer'
           ? <div className="ico round" style={{ background: 'var(--surface-2)', color: 'var(--ink-2)' }}><ArrowLeftRight size={20} /></div>
           : <IconBox icon={style.icon} color={style.color} round />}
@@ -162,7 +187,7 @@ function TxRow({ t, index }: { t: Tx; index: number }) {
         <span className="tx-amt num" style={{ color: t.type === 'expense' ? 'var(--expense)' : t.type === 'income' ? 'var(--income)' : 'var(--ink-2)' }}>
           {t.type === 'expense' ? '−' : t.type === 'income' ? '+' : ''}{num(t.amount)}<span className="cur">€</span>
         </span>
-      </motion.button>
-    </motion.div>
+      </button>
+    </Wrap>
   );
-}
+});

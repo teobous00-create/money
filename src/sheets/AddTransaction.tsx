@@ -451,9 +451,9 @@ function Picker({ type, onType, onPick, exclude, quick }: { type: TxType; onType
         {tabs.map(([t, label, I]) => (
           <button key={t} className={`ptab ${type === t ? 'on' : ''}`} onClick={() => onType(t)}>
             <I size={18} />{label}
-            {type === t && <motion.span layoutId="ptab-ind" className="ptab-ind" transition={softSpring} />}
           </button>
         ))}
+        <span className="ptab-ind" style={{ left: `calc(100% * (${Math.max(0, tabs.findIndex(x => x[0] === type))} + 0.22) / 3)`, width: 'calc(100% * 0.56 / 3)' }} />
       </DragZone>
       <div className="sheet-body" style={{ paddingTop: 14 }}>
         {quick}
