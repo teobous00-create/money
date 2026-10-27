@@ -26,6 +26,8 @@ export function useListen(onFinal: (text: string) => void) {
   const finalText = useRef('');
   const cb = useRef(onFinal);
   cb.current = onFinal;
+  const timers = useRef<{ quiet?: ReturnType<typeof setTimeout>; max?: ReturnType<typeof setTimeout> }>({});
+  const clear = () => { clearTimeout(timers.current.quiet); clearTimeout(timers.current.max); };
   const start = () => {
     if (!SR) return;
     if (listening) { rec.current?.stop(); return; }
@@ -36,22 +38,26 @@ export function useListen(onFinal: (text: string) => void) {
     r.maxAlternatives = 1;
     finalText.current = '';
     setHeard('');
+    // stops by itself: 1 s after the last words, 5 s if nothing is said, 15 s at most
+    const quiet = (ms: number) => { clearTimeout(timers.current.quiet); timers.current.quiet = setTimeout(() => r.stop(), ms); };
     r.onresult = e => {
       let all = '';
       for (let i = 0; i < e.results.length; i++) all += e.results[i][0].transcript;
       setHeard(all);
       finalText.current = all;
+      if (all.trim()) quiet(1000);
     };
     r.onerror = e => {
+      clear();
       setListening(false);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Allow the microphone for this app to talk');
       else if (e.error === 'no-speech') toast('Didn’t hear anything');
     };
-    r.onend = () => { setListening(false); const t = finalText.current.trim(); if (t) cb.current(t); };
+    r.onend = () => { clear(); setListening(false); const t = finalText.current.trim(); if (t) cb.current(t); };
     rec.current = r;
-    try { r.start(); setListening(true); haptic(8); } catch { setListening(false); }
+    try { r.start(); setListening(true); haptic(8); quiet(5000); timers.current.max = setTimeout(() => r.stop(), 15000); } catch { setListening(false); }
   };
-  useEffect(() => () => rec.current?.abort(), []);
+  useEffect(() => () => { clear(); rec.current?.abort(); }, []);
   return { listening, heard, start, supported: !!SR };
 }
 
