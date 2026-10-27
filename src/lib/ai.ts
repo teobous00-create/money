@@ -186,7 +186,7 @@ export const QUERY_TOOL = {
   },
 };
 
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];   // also used by the work tool
 
 export function runQuery(q: QueryInput, s: State = getState(), today = todayISO()): QueryResult {
   const me = s.user?.id ?? '';
@@ -237,9 +237,69 @@ export function runQuery(q: QueryInput, s: State = getState(), today = todayISO(
 
 const forClaude = (r: QueryResult) => JSON.stringify({ count: r.count, total: r.total, average: r.count ? r2(r.total / r.count) : 0, first_date: r.from, last_date: r.to, groups: r.groups.slice(0, 40).map(g => ({ ...g, average: g.count ? r2(g.total / g.count) : 0 })), latest: r.rows.slice(0, 12).map(x => `${x.date} ${x.amount} ${x.what}${x.note ? ` "${x.note}"` : ''}`) });
 
+// ---------------------------------------------------------------- work and trading tools
+
+export interface WorkInput { from?: string; to?: string; job?: string }
+export const WORK_TOOL = {
+  name: 'query_work',
+  description: 'His logged work shifts, day by day, computed on his phone: for each day which jobs he worked, hours, pay, sales bonus and tips, plus totals per job, the days he worked both jobs, and pay with tips per hour by weekday. Use it for any question about shifts, hours, days worked, tips or what a job pays.',
+  input_schema: { type: 'object', properties: { from: { type: 'string', description: 'YYYY-MM-DD, default first day of this month' }, to: { type: 'string', description: 'YYYY-MM-DD, default today' }, job: { type: 'string', description: 'job name, default all' } } },
+};
+export function runWork(q: WorkInput, s: State = getState(), today = todayISO()): string {
+  const from = q.from ?? monthStart(today), to = q.to ?? today;
+  const jobs = alive(s.jobs).filter(j => !j.archived && (!q.job || norm(j.name).includes(norm(q.job)) || norm(q.job).includes(norm(j.name))));
+  const days = new Map<string, string[]>();
+  const tot = new Map<string, { n: number; hours: number; pay: number; bonus: number; tips: number }>();
+  const wd = new Map<string, { pay: number; hours: number; n: number }>();
+  for (const sh of alive(s.shifts).filter(x => x.date >= from && x.date <= to && x.date <= today).sort((a, b) => a.date.localeCompare(b.date))) {
+    const j = jobs.find(x => x.id === sh.job_id);
+    if (!j) continue;
+    const tip = sh.tips_tx_id ? s.transactions[sh.tips_tx_id] : null;
+    const tips = tip && !tip.deleted_at ? tip.amount : 0;
+    const pay = shiftPay(j, sh), bonus = shiftParts(j, sh).bonus;
+    const line = `${j.name}${j.kind === 'hourly' ? ` ${sh.hours}h` : ''} pay ${r2(pay)}${bonus ? ` (bonus ${r2(bonus)})` : ''}${tips ? ` tips ${r2(tips)}` : ''}`;
+    days.set(sh.date, [...(days.get(sh.date) ?? []), line]);
+    const t = tot.get(j.name) ?? { n: 0, hours: 0, pay: 0, bonus: 0, tips: 0 };
+    t.n++; t.hours += j.kind === 'hourly' ? sh.hours ?? 0 : 0; t.pay += pay; t.bonus += bonus; t.tips += tips; tot.set(j.name, t);
+    if (j.kind === 'hourly' && sh.hours) { const k = `${j.name} ${WD[fromISO(sh.date).getDay()]}`; const w = wd.get(k) ?? { pay: 0, hours: 0, n: 0 }; w.pay += pay + tips; w.hours += sh.hours; w.n++; wd.set(k, w); }
+  }
+  const both = [...days.entries()].filter(([, l]) => l.length >= 2).map(([d]) => d);
+  return JSON.stringify({
+    from, to,
+    totals: Object.fromEntries([...tot.entries()].map(([k, v]) => [k, { shifts: v.n, hours: r2(v.hours), pay: r2(v.pay), bonus: r2(v.bonus), tips: r2(v.tips), per_hour_with_tips: v.hours ? r2((v.pay + v.tips) / v.hours) : null }])),
+    days_with_both_jobs: both, count_both: both.length,
+    per_hour_with_tips_by_weekday: Object.fromEntries([...wd.entries()].map(([k, v]) => [k, { per_hour: r2(v.pay / v.hours), shifts: v.n }])),
+    by_day: Object.fromEntries([...days.entries()].map(([d, l]) => [`${d} ${WD[fromISO(d).getDay()]}`, l.join('; ')])),
+  });
+}
+
+export interface TradingInput { from?: string; to?: string; strategy?: string }
+export const TRADING_TOOL = {
+  name: 'query_trading',
+  description: 'His logged daily trading P&L per strategy, computed on his phone: daily values, totals, winning/losing days, best and worst day, longest losing streak. Not part of account balances. Use it for any trading question.',
+  input_schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' }, strategy: { type: 'string', description: 'strategy name or initials, default all' } } },
+};
+export function runTrading(q: TradingInput, s: State = getState(), today = todayISO()): string {
+  const from = q.from ?? '0000-01-01', to = q.to ?? today;
+  const want = q.strategy ? norm(q.strategy) : null;
+  const strategies = alive(s.strategies).filter(st => !want || norm(st.name).includes(want) || norm(st.name).split(/\s+/).map(w => w[0]).join('') === want);
+  const ids = new Set(strategies.map(x => x.id));
+  const rows = alive(s.pnl).filter(p => ids.has(p.strategy_id) && p.date >= from && p.date <= to).sort((a, b) => a.date.localeCompare(b.date));
+  const byDay = new Map<string, number>(); for (const p of rows) byDay.set(p.date, (byDay.get(p.date) ?? 0) + p.pnl);
+  const vals = [...byDay.entries()];
+  let streak = 0, worstStreak = 0; for (const [, v] of vals) { streak = v < 0 ? streak + 1 : 0; worstStreak = Math.max(worstStreak, streak); }
+  return JSON.stringify({
+    from: vals[0]?.[0] ?? from, to, strategies: strategies.map(x => x.name),
+    total: r2(rows.reduce((x, p) => x + p.pnl, 0)), days: vals.length, winning_days: vals.filter(([, v]) => v > 0).length, losing_days: vals.filter(([, v]) => v < 0).length,
+    best_day: vals.sort((a, b) => b[1] - a[1])[0] ?? null, worst_day: [...vals].sort((a, b) => a[1] - b[1])[0] ?? null, longest_losing_streak_days: worstStreak,
+    per_strategy: Object.fromEntries(strategies.map(st => [st.name, r2(rows.filter(p => p.strategy_id === st.id).reduce((x, p) => x + p.pnl, 0))])),
+    daily: Object.fromEntries([...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-60).map(([d, v]) => [d, r2(v)])),
+  });
+}
+
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes), the query_transactions tool (exact sums over every transaction, computed on his phone), and ABOUT ME (his own description of his goals and situation; it may be empty).
+const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes), three tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips) and query_trading (daily P&L per strategy) — and ABOUT ME (his own description of his goals and situation; it may be empty).
 
 Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
 
@@ -250,7 +310,7 @@ How to answer
 
 Numbers
 - Use only DATA, tool results, or tool results from earlier in this conversation. Never estimate, round or invent a figure. If something is not in the data, say so and say what would answer it.
-- Before stating any figure that is not literally in DATA, call query_transactions. Call it as many times as you need (other periods, filters, group_by) to check an explanation before you give it.
+- Before stating any figure that is not literally in DATA, call the matching tool (query_transactions, query_work or query_trading). Call it as many times as you need (other periods, filters, group_by) to check an explanation before you give it.
 - Simple arithmetic on known numbers is fine (differences, per month, hours = € ÷ hourly pay); show it plainly.
 - Money format: 1.234,56 €.
 
@@ -279,14 +339,18 @@ const aboutMe = () => (getState().prefs.aboutMe ?? '').trim() || '(empty)';
 /** Asks; if the answer hits the length limit, asks for the rest (twice at most) and joins it. */
 async function complete(system: unknown, msgs: ApiMsg[], tools?: unknown): Promise<ApiReply> {
   let r = await callAI({ system, messages: msgs, tools });
+  if (r.stop_reason !== 'max_tokens' || !textOf(r).trim()) return r;
   let text = textOf(r);
   for (let i = 0; i < 2 && r.stop_reason === 'max_tokens'; i++) {
     const more = [...msgs, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: CONTINUE }];
     r = await callAI({ system, messages: more, tools });
     text += textOf(r);
   }
-  return { ...r, content: [...r.content.filter(x => x.type !== 'text'), { type: 'text', text }] };
+  return { ...r, content: [{ type: 'text', text }, ...r.content.filter(x => x.type !== 'text')] };
 }
+
+/** the API refuses empty text blocks, e.g. a tool call with no words before it */
+const clean = (content: Block[]) => content.filter(x => x.type !== 'text' || x.text.trim());
 
 /** What it looked up in a turn, kept in the conversation so follow-up questions can build on it. */
 const memo = (r: QueryResult) => `${r.label} ${r.from}–${r.to}: total ${r.total}, ${r.count} entries${r.groups.length ? `; by ${r.input.group_by}: ${r.groups.slice(0, 14).map(g => `${g.key} ${g.total}`).join(', ')}` : ''}`;
@@ -310,12 +374,14 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
   }
   const results: QueryResult[] = [];
   for (let step = 0; step < 8; step++) {
-    const r = await complete(system, msgs, [QUERY_TOOL]);
+    const r = await complete(system, msgs, [QUERY_TOOL, WORK_TOOL, TRADING_TOOL]);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
     if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, at: new Date().toISOString() };
-    msgs.push({ role: 'assistant', content: r.content });
+    msgs.push({ role: 'assistant', content: clean(r.content) });
     msgs.push({
       role: 'user', content: uses.map(u => {
+        if (u.name === WORK_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runWork(u.input as WorkInput) };
+        if (u.name === TRADING_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runTrading(u.input as TradingInput) };
         const res = runQuery(u.input as QueryInput);
         results.push(res);
         return { type: 'tool_result' as const, tool_use_id: u.id, content: forClaude(res) };

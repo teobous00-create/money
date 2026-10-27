@@ -9,6 +9,13 @@ await ctx.addInitScript(() => {
     if (typeof body.system === 'string') return { content: [{ type: 'text', text: '• Αποταμίευσες 239,04 € (μέσος όρος 71,58 €).\n• Μεγαλύτερη κατηγορία: Σπίτι.' }], stop_reason: 'end_turn', remaining: 58 };
     const last = body.messages[body.messages.length - 1];
     if (last.content === 'Continue exactly where you stopped. Do not repeat anything.') return { content: [{ type: 'text', text: ' and this is the rest.' }], stop_reason: 'end_turn', remaining: 50 };
+    if (typeof last.content === 'string' && /both jobs/.test(last.content)) return { content: [{ type: 'text', text: '' }, { type: 'tool_use', id: 'w1', name: 'query_work', input: { from: '2026-10-01' } }], stop_reason: 'tool_use', remaining: 49 };
+    if (Array.isArray(last.content) && last.content[0]?.tool_use_id === 'w1') {
+      const prev = body.messages[body.messages.length - 2];
+      window.__emptySent = prev.content.some(b => b.type === 'text' && !b.text.trim());
+      window.__work = JSON.parse(last.content[0].content);
+      return { content: [{ type: 'text', text: `Both jobs on ${window.__work.count_both} days.` }], stop_reason: 'end_turn', remaining: 48 };
+    }
     if (typeof last.content === 'string' && /long one/.test(last.content)) {
       window.__sawMemo = body.messages.some(m => typeof m.content === 'string' && m.content.includes('[Looked up: Delivery'));
       return { content: [{ type: 'text', text: 'This answer was cut' }], stop_reason: 'max_tokens', remaining: 51 };
@@ -62,6 +69,10 @@ await p.locator('.chat .quick-input').fill('and a long one please');
 await p.locator('.chat .quick-input').press('Enter'); await p.waitForTimeout(1500);
 ok(await p.evaluate(() => window.__sawMemo) === true, 'follow-up carries the numbers it found before');
 ok((await p.locator('.chat .bubble.ai').last().innerText()).trim() === 'This answer was cut and this is the rest.', 'cut answer continued and joined');
+await p.locator('.chat .quick-input').fill('Which days did I work both jobs this month?');
+await p.locator('.chat .quick-input').press('Enter'); await p.waitForTimeout(1500);
+ok(await p.evaluate(() => window.__emptySent) === false && 'days_with_both_jobs' in (await p.evaluate(() => window.__work)), 'work tool answered; no empty text block sent (the error you saw)');
+ok(/Both jobs on \d+ days/.test(await p.locator('.chat .bubble.ai').last().innerText()), 'answer shown');
 await p.locator('[aria-label="New chat"]').click(); await p.waitForTimeout(300);
 await p.locator('.chat .quick-input').fill('Πόσα έδωσα σε delivery φέτος;');
 await p.locator('.chat .quick-input').press('Enter'); await p.waitForTimeout(1800);
