@@ -62,7 +62,7 @@ ok(ans.includes(String(tr.total)), 'answer uses the computed number');
 ok(await p.locator('.chat .qcard').count() === 1 && (await p.locator('.chat .qbar').count()) >= 3, 'card with the exact numbers and monthly bars');
 const sys = await p.evaluate(() => window.__calls[0].system[2].text);
 ok(/ACCOUNTS/.test(sys) && /MONTHS/.test(sys) && /Σπίτι/.test(sys) && !/Netflix/.test(sys), 'summary sent, not single entries (no notes)');
-ok(/58 left today/.test(await p.locator('.chat-head').innerText()), 'shows what is left today');
+ok(!/left today/.test(await p.locator('.chat-head').innerText()), 'your account: no daily count shown (no limit)');
 await p.screenshot({ path: `${OUT}/c2.png` });
 // follow-up: remembers what it looked up; a cut answer is continued automatically
 await p.locator('.chat .quick-input').fill('and a long one please');

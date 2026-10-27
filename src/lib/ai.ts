@@ -27,7 +27,30 @@ type Mock = (body: unknown) => Promise<ApiReply>;
 let lastRemaining: number | null = null;
 export const aiRemaining = () => lastRemaining;
 
-async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unknown }): Promise<ApiReply> {
+/** Your account has no daily limit: the app zeroes your own usage counter so the server's 60 never kicks in. */
+const isTeo = () => !!getState().prefs.analytics;
+async function resetUsage() {
+  const st = getState();
+  if (!supabase || !st.user) return;
+  const { data } = await supabase.from('user_prefs').select('prefs').eq('user_id', st.user.id).maybeSingle();
+  const prefs = (data?.prefs ?? {}) as Record<string, unknown>;
+  const u = prefs.aiUsage as { count?: number } | undefined;
+  if (!u || (u.count ?? 0) === 0) return;
+  await supabase.from('user_prefs').update({ prefs: { ...prefs, aiUsage: { day: todayISO(), count: 0 } } }).eq('user_id', st.user.id);
+}
+
+async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unknown }, retry = true): Promise<ApiReply> {
+  try {
+    const r = await callOnce(body);
+    if (isTeo()) { lastRemaining = null; if (r.remaining != null && r.remaining <= 20) void resetUsage().catch(() => {}); }
+    return r;
+  } catch (e) {
+    if (retry && isTeo() && e instanceof AiError && e.code === 'limit') { await resetUsage(); lastRemaining = null; return callAI(body, false); }
+    throw e;
+  }
+}
+
+async function callOnce(body: { system: unknown; messages: ApiMsg[]; tools?: unknown }): Promise<ApiReply> {
   const mock = (window as unknown as { __aiMock?: Mock }).__aiMock;
   if (mock) { const r = await mock(body); if (typeof r.remaining === 'number') lastRemaining = r.remaining; return r; }
   if (!REMOTE || !supabase) throw new AiError('not_setup');
