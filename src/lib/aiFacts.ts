@@ -5,7 +5,7 @@
 import type { State } from './store';
 import { alive, catName, ruleDates } from './calc';
 import { addDays, fromISO, num, round2, toISO } from './format';
-import { payPeriods, shiftPay, shiftParts } from './tracker';
+import { payPeriods, shiftPay, shiftParts, monthBonus } from './tracker';
 import type { Category, Tx } from './types';
 
 export const monthStart = (d: string) => d.slice(0, 7) + '-01';
@@ -221,7 +221,9 @@ export function reviewFacts(s: State, anchor: string, today: string): string | n
         const wd = workByWeekday(b, j.id, addDays(upTo, -90), upTo).filter(x => x.n >= 2);
         L.push(`WORK ${j.name} (hourly + tips): ${w.n} shifts, ${num(w.hours)} h, pay ${e(w.pay)}, tips ${e(w.tips)} (${w.n ? e(round2(w.tips / w.n)) : '—'}/shift), ${w.perHour != null ? e(w.perHour) + '/h with tips' : 'no hours'}; usual ${avg('n') ?? '—'} shifts, ${avg('hours') ?? '—'} h, ${uh ? e(round2(up / uh)) + '/h' : '—'}.${wd.length >= 2 ? ` Last 90 days by weekday (€/h with tips): best ${wd.slice(0, 2).map(x => `${x.d} ${e(round2(x.rate))} (${x.n} shifts)`).join(', ')}; worst ${wd.slice(-1).map(x => `${x.d} ${e(round2(x.rate))} (${x.n} shifts)`).join('')}.` : ''}`);
       } else {
-        L.push(`WORK ${j.name} (day pay + sales bonus): ${w.n} days, pay ${e(w.pay)} of which bonus ${e(w.bonus)} (${w.n ? e(round2(w.bonus / w.n)) : '—'}/day); usual ${avg('n') ?? '—'} days, bonus ${avg('bonus') != null ? e(avg('bonus')!) : '—'}.`);
+        const t = monthBonus(j, alive(s.shifts), a, today);
+        if (t) L.push(`WORK ${j.name} (day pay + monthly contacts bonus: ${t.per} € per contact for all contacts, only if the month's average per worked day is at least ${t.min}, else 0): ${t.worked} days worked, ${t.planned} more planned, day pay ${e(w.pay)}; contacts ${t.contacts}, average ${num(t.avg)}/day; ${t.over ? `bonus ${e(t.bonus)}` : t.planned ? `needs ${num(t.needPerDay ?? 0)}/day on the planned days to keep the target (${t.target} total); at this pace ${t.projected} contacts → bonus ${e(t.projectedBonus)}` : `bonus so far ${e(t.bonus)}`}.`);
+        else L.push(`WORK ${j.name} (day pay + sales bonus): ${w.n} days, pay ${e(w.pay)} of which bonus ${e(w.bonus)} (${w.n ? e(round2(w.bonus / w.n)) : '—'}/day); usual ${avg('n') ?? '—'} days, bonus ${avg('bonus') != null ? e(avg('bonus')!) : '—'}.`);
       }
       const owed = payPeriods(j, alive(s.shifts), s.payouts, s.transactions);
       if (owed.owed > 0) L.push(`  owed to him by ${j.name} now: ${e(owed.owed)}`);

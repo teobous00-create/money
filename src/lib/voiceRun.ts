@@ -6,7 +6,7 @@ import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } fro
 import { catName, alive } from './calc';
 import { complete, type Cmd, type VoiceCtx } from './voice';
 import { loadLearned } from './quickparse';
-import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift } from './tracker';
+import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf } from './tracker';
 import { toast } from '../components/ui';
 import type { Recurring, Tx, TxType } from './types';
 
@@ -122,12 +122,14 @@ function saveShift(c: Extract<Cmd, { kind: 'shift' }>): Done | null {
   const mine = Object.values(st.accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === st.user?.id);
   const tips = c.tips ?? liveTip?.amount ?? 0;
   const base = job.kind === 'daily' ? c.base ?? existing?.base ?? rateAt(job, date).day ?? 0 : null;
-  const bonus = job.kind === 'daily' ? c.bonus ?? existing?.bonus ?? 0 : null;
+  const rule = contactRule(job, date);   // contacts target: what you say is the day's contacts
+  const bonus = job.kind === 'daily' && !rule ? c.bonus ?? existing?.bonus ?? 0 : null;
+  const contacts = rule ? c.bonus ?? (existing ? contactsOf(job, existing) : 0) : null;
   const undo = writeShift(job, date, {
-    worked: true, hours, base, bonus, tips,
+    worked: true, hours, base, bonus, tips, contacts,
     tipsAccount: liveTip?.account_id ?? job.tips_account_id ?? mine.find(a => /μετρητ|cash/i.test(a.name))?.id ?? mine[0]?.id ?? null,
   });
-  const detail = job.kind === 'daily' ? (bonus ? `bonus ${money(bonus)}` : 'worked') : `${num(hours)}h${tips ? ` · tips ${money(tips)}` : ''}`;
+  const detail = job.kind === 'daily' ? (rule ? (contacts ? `${contacts} contacts` : 'worked') : bonus ? `bonus ${money(bonus)}` : 'worked') : `${num(hours)}h${tips ? ` · tips ${money(tips)}` : ''}`;
   return { label: `${job.name} · ${detail}${when(date)}`, amount: 0, undo, edit: () => setUi({ tab: 'tracker', shiftDay: date }) };
 }
 

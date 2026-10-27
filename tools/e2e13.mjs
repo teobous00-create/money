@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await ctx.addInitScript(() => localStorage.setItem('money:rule-contacts', '1'));   // keeps the old per-day bonus (no contacts target) for this test
 await ctx.addInitScript(() => {
   window.__say = '3€ bonus σήμερα';
   window.SpeechRecognition = window.webkitSpeechRecognition = class {
@@ -37,7 +38,7 @@ const tt = await p.locator('.toast').innerText().catch(() => '');
 ok(/Morning · bonus 3 €/.test(tt), 'bonus went to the morning shift: ' + tt);
 await p.screenshot({ path: `${OUT}/m2.png` });
 await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(900);
-ok(/40 € \+ 3 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'owed to you: 40 € + 3 €');
+ok(/40 € \+ 3 €/.test(await p.locator('.card', { hasText: 'Morning' }).first().innerText()), 'owed to you: 40 € + 3 €');
 await p.goto(process.env.URL + '?a=shift'); await p.waitForTimeout(1200);
 ok(await p.locator('.nav-item.on').innerText() === 'Tracker', 'shortcut still wins over Transactions');
 console.log('errors:', errors.length ? errors : 'none');

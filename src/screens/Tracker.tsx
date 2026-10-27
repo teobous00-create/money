@@ -10,7 +10,7 @@ import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
 import {
-  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, savePnl,
+  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
   useStrategies, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
@@ -102,6 +102,12 @@ function useEnsureJobs() {
     // jobs created by an earlier version: fill in the salary/bonus categories once if we can find them
     const fill = alive(jobs).filter(j => j.kind === 'daily' && !j.salary_category_id && j.bonus_category_id === undefined);
     if (fill.length) putMany('jobs', fill.map(j => ({ ...j, salary_category_id: find(/pda salary|salary/i), bonus_category_id: find(/pda bonus|bonus/i) })));
+    // the morning job's contacts rule (15 a day on average, 1 € per contact), set once; change it in ⚙
+    if (lsGet('money:rule-contacts') !== '1') {
+      const day = alive(jobs).filter(j => j.kind === 'daily' && !j.archived && !(j.rates ?? []).some(r => (r.min ?? 0) > 0) && (j.rates ?? []).length);
+      if (day.length) { putMany('jobs', day.map(j => ({ ...j, rates: j.rates.map(r => ({ ...r, min: 15, bonus: 1 })) }))); lsSet('money:rule-contacts', '1'); }
+      else if (alive(jobs).some(j => (j.rates ?? []).some(r => (r.min ?? 0) > 0))) lsSet('money:rule-contacts', '1');
+    }
   }, [jobs, lastSync, cats, accs, me]);
 }
 
@@ -119,12 +125,12 @@ function Work() {
   useEffect(() => { if (wantPay) { setUi({ payJob: null }); setPayJob(jobs.find(j => j.id === wantPay) ?? null); } }, [wantPay, jobs]);
   const [settings, setSettings] = useState(false);
   const byDay = useMemo(() => {
-    const m = new Map<string, Array<{ job: Job; hours: number; bonus: number }>>();
+    const m = new Map<string, Array<{ job: Job; hours: number; bonus: number; contacts: number | null }>>();
     for (const s of shifts) {
       const job = jobs.find(j => j.id === s.job_id);
       if (!job) continue;
       const l = m.get(s.date) ?? [];
-      l.push({ job, hours: s.hours, bonus: shiftParts(job, s).bonus });
+      l.push({ job, hours: s.hours, bonus: shiftParts(job, s).bonus, contacts: contactRule(job, s.date) ? contactsOf(job, s) : null });
       m.set(s.date, l);
     }
     return m;
@@ -154,7 +160,7 @@ function Work() {
                 <span className="cal-jobs">
                   {list.map(x => (
                     <span key={x.job.id} className="cal-chip" style={{ background: x.job.color }}>
-                      {x.job.kind === 'daily' ? (x.bonus ? `+${num(x.bonus)}` : '✓') : `${num(x.hours)}h`}
+                      {x.job.kind === 'daily' ? (x.contacts != null ? (x.contacts ? `${x.contacts}` : '✓') : x.bonus ? `+${num(x.bonus)}` : '✓') : `${num(x.hours)}h`}
                     </span>
                   ))}
                 </span>
@@ -222,6 +228,16 @@ function MonthPlan({ anchor }: { anchor: string }) {
                 </div>
                 {p.worked.n > 0 && <div className="tiny muted num">Worked: {line(r.job, p.worked)}</div>}
                 {p.planned.n > 0 && <div className="tiny num" style={{ color: 'var(--accent)' }}>Planned: {line(r.job, p.planned)}{p.tipsEst ? ` · tips ≈ ${money(p.tipsEst)}` : ''}</div>}
+                {(() => {
+                  const t = monthBonus(r.job, shifts, p.a, today);
+                  if (!t || (!t.worked && !t.planned)) return null;
+                  return (
+                    <div className="tiny num" style={{ fontWeight: 600, color: t.met ? 'var(--income)' : t.worked ? 'var(--warn)' : 'var(--ink-2)' }}>
+                      Bonus: {t.worked ? `${t.contacts} contacts, avg ${num(t.avg)}` : `target ${t.min}/day`}{' → '}
+                      {t.over ? money(t.bonus) : t.met ? `≈ ${money(t.projectedBonus)} if the average stays ≥ ${t.min}` : `${money(t.target * t.per)} only if you reach ${t.target} (${t.min}/day)`}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -256,7 +272,7 @@ function JobCard({ job, onPay, onSettings }: { job: Job; onPay: () => void; onSe
                 <div className="num" style={{ fontSize: 22, fontWeight: 650, letterSpacing: '-0.02em', color: owed > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>
                   {money(owedBase)} <span className="muted" style={{ fontWeight: 500 }}>+</span> {money(owedBonus)}
                 </div>
-                <div className="tiny muted">salary + bonus</div>
+                <div className="tiny muted">salary + bonus{current.pendingBonus ? ` · +${money(current.pendingBonus)} pending` : ''}</div>
               </>
             ) : (
               <div className="num" style={{ fontSize: 24, fontWeight: 650, letterSpacing: '-0.02em', color: owed > 0 ? 'var(--ink)' : 'var(--ink-3)' }}>{money(owed)}</div>
@@ -264,12 +280,41 @@ function JobCard({ job, onPay, onSettings }: { job: Job; onPay: () => void; onSe
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="tiny muted" style={{ fontWeight: 600 }}>This period · {periodLabel(current)}</div>
-            <div className="num bold">{split ? `${money(current.base)} + ${money(current.bonus)}` : money(current.earned)}</div>
+            <div className="num bold">{split ? `${money(current.base)} + ${money(current.target ? current.pendingBonus ?? 0 : current.bonus)}` : money(current.earned)}</div>
             <div className="tiny muted num">{current.shifts} {job.kind === 'daily' ? (current.shifts === 1 ? 'day' : 'days') : `${current.shifts === 1 ? 'shift' : 'shifts'} · ${num(current.hours)}h`}</div>
           </div>
         </div>
       )}
+      {!noRate && current.target && <TargetBar t={current.target} month={monthFmt.format(fromISO(current.start)).split(' ')[0]} />}
     </motion.div>
+  );
+}
+
+/** Contacts target for the month: progress, the pace you need on the planned days, and what the bonus becomes. */
+function TargetBar({ t, month }: { t: MonthBonus; month: string }) {
+  const goal = t.target || t.min;
+  const hard = t.needPerDay != null && t.needPerDay > t.min * 1.25;
+  const color = t.met && (t.needPerDay == null || t.needPerDay <= t.min) ? 'var(--income)' : !t.planned && !t.met ? 'var(--expense)' : hard ? 'var(--expense)' : 'var(--warn)';
+  const status = !t.worked
+    ? `Target ${t.min} a day on average`
+    : t.planned
+      ? `Average ${num(t.avg)} · need ${num(t.needPerDay ?? 0)} a day on the ${t.planned} planned ${t.planned === 1 ? 'day' : 'days'}`
+      : `Average ${num(t.avg)} a day · target ${t.min}`;
+  const outlook = !t.worked ? null
+    : t.met ? `At this pace: ${t.projected} contacts → bonus ${money(t.projectedBonus)}`
+      : `Below ${t.min} a day → bonus 0 € (it would be ${money(t.planned ? t.target * t.per : t.contacts * t.per)} at ${t.min}/day)`;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="row small" style={{ justifyContent: 'space-between' }}>
+        <span style={{ fontWeight: 600 }}>Contacts · {month}</span>
+        <span className="num bold">{t.contacts} <span className="muted" style={{ fontWeight: 500 }}>/ {goal}</span></span>
+      </div>
+      <div className="bar" style={{ marginTop: 6, height: 8 }}>
+        <motion.div style={{ background: color }} initial={{ width: 0 }} animate={{ width: `${Math.min(1, goal ? t.contacts / goal : 0) * 100}%` }} transition={{ duration: 0.7, ease }} />
+      </div>
+      <div className="tiny muted num" style={{ marginTop: 5 }}>{status}</div>
+      {outlook && <div className="tiny num" style={{ marginTop: 2, fontWeight: 600, color }}>{outlook}</div>}
+    </div>
   );
 }
 
@@ -303,7 +348,9 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
     const parts = live ? shiftParts(j, live) : { base: rateAt(j, date).day ?? 0, bonus: 0 };
     return [j.id, {
       worked: !!live, hours: live?.hours ?? 0,
-      base: parts.base ? num(parts.base).replace(/\./g, '') : '', bonus: parts.bonus ? num(parts.bonus).replace(/\./g, '') : '',
+      base: parts.base ? num(parts.base).replace(/\./g, '') : '',
+      // contacts target: this field holds the day's contacts instead of a bonus in €
+      bonus: contactRule(j, date) ? (live && contactsOf(j, live) ? String(contactsOf(j, live)) : '') : parts.bonus ? num(parts.bonus).replace(/\./g, '') : '',
       tips: tip && !tip.deleted_at ? num(tip.amount).replace(/\./g, '') : '', account: tip?.account_id ?? j.tips_account_id ?? accounts[0]?.id ?? '',
     }];
   }));
@@ -316,6 +363,7 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
       writeShift(j, date, {
         worked: f.worked, hours: f.hours, base: j.kind === 'daily' ? parseNum(f.base) : null,
         bonus: j.kind === 'daily' ? (f.bonus.trim() ? parseNum(f.bonus) : 0) : null,
+        contacts: contactRule(j, date) ? (f.bonus.trim() ? parseNum(f.bonus) : 0) : null,
         tips: j.kind === 'hourly' ? parseNum(f.tips) : 0, tipsAccount: f.account || null,
       });
     }
@@ -350,8 +398,8 @@ function ShiftForm({ date, onClose }: { date: string; onClose: () => void }) {
                       initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease }}>
                       <div className="field grow" style={{ margin: 0 }}><label>Day pay</label>
                         <input className="input num" inputMode="decimal" placeholder="0" value={f.base} onChange={e => set(j.id, { base: e.target.value })} style={{ height: 44 }} /></div>
-                      <div className="field grow" style={{ margin: 0 }}><label>Bonus</label>
-                        <input className="input num" inputMode="decimal" placeholder="0" value={f.bonus} onChange={e => set(j.id, { bonus: e.target.value })} style={{ height: 44 }} /></div>
+                      <div className="field grow" style={{ margin: 0 }}><label>{contactRule(j, date) ? 'Contacts' : 'Bonus'}</label>
+                        <input className="input num" inputMode={contactRule(j, date) ? 'numeric' : 'decimal'} placeholder="0" value={f.bonus} onChange={e => set(j.id, { bonus: e.target.value })} style={{ height: 44 }} /></div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -510,6 +558,8 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
   const [pay, setPay] = useState<Job['pay']>(job?.pay ?? 'monthly');
   const [day, setDay] = useState(r.day ? num(r.day).replace(/\./g, '') : '');
   const [hour, setHour] = useState(r.hour ? num(r.hour).replace(/\./g, '') : '');
+  const [per, setPer] = useState(r.min ? num(r.bonus || 1).replace(/\./g, '') : '');
+  const [minAvg, setMinAvg] = useState(r.min ? String(r.min) : '');
   const [from, setFrom] = useState(todayISO());
   const [salary, setSalary] = useState(job?.salary_category_id ?? '');
   const [bonusCat, setBonusCat] = useState(job?.bonus_category_id ?? '');
@@ -528,6 +578,11 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
       const nr = kind === 'daily' ? { day: parseNum(day) } : { hour: parseNum(hour) };
       rates = hasRates ? [...rates.filter(x => x.from !== from), { from, ...nr }] : [{ from: '0000-01-01', ...nr }];
     }
+    // contacts target: the same rule on every rate (it isn't tied to a pay change)
+    if (kind === 'daily') {
+      const m = minAvg.trim() ? Math.round(parseNum(minAvg)) : 0;
+      rates = rates.map(x => (m > 0 ? { ...x, min: m, bonus: per.trim() ? parseNum(per) : 1 } : { ...x, min: undefined }));
+    }
     put('jobs', {
       id: job?.id ?? uuid(), owner_id: '', name: name.trim(), kind, pay, rates, color: job?.color ?? COLORS[(jobs.length * 3 + 8) % COLORS.length],
       salary_category_id: salary || null, bonus_category_id: kind === 'daily' ? bonusCat || null : null, tips_category_id: kind === 'hourly' ? tips || null : null, tips_account_id: kind === 'hourly' ? tipsAcc || null : null,
@@ -545,10 +600,19 @@ function JobForm({ job, onClose }: { job: Job | null; onClose: () => void }) {
       </div>
       {kind === 'daily' ? (
         <div className="field"><label>Usual day pay</label><input className="input num" inputMode="decimal" value={day} onChange={e => setDay(e.target.value)} placeholder="0" />
-          <span className="tiny muted" style={{ paddingLeft: 4 }}>Filled in for each day; you can change it per day and add that day's bonus.</span></div>
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Filled in for each day; you can change it per day.</span></div>
       ) : (
         <div className="field"><label>Per hour</label><input className="input num" inputMode="decimal" value={hour} onChange={e => setHour(e.target.value)} placeholder="0" /></div>
       )}
+      {kind === 'daily' && (
+        <div className="row" style={{ gap: 10 }}>
+          <div className="field grow"><label>Bonus € per contact</label>
+            <input className="input num" inputMode="decimal" value={per} onChange={e => setPer(e.target.value)} placeholder="1" /></div>
+          <div className="field grow"><label>Target: contacts a day</label>
+            <input className="input num" inputMode="numeric" value={minAvg} onChange={e => setMinAvg(e.target.value)} placeholder="none" /></div>
+        </div>
+      )}
+      {kind === 'daily' && minAvg.trim() && <div className="tiny muted" style={{ margin: '-6px 4px 12px' }}>The month's bonus is € per contact for all contacts, only if the average per worked day reaches the target; otherwise 0.</div>}
       {hasRates && changed && (
         <div className="field"><label>New rate applies from</label>
           <input className="input" type="date" value={from} onChange={e => e.target.value && setFrom(e.target.value)} />

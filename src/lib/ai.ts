@@ -8,7 +8,7 @@ import { supabase, REMOTE } from './supabase';
 import { alive, computeBalances, catName } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
-import { payPeriods, rateAt, shiftParts, shiftPay } from './tracker';
+import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf } from './tracker';
 import { chatDetail } from './aiFacts';
 import { CHANGES_TOOL, resolveChanges, type Proposal } from './aiActions';
 import type { Category, Tx } from './types';
@@ -137,6 +137,8 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
         const earned = r2(sh.reduce((x, y) => x + shiftPay(j, y), 0));
         const bonus = r2(sh.reduce((x, y) => x + shiftParts(j, y).bonus, 0));
         const tips = j.tips_category_id ? r2(mine.filter(t => t.type === 'income' && t.category_id === j.tips_category_id && t.date >= m && t.date <= e && t.date <= today).reduce((x, t) => x + t.amount, 0)) : 0;
+        const mb = monthBonus(j, shifts, m, today);
+        if (mb) L.push(`  ${ym(m)}: contacts ${mb.contacts} over ${mb.worked} days (avg ${mb.avg}; target ${mb.min}/day → ${mb.over ? `bonus ${mb.bonus}` : mb.met ? `on track, bonus ${mb.bonus} so far` : `below target, bonus 0 so far`}${mb.planned ? `; ${mb.planned} days planned, need ${mb.needPerDay}/day` : ''})`);
         L.push(`  ${ym(m)}: ${sh.length} ${j.kind === 'daily' ? 'days' : 'shifts'}, ${j.kind === 'hourly' ? `${hours}h, ` : ''}earned ${earned}${bonus ? ` (bonus ${bonus})` : ''}${tips ? `, tips ${tips} (${r2(tips / sh.length)}/shift)` : ''}${j.kind === 'hourly' && hours ? `, ${r2((earned + tips) / hours)}/h with tips` : ''}`);
       }
       const fut = shifts.filter(x => x.job_id === j.id && x.date > today).sort((a, b) => a.date.localeCompare(b.date));
@@ -264,7 +266,7 @@ export function runWork(q: WorkInput, s: State = getState(), today = todayISO())
     const tip = sh.tips_tx_id ? s.transactions[sh.tips_tx_id] : null;
     const tips = tip && !tip.deleted_at ? tip.amount : 0;
     const pay = shiftPay(j, sh), bonus = shiftParts(j, sh).bonus;
-    const line = `${j.name}${j.kind === 'hourly' ? ` ${sh.hours}h` : ''} pay ${r2(pay)}${bonus ? ` (bonus ${r2(bonus)})` : ''}${tips ? ` tips ${r2(tips)}` : ''}`;
+    const line = `${j.name}${j.kind === 'hourly' ? ` ${sh.hours}h` : ''} pay ${r2(pay)}${bonus ? ` (bonus ${r2(bonus)})` : ''}${contactRule(j, sh.date) ? ` contacts ${contactsOf(j, sh)}` : ''}${tips ? ` tips ${r2(tips)}` : ''}`;
     days.set(sh.date, [...(days.get(sh.date) ?? []), line]);
     const t = tot.get(j.name) ?? { n: 0, hours: 0, pay: 0, bonus: 0, tips: 0 };
     t.n++; t.hours += j.kind === 'hourly' ? sh.hours ?? 0 : 0; t.pay += pay; t.bonus += bonus; t.tips += tips; tot.set(j.name, t);

@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: process.env.SCHEME || 'light' });
+await ctx.addInitScript(() => localStorage.setItem('money:rule-contacts', '1'));   // keeps the old per-day bonus (no contacts target) for this test
 const p = await ctx.newPage();
 const errors = []; p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
@@ -52,20 +53,20 @@ const w = await p.locator('.screen').last().innerText();
 await shot('w2-work');
 ok(/40 € \+ 6 €/.test(w) && /66 €/.test(w), 'owed: morning 40 € + 6 € (salary + bonus), evening 66 €');
 // morning: salary + bonus paid separately
-await p.locator('.card', { hasText: 'Morning' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+await p.locator('.card', { hasText: 'Morning' }).first().getByText('Got paid').click(); await p.waitForTimeout(700);
 const ms = top();
 ok(await ms.locator('.field', { hasText: 'Salary' }).locator('input').inputValue() === '40' && await ms.locator('.field', { hasText: 'Bonus' }).locator('input').inputValue() === '6', 'morning payout splits: salary 40 + bonus 6');
 await ms.locator('.field', { hasText: 'Bonus' }).locator('input').fill('');
 await ms.getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
-ok((await p.locator('.card', { hasText: 'Morning' }).innerText()).includes('6 €'), 'salary paid, bonus 6 € still owed');
-await p.locator('.card', { hasText: 'Morning' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+ok((await p.locator('.card', { hasText: 'Morning' }).first().innerText()).includes('6 €'), 'salary paid, bonus 6 € still owed');
+await p.locator('.card', { hasText: 'Morning' }).first().getByText('Got paid').click(); await p.waitForTimeout(700);
 ok(await top().locator('.field', { hasText: 'Salary' }).locator('input').inputValue() === '' && await top().locator('.field', { hasText: 'Bonus' }).locator('input').inputValue() === '6', 'next time only the bonus is prefilled');
 await top().getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
 // got paid evening
-await p.locator('.card', { hasText: 'Evening' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+await p.locator('.card', { hasText: 'Evening' }).first().getByText('Got paid').click(); await p.waitForTimeout(700);
 await shot('w3-pay');
 await top().getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
-ok((await p.locator('.card', { hasText: 'Evening' }).innerText()).includes('0 €'), 'after payment evening owed 0 €');
+ok((await p.locator('.card', { hasText: 'Evening' }).first().innerText()).includes('0 €'), 'after payment evening owed 0 €');
 // transactions: tips + salary present
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(900);
 const tx = await p.locator('.screen').last().innerText();
@@ -76,10 +77,10 @@ ok(/PDA Salary/.test(tx) && /\+40/.test(tx) && /Επιδόματα/.test(tx) && 
 await p.locator('.screen').last().locator('.list-row', { hasText: 'Cake & Roll' }).filter({ hasText: '66' }).first().click(); await p.waitForTimeout(800);
 await top().locator('[aria-label=Delete]').first().click(); await p.waitForTimeout(900);
 await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(900);
-ok((await p.locator('.card', { hasText: 'Evening' }).innerText()).includes('66 €'), 'deleted salary entry → evening owed 66 € again');
-await p.locator('.card', { hasText: 'Evening' }).getByText('Got paid').click(); await p.waitForTimeout(700);
+ok((await p.locator('.card', { hasText: 'Evening' }).first().innerText()).includes('66 €'), 'deleted salary entry → evening owed 66 € again');
+await p.locator('.card', { hasText: 'Evening' }).first().getByText('Got paid').click(); await p.waitForTimeout(700);
 await top().getByRole('button', { name: 'Save payment' }).click(); await p.waitForTimeout(900);
-{ const t = await p.locator('.card', { hasText: 'Evening' }).innerText(); ok(/Owed to you\s*0 €/.test(t), 'paid again → 0 owed'); }
+{ const t = await p.locator('.card', { hasText: 'Evening' }).first().innerText(); ok(/Owed to you\s*0 €/.test(t), 'paid again → 0 owed'); }
 
 // ---------------- trading
 await p.click('.nav-item:nth-child(5)'); await p.waitForTimeout(800);

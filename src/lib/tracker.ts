@@ -16,10 +16,54 @@ export function rateAt(job: Job, date: string): JobRate {
   return r;
 }
 
-/** Pay for one shift, split into the base (day rate / hours) and the sales bonus. */
+const firstOf = (d: string) => d.slice(0, 8) + '01';
+const lastOf = (d: string) => { const x = fromISO(d); return toISO(new Date(x.getFullYear(), x.getMonth() + 1, 0)); };
+
+/** Monthly contacts target (morning job): the bonus is € per contact for ALL contacts, but only if the month's average per worked day reaches `min`; otherwise 0. */
+export function contactRule(job: Job, date: string): { min: number; per: number } | null {
+  if (job.kind !== 'daily') return null;
+  const r = rateAt(job, firstOf(date));
+  return (r.min ?? 0) > 0 ? { min: r.min!, per: r.bonus || 1 } : null;
+}
+/** Contacts that day (older entries kept the bonus in €: with 1 €/contact it's the same number). */
+export function contactsOf(job: Job, s: Shift): number {
+  if ((s.sales ?? 0) > 0) return s.sales;
+  const rule = contactRule(job, s.date);
+  return s.bonus ? Math.round(s.bonus / (rule?.per || 1)) : 0;
+}
+
+export interface MonthBonus {
+  min: number; per: number; worked: number; planned: number; contacts: number; avg: number;
+  met: boolean; bonus: number;            // what it pays as things stand (month over → final)
+  target: number;                         // contacts needed over worked + planned days
+  needPerDay: number | null;              // on each planned day still to come
+  projected: number; projectedBonus: number; over: boolean;
+}
+
+/** Where the month's contacts target stands. */
+export function monthBonus(job: Job, shifts: Shift[], anyDate: string, today = todayISO()): MonthBonus | null {
+  const rule = contactRule(job, anyDate);
+  if (!rule) return null;
+  const a = firstOf(anyDate), b = lastOf(anyDate);
+  const inM = shifts.filter(s => s.job_id === job.id && !s.deleted_at && s.date >= a && s.date <= b);
+  const done = inM.filter(s => s.date <= today), todo = inM.filter(s => s.date > today);
+  const contacts = done.reduce((x, s) => x + contactsOf(job, s), 0);
+  const worked = done.length, planned = todo.length;
+  const avg = worked ? contacts / worked : 0;
+  const met = worked > 0 && avg >= rule.min;
+  const target = rule.min * (worked + planned);
+  const needPerDay = planned ? Math.max(0, (target - contacts) / planned) : null;
+  const projected = Math.round(contacts + avg * planned);
+  return {
+    ...rule, worked, planned, contacts, avg: round2(avg), met, bonus: met ? round2(contacts * rule.per) : 0,
+    target, needPerDay: needPerDay == null ? null : round2(needPerDay), projected, projectedBonus: met ? round2(projected * rule.per) : 0, over: today > b,
+  };
+}
+
+/** Pay for one shift, split into the base (day rate / hours) and the sales bonus (0 for a monthly contacts target — see monthBonus). */
 export function shiftParts(job: Job, s: Shift): { base: number; bonus: number } {
   const r = rateAt(job, s.date);
-  if (job.kind === 'daily') return { base: round2(s.base ?? r.day ?? 0), bonus: round2(s.bonus ?? (r.bonus ?? 0) * (s.sales ?? 0)) };
+  if (job.kind === 'daily') return { base: round2(s.base ?? r.day ?? 0), bonus: contactRule(job, s.date) ? 0 : round2(s.bonus ?? (r.bonus ?? 0) * (s.sales ?? 0)) };
   return { base: round2((r.hour ?? 0) * (s.hours ?? 0)), bonus: 0 };
 }
 export function shiftPay(job: Job, s: Shift): number {
@@ -40,6 +84,8 @@ export interface PayPeriod {
   start: string; end: string; current: boolean; shifts: number; hours: number;
   earned: number; paid: number; owed: number;              // totals
   base: number; bonus: number; paidBase: number; paidBonus: number;
+  pendingBonus?: number;                                     // contacts target: this month's bonus, not owed until the month ends
+  target?: MonthBonus;
 }
 
 export function useJobs() {
@@ -79,6 +125,15 @@ export function payPeriods(job: Job, shifts: Shift[], payouts: Record<string, Pa
     p.shifts += 1;
     p.hours += s.hours ?? 0;
   }
+  // contacts target: a finished month owes its bonus (or 0); the running month shows it as pending
+  if (contactRule(job, today) || job.rates?.some(r => (r.min ?? 0) > 0)) {
+    for (const p of map.values()) {
+      const mb = monthBonus(job, shifts, p.start, today);
+      if (!mb) continue;
+      p.target = mb;
+      if (mb.over) p.bonus += mb.bonus; else p.pendingBonus = mb.bonus;
+    }
+  }
   const settled = new Set<string>();
   for (const po of alive(payouts)) {
     if (po.job_id !== job.id) continue;
@@ -112,7 +167,7 @@ export function periodToPay(list: PayPeriod[]): PayPeriod | null {
   return owed.filter(p => !p.current).pop() ?? owed[0] ?? null;
 }
 
-export interface ShiftInput { hours: number; base: number | null; bonus: number | null; tips: number; tipsAccount: string | null; worked: boolean }
+export interface ShiftInput { hours: number; base: number | null; bonus: number | null; tips: number; tipsAccount: string | null; worked: boolean; contacts?: number | null }
 
 /** Saves one job's shift for a day (with its tips as an income entry). Returns what to put back for an undo. */
 export function writeShift(job: Job, date: string, f: ShiftInput) {
@@ -133,8 +188,10 @@ export function writeShift(job: Job, date: string, f: ShiftInput) {
     tipsTx = null;
   }
   if (active) put('shifts', {
-    id, owner_id: '', job_id: job.id, date, hours: job.kind === 'hourly' ? f.hours : 1, sales: 0,
-    base: job.kind === 'daily' ? f.base : null, bonus: job.kind === 'daily' ? (f.bonus ?? 0) : null, tips_tx_id: tipsTx,
+    id, owner_id: '', job_id: job.id, date, hours: job.kind === 'hourly' ? f.hours : 1,
+    // contacts target: the day's contacts are stored, the bonus is worked out per month
+    sales: contactRule(job, date) ? Math.max(0, Math.round(f.contacts ?? 0)) : 0,
+    base: job.kind === 'daily' ? f.base : null, bonus: job.kind === 'daily' && !contactRule(job, date) ? (f.bonus ?? 0) : null, tips_tx_id: tipsTx,
   });
   else if (existing) remove('shifts', id);
   return () => {

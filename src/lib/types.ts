@@ -78,7 +78,7 @@ export interface Person extends Profile {
 
 // ---------- personal tracker (work + trading), private to the owner ----------
 
-export interface JobRate { from: string; day?: number; bonus?: number; hour?: number }
+export interface JobRate { from: string; day?: number; bonus?: number; hour?: number; min?: number }   // daily jobs: bonus = € per contact; min = average contacts per day needed for the month's bonus
 
 export interface Job extends Row {
   name: string;
@@ -98,7 +98,7 @@ export interface Shift extends Row {    // id = `${job_id}:${date}`
   job_id: string;
   date: string;
   hours: number;
-  sales: number;
+  sales: number;                      // daily jobs with a contacts target: contacts that day
   base?: number | null;               // daily jobs: what the day paid (defaults to the day rate)
   bonus?: number | null;              // daily jobs: bonus earned that day, in €
   tips_tx_id: string | null;

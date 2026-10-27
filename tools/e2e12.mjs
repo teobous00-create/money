@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: process.env.SCHEME || 'light' });
+await ctx.addInitScript(() => localStorage.setItem('money:rule-contacts', '1'));   // keeps the old per-day bonus (no contacts target) for this test
 const p = await ctx.newPage();
 const errors = []; p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
@@ -42,17 +43,17 @@ let tt = await toastText();
 ok(/Evening · 6h · tips 25 €/.test(tt), 'shift saved: ' + tt);
 const cellToday = p.locator('.cal-cell.today');
 ok(/6h/.test(await cellToday.innerText()), 'calendar shows 6h today');
-ok(/36 €/.test(await p.locator('.card', { hasText: 'Evening' }).innerText()), 'evening owed 36 € (6h × 6)');
+ok(/36 €/.test(await p.locator('.card', { hasText: 'Evening' }).first().innerText()), 'evening owed 36 € (6h × 6)');
 await say('πρωινή bonus 18');
 ok(/Morning · bonus 18 €/.test(await toastText()), 'morning with bonus 18');
-ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'morning owed 40 € + 18 €');
+ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).first().innerText()), 'morning owed 40 € + 18 €');
 // payment by voice
 await say('πληρώθηκα από την πρωινή');
 tt = await toastText();
 ok(/Morning paid 40 € \+ 18 €/.test(tt), 'payout: ' + tt);
-ok(/Owed to you\s*0 € \+ 0 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'morning owed 0 after voice payment');
+ok(/Owed to you\s*0 € \+ 0 €/.test(await p.locator('.card', { hasText: 'Morning' }).first().innerText()), 'morning owed 0 after voice payment');
 await p.locator('.toast button').click(); await p.waitForTimeout(700);
-ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).innerText()), 'Undo → owed again');
+ok(/40 € \+ 18 €/.test(await p.locator('.card', { hasText: 'Morning' }).first().innerText()), 'Undo → owed again');
 // P&L by voice
 await p.locator('.seg button', { hasText: 'Trading' }).click(); await p.waitForTimeout(700);
 await p.getByRole('button', { name: 'Add strategy' }).click(); await p.waitForTimeout(800);

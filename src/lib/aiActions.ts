@@ -6,7 +6,7 @@ import { getState, put, remove, restore, setBudget, nextOccurrence } from './sto
 import { alive, catName } from './calc';
 import { fromISO, money, num, round2, todayISO, uuid } from './format';
 import { norm, sameWord } from './quickparse';
-import { rateAt, savePnl, shiftId, writeShift } from './tracker';
+import { rateAt, savePnl, shiftId, writeShift, contactRule, contactsOf } from './tracker';
 import { DAY_ALIASES, EVE_ALIASES } from './voice';
 import { defaultAccount } from './voiceRun';
 import type { Category, Freq, Job, Recurring, Strategy, Tx, TxType } from './types';
@@ -14,7 +14,7 @@ import type { Category, Freq, Job, Recurring, Strategy, Tx, TxType } from './typ
 export const CHANGES_TOOL = {
   name: 'propose_changes',
   description: 'Prepare changes to his data. Nothing is saved until he taps Apply on the card the app shows, so never say it is done. Each change: '
-    + 'add_shift / update_shift {job, dates[], hours?, bonus?, tips?, day_pay?} (update keeps what you do not give); remove_shift {job, dates[]}; '
+    + 'add_shift / update_shift {job, dates[], hours?, contacts? (morning job: that day\'s contacts), bonus?, tips?, day_pay?} (update keeps what you do not give); remove_shift {job, dates[]}; '
     + 'add_transaction {type expense|income|transfer, amount, category ("Parent › Sub" or a name), account?, to_account? (transfer), date, note?, repeat? weekly|monthly|yearly, until?}; '
     + 'update_transaction {id, amount?, date?, category?, account?, note?}; delete_transaction {id} (ids come from query_transactions); '
     + 'set_budget {category, amount (null removes it)}; set_pnl {strategy, dates[], value (null clears)}. '
@@ -115,11 +115,11 @@ export function resolveChanges(input: { summary?: string; changes?: Raw[] }): { 
         for (const d of ds) {
           const prev = st.shifts[shiftId(job.id, d)];
           const has = prev && !prev.deleted_at;
-          const hours = numOrNull(c.hours), bonus = numOrNull(c.bonus), tips = numOrNull(c.tips), base = numOrNull(c.day_pay);
+          const hours = numOrNull(c.hours), bonus = numOrNull(c.contacts ?? c.bonus), tips = numOrNull(c.tips), base = numOrNull(c.day_pay);
           if (job.kind === 'hourly' && !hours && !has) { errors.push(`${where}: ${d} needs hours for ${job.name}`); continue; }
           const bits = job.kind === 'hourly'
             ? [hours != null ? `${num(hours)} h` : null, tips != null ? `tips ${money(tips)}` : null]
-            : [base != null ? `day pay ${money(base)}` : null, bonus != null ? `bonus ${money(bonus)}` : null];
+            : [base != null ? `day pay ${money(base)}` : null, bonus != null ? (contactRule(job, d) ? `${bonus} contacts` : `bonus ${money(bonus)}`) : null];
           items.push({ kind: 'shift', jobId: job.id, date: d, hours, bonus, tips, base, label: `${has ? 'Change' : 'Add'} shift · ${job.name} · ${day(d)}${bits.filter(Boolean).length ? ' · ' + bits.filter(Boolean).join(', ') : ''}` });
         }
         break;
@@ -228,7 +228,8 @@ export function applyProposal(p: Proposal): () => void {
         undos.push(writeShift(job, it.date, {
           worked: true, hours: it.hours ?? has?.hours ?? 0,
           base: job.kind === 'daily' ? it.base ?? has?.base ?? rateAt(job, it.date).day ?? 0 : null,
-          bonus: job.kind === 'daily' ? it.bonus ?? has?.bonus ?? 0 : null,
+          bonus: job.kind === 'daily' && !contactRule(job, it.date) ? it.bonus ?? has?.bonus ?? 0 : null,
+          contacts: contactRule(job, it.date) ? it.bonus ?? (has ? contactsOf(job, has) : 0) : null,
           tips: it.tips ?? (tipTx && !tipTx.deleted_at ? tipTx.amount : 0),
           tipsAccount: tipTx?.account_id ?? job.tips_account_id ?? mine.find(a => /μετρητ|cash/i.test(a.name))?.id ?? mine[0]?.id ?? null,
         }));
