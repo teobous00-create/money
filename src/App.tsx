@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
 import { useUi, setUi, type UiState } from './lib/ui';
 import { useHeaderTotalBase, usePlanned } from './lib/calc';
@@ -49,7 +49,7 @@ function useShortcut() {
     const a = new URLSearchParams(location.search).get('a');
     if (!a) { if (analytics) setUi({ tab: 'transactions' }); return; }   // your account always opens on Transactions
     history.replaceState(null, '', location.pathname);
-    if (a === 'voice') setUi(analytics ? { tab: 'transactions', listenNow: true } : { addTx: { voice: true } });   // your account: the top mic
+    if (a === 'voice') setUi({ tab: 'transactions', listenNow: true });   // the top mic
     else if (a === 'expense') setUi({ addTx: { type: 'expense' } });
     else if (a === 'shift' && analytics) setUi({ tab: 'tracker', shiftDay: todayISO() });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -107,7 +107,7 @@ function Shell() {
       </AnimatePresence>
       <BottomNav />
       {ai && chatEver && <Suspense fallback={null}><ChatPanel open={chat} onClose={() => setUi({ chat: false })} /></Suspense>}
-      {ai && askEver && <Suspense fallback={null}><AskSheet /></Suspense>}
+      {askEver && <Suspense fallback={null}><AskSheet /></Suspense>}
       <ToastHost />
       <Sheets />
     </div>
@@ -127,13 +127,12 @@ function TopBar() {
   const pending = useStore(s => s.pending);
   const failed = useStore(s => s.failed);
   const tab = useUi(u => u.tab);
-  const analytics = useStore(s => !!s.prefs.analytics);
   const name = (user && profiles[user.id]?.display_name) || user?.email || 'Me';
   const right: Record<UiState['tab'], ReactNode> = {
     accounts: <button className="iconbtn" aria-label="Add account" onClick={() => setUi({ account: {} })}><Plus size={24} /></button>,
     categories: <button className="iconbtn" aria-label="New category" onClick={() => setUi({ category: {} })}><Pencil size={20} /></button>,
     // your account: a mic for voice commands; others keep search
-    transactions: analytics ? <VoiceButton /> : <button className="iconbtn" aria-label="Search" onClick={() => setUi({ search: true })}><Search size={22} /></button>,
+    transactions: <VoiceButton />,
     overview: <span />,
     tracker: <span />,
   };

@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { setUi, useUi } from '../lib/ui';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, Mic, Sparkles } from 'lucide-react';
+import { Mic } from 'lucide-react';
 import { haptic } from '../lib/format';
 import { toast } from './ui';
-import { interpret, isQuestion, wantsAI, type Cmd } from '../lib/voice';
+import { interpret, isQuestion, wantsAI } from '../lib/voice';
 import { openFor, runVoice, understood, voiceCtxNow } from '../lib/voiceRun';
 
 type Rec = {
@@ -53,57 +53,6 @@ export function useListen(onFinal: (text: string) => void) {
   };
   useEffect(() => () => rec.current?.abort(), []);
   return { listening, heard, start, supported: !!SR };
-}
-
-/** "Type or say…" box. `onText` gets the phrase; voice/typed commands are handled by the caller. */
-export function QuickEntry({ onText, autoListen = false, placeholder }: { onText: (text: string) => void; autoListen?: boolean; placeholder?: string }) {
-  const [text, setText] = useState('');
-  const submit = (t = text) => {
-    const s = t.trim();
-    if (!s) return;
-    haptic(10);
-    onText(s);
-    setText('');
-  };
-  const { listening, heard, start: listen } = useListen(t => submit(t));
-  useEffect(() => { if (listening) setText(heard); }, [heard, listening]);
-  useEffect(() => {
-    if (autoListen && SR) { const t = setTimeout(listen, 350); return () => clearTimeout(t); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <div className={`quick ${listening ? 'on' : ''}`}>
-      <Sparkles size={17} className="quick-spark" />
-      <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : placeholder ?? 'Type or say: καφές 3,5 revolut'}
-        onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }} enterKeyHint="go" />
-      <AnimatePresence initial={false}>
-        {text.trim() && !listening && (
-          <motion.button key="go" className="quick-btn go" aria-label="Fill in" onClick={() => submit()}
-            initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }}>
-            <ArrowRight size={19} />
-          </motion.button>
-        )}
-      </AnimatePresence>
-      {SR && (
-        <button className={`quick-btn mic ${listening ? 'on' : ''}`} aria-label={listening ? 'Stop' : 'Speak'} onClick={listen}>
-          {listening && <motion.span className="quick-pulse" initial={{ scale: 1, opacity: 0.5 }} animate={{ scale: 1.9, opacity: 0 }} transition={{ duration: 1.1, repeat: Infinity }} />}
-          <Mic size={19} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** One handler for every place with a quick-entry box. Returns a function that takes the phrase. */
-export function useVoiceHandler(fillTx: (c: Extract<Cmd, { kind: 'tx' }>) => void, onSaved?: () => void) {
-  return (text: string) => {
-    const cmds = interpret(text, voiceCtxNow());
-    if (!understood(cmds)) { toast('Didn’t catch that — try e.g. “καφές 3,5 revolut”'); return; }
-    const open = runVoice(cmds);
-    if (!open) onSaved?.();
-    else if (open.kind === 'tx') fillTx(open);
-    else openFor(open);
-  };
 }
 
 /** Mic button (top bar): tap, say a command, done. Shows what it hears while listening. */

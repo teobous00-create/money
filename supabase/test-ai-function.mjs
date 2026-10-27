@@ -6,13 +6,19 @@ const { handle } = await import(out + '?' + Date.now());
 let pass = 0, fail = 0;
 const ok = (c, m) => { c ? pass++ : fail++; console.log((c ? 'ok  ' : 'FAIL') + ' ' + m); };
 const env = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_PUBLISHABLE_KEYS: '{"default":"sb_publishable_1"}', SUPABASE_SECRET_KEYS: '{"default":"sb_secret_1"}', ANTHROPIC_API_KEY: 'sk-ant-test' };
-function world({ user = 'u1', prefs = { analytics: true }, claude = { content: [{ type: 'text', text: 'Γεια' }], stop_reason: 'end_turn' }, claudeStatus = 200 } = {}) {
+function world({ user = 'u1', prefs = { analytics: true }, leads = ['teo'], shares = [], claude = { content: [{ type: 'text', text: 'Γεια' }], stop_reason: 'end_turn' }, claudeStatus = 200 } = {}) {
   const calls = [];
   const f = async (url, init = {}) => {
     calls.push({ url, init });
     if (url.endsWith('/auth/v1/user')) return new Response(JSON.stringify(user ? { id: user } : {}), { status: user ? 200 : 401 });
+    if (url.includes('/rest/v1/user_prefs?select=user_id')) return new Response(JSON.stringify(leads.map(user_id => ({ user_id }))), { status: 200 });
+    if (url.includes('/rest/v1/category_members')) {
+      const u = decodeURIComponent(url);
+      const hit = shares.some(([member, owner]) => u.includes(`user_id=eq.${member}`) && u.includes(`owner_id=in.(`) && u.includes(owner) || u.includes(`owner_id=eq.${owner}`) && u.includes(`user_id=in.(`) && u.includes(member));
+      return new Response(JSON.stringify(hit ? [{ category_id: 'c' }] : []), { status: 200 });
+    }
     if (url.includes('/rest/v1/user_prefs') && (!init.method || init.method === 'GET')) return new Response(JSON.stringify(prefs ? [{ prefs }] : []), { status: 200 });
-    if (url.includes('/rest/v1/user_prefs') && init.method === 'PATCH') { world.patched = JSON.parse(init.body); return new Response('', { status: 204 }); }
+    if (url.includes('/rest/v1/user_prefs') && (init.method === 'PATCH' || init.method === 'POST')) { world.patched = JSON.parse(init.body); return new Response('', { status: 204 }); }
     if (url.startsWith('https://api.anthropic.com')) { world.sent = JSON.parse(init.body); world.sentHeaders = init.headers; return new Response(JSON.stringify(claude), { status: claudeStatus }); }
     return new Response('?', { status: 404 });
   };
@@ -31,7 +37,15 @@ ok(r.status === 429 && !w.calls.some(c => c.url.startsWith('https://api.anthropi
 w = world({ prefs: { analytics: true, aiUsage: { day: '2000-01-01', count: 60 } } }); r = await handle(req(msg), env, w.f);
 ok(r.status === 200, 'new day, new 60');
 w = world({ prefs: { budgets: {} } }); r = await handle(req(msg), env, w.f);
-ok(r.status === 403, 'someone without analytics (e.g. partner) refused');
+ok(r.status === 403, 'someone without analytics who shares nothing with Teo refused');
+w = world({ user: 'gf', prefs: { budgets: {} }, shares: [['gf', 'teo']] }); r = await handle(req(msg), env, w.f); j = await r.json();
+ok(r.status === 200 && j.remaining === 19 && world.patched.user_id === 'gf' && world.patched.prefs.aiUsage.count === 1, 'partner (member of his category): allowed, 19 of 20 left');
+w = world({ user: 'gf', prefs: null, shares: [['teo', 'gf']] }); r = await handle(req(msg), env, w.f);
+ok(r.status === 200, 'partner (he is a member of her category), no settings row yet: allowed');
+w = world({ user: 'gf', prefs: { aiUsage: { day: new Date().toISOString().slice(0, 10), count: 20 } }, shares: [['gf', 'teo']] }); r = await handle(req(msg), env, w.f);
+ok(r.status === 429, "partner's 21st call refused");
+w = world({ user: 'gf', prefs: {}, leads: [], shares: [['gf', 'teo']] }); r = await handle(req(msg), env, w.f);
+ok(r.status === 403, 'no one with analytics → refused');
 w = world({ user: null }); r = await handle(req(msg), env, w.f);
 ok(r.status === 401, 'not signed in refused');
 w = world(); r = await handle(req(msg, 'sb_publishable_1'), env, w.f);

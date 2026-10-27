@@ -13,7 +13,7 @@ import type { Category, Freq, Job, Recurring, Strategy, Tx, TxType } from './typ
 
 export const CHANGES_TOOL = {
   name: 'propose_changes',
-  description: 'Prepare changes to his data. Nothing is saved until he taps Apply on the card the app shows, so never say it is done. Each change: '
+  description: 'Prepare changes to the user\'s data. Nothing is saved until the user taps Apply on the card the app shows, so never say it is done. Each change: '
     + 'add_shift / update_shift {job, dates[], hours?, contacts? (morning job: that day\'s contacts), bonus?, tips?, day_pay?} (update keeps what you do not give); remove_shift {job, dates[]}; '
     + 'add_transaction {type expense|income|transfer, amount, category ("Parent › Sub" or a name), account?, to_account? (transfer), date, note?, repeat? weekly|monthly|yearly, until?}; '
     + 'update_transaction {id, amount?, date?, category?, account?, note?}; delete_transaction {id} (ids come from query_transactions); '
@@ -167,7 +167,7 @@ export function resolveChanges(input: { summary?: string; changes?: Raw[] }): { 
       case 'update_transaction': {
         const t = st.transactions[String(c.id)];
         if (!t || t.deleted_at) { errors.push(`${where}: no transaction with id ${String(c.id)} — look it up first`); break; }
-        if (t.owner_id !== st.user?.id) { errors.push(`${where}: that entry is his partner's; he can't change it`); break; }
+        if (t.owner_id !== st.user?.id) { errors.push(`${where}: that entry is the partner's; the user can't change it`); break; }
         const patch: Partial<Tx> = {};
         const amount = numOrNull(c.amount); if (amount && amount > 0) patch.amount = amount;
         if (isDate(c.date)) patch.date = c.date;
@@ -188,7 +188,7 @@ export function resolveChanges(input: { summary?: string; changes?: Raw[] }): { 
       case 'delete_transaction': {
         const t = st.transactions[String(c.id)];
         if (!t || t.deleted_at) { errors.push(`${where}: no transaction with id ${String(c.id)} — look it up first`); break; }
-        if (t.owner_id !== st.user?.id) { errors.push(`${where}: that entry is his partner's; he can't delete it`); break; }
+        if (t.owner_id !== st.user?.id) { errors.push(`${where}: that entry is the partner's; the user can't delete it`); break; }
         items.push({ kind: 'del_tx', id: t.id, label: `Delete · ${t.type === 'transfer' ? 'Transfer' : catName(t.category_id, st.categories)} ${money(t.amount)} · ${day(t.date)}${t.note ? ` · "${t.note}"` : ''}` });
         break;
       }

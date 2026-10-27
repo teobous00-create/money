@@ -8,7 +8,6 @@ import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
-import { QuickEntry, useVoiceHandler } from '../components/QuickEntry';
 import { unmarkVoice } from '../lib/voiceRun';
 import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
 import { learn, type Parsed } from '../lib/quickparse';
@@ -97,8 +96,6 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     }
     parsed.current = { words: p.words, categoryId: p.categoryId };
   };
-  const topMic = useStore(s => !!s.prefs.analytics);   // your account speaks through the top mic instead
-  const onVoice = useVoiceHandler(c => applyParsed(c.p, c.repeat, c.until), () => close());
   // opened from elsewhere with a phrase that still needs you
   useEffect(() => { if (args.prefill) applyParsed(args.prefill.p, args.prefill.repeat, args.prefill.until); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -309,8 +306,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
       {picking ? (
         <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
           initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
-          <Picker type={type} onType={setType} onPick={onPick} exclude={accountId}
-            quick={!editing && !topMic ? <QuickEntry onText={onVoice} autoListen={!!args.voice} /> : null} />
+          <Picker type={type} onType={setType} onPick={onPick} exclude={accountId} />
         </motion.div>
       ) : (
         <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
@@ -435,7 +431,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
 }
 
 /** Step 1: Income / Expense / Transfer tabs with the category (or destination account) grid. */
-function Picker({ type, onType, onPick, exclude, quick }: { type: TxType; onType: (t: TxType) => void; onPick: (t: TxType, id: string) => void; exclude: string | null; quick?: React.ReactNode }) {
+function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: TxType) => void; onPick: (t: TxType, id: string) => void; exclude: string | null }) {
   const cats = useCategories();
   const accounts = useAccounts();
   const me = useStore(s => s.user?.id);
@@ -457,7 +453,6 @@ function Picker({ type, onType, onPick, exclude, quick }: { type: TxType; onType
         <span className="ptab-ind" style={{ left: `calc(100% * (${Math.max(0, tabs.findIndex(x => x[0] === type))} + 0.22) / 3)`, width: 'calc(100% * 0.56 / 3)' }} />
       </DragZone>
       <div className="sheet-body" style={{ paddingTop: 14 }}>
-        {quick}
         <div className="small muted" style={{ margin: '0 4px 12px', fontWeight: 600 }}>{type === 'transfer' ? 'Transfer to' : 'Choose a category'}</div>
         <motion.div className="cat-grid" key={type} initial="h" animate="s" variants={{ s: { transition: { staggerChildren: 0.018 } } }}>
           {type === 'transfer'

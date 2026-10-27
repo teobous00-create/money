@@ -60,8 +60,8 @@ export function aiErrorText(e: unknown): string {
   if (code === 'no_key') return 'The “ai” function is there, but the key is missing: add ANTHROPIC_API_KEY in Edge Function Secrets (step 3).';
   if (code === 'jwt') return 'The “ai” function refused the login: turn OFF “Verify JWT” in its settings, then try again.';
   if (code === 'unreachable') return 'Can’t reach the “ai” function — it may not be deployed, or the pasted code has an error. Deploy it again (step 2).';
-  if (code === 'limit') return 'You’ve used today’s 60 messages. It resets tomorrow.';
-  if (code === 'not_allowed') return 'The AI is only on for your account.';
+  if (code === 'limit') return 'You’ve used today’s AI messages. It resets tomorrow.';
+  if (code === 'not_allowed') return 'The AI isn’t on for this account.';
   if (code === 'offline') return 'No connection right now.';
   if (code === 'claude') return `Claude couldn’t answer: ${(e as AiError).message || 'try again'}`;
   return `Something went wrong${(e as Error)?.message ? ` (${(e as Error).message})` : ''} — try again.`;
@@ -114,7 +114,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
       const theirs = r2(txs.filter(t => t.owner_id !== me && t.type === 'expense' && t.date >= mStart && t.date <= today && topOf(t.category_id, cats) === id).reduce((x, t) => x + t.amount, 0));
       return `${cats[id].name}: partner paid ${theirs} this month`;
     });
-    L.push('', `SHARED CATEGORIES (with the girlfriend; the user's totals above are only his part): ${parts.join(' | ')}`);
+    L.push('', `SHARED CATEGORIES (with the partner; the user's totals above are only their own part): ${parts.join(' | ')}`);
   }
 
   // recurring
@@ -179,7 +179,7 @@ export interface QueryResult {
 
 export const QUERY_TOOL = {
   name: 'query_transactions',
-  description: 'Exact sums, counts and lists over all of the user\'s transactions, computed on his phone. Use it for any figure that is not in DATA, and to test an explanation before giving it (compare two periods, group by weekday to find a pattern, filter by note text). Returns total, count, average per entry, groups, and the 12 latest matching entries. Dates are YYYY-MM-DD; weekdays 0=Sunday…6=Saturday. who: me (default), partner, or both.',
+  description: 'Exact sums, counts and lists over all of the user\'s transactions, computed on the phone. Use it for any figure that is not in DATA, and to test an explanation before giving it (compare two periods, group by weekday to find a pattern, filter by note text). Returns total, count, average per entry, groups, and the 12 latest matching entries. Dates are YYYY-MM-DD; weekdays 0=Sunday…6=Saturday. who: me (default), partner, or both.',
   input_schema: {
     type: 'object',
     properties: {
@@ -340,6 +340,28 @@ Context
 - Future-dated (planned) entries do not count until their date.
 - The current month is not over: compare by pace, not by totals.`;
 
+/** Her account: the top mic only — commands, and one short answer to a question. No conversation. */
+export const LITE_RULES = `You are the voice assistant inside a shared budgeting app. The user speaks one command or one question into the microphone. You see her finances through DATA (a summary the app computes) and query_transactions (every transaction). There is no conversation: answer this one message and stop.
+
+Language: answer in the language she used (usually Greek). Keep category names, account names and notes exactly as they are.
+
+Commands (add, change or remove entries — also repeating ones — or budgets)
+- Call propose_changes. For existing entries find their ids with query_transactions first.
+- Nothing is saved until she taps Apply on the card. After proposing, say in one short line what the card contains. Never say it is done.
+- If something essential is missing or ambiguous, ask for it in one short line instead of guessing.
+- If the tool reports problems, fix them with another call, or say in one line what is wrong.
+
+Questions
+- Answer in 1–3 short sentences: the answer first, then at most two supporting numbers.
+- Use only DATA or tool results. Never estimate or invent a figure; before stating any figure that is not literally in DATA, call query_transactions. If the data cannot answer it, say so in one line.
+- No advice unless she asks for it, no greetings, no filler, no follow-up questions or offers.
+- Money format: 1.234,56 €.
+
+Context
+- Shared categories: her totals are only her part. For joint spending use who "partner" or "both" in the tool.
+- She can only change her own entries, not her partner's.
+- Future-dated (planned) entries do not count until their date. The current month is not over.`;
+
 export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; proposal?: Proposal; error?: boolean; at: string }
 
 const CHAT_KEY = 'money:chat';
@@ -370,13 +392,13 @@ const clean = (content: Block[]) => content.filter(x => x.type !== 'text' || x.t
 const memo = (r: QueryResult) => `${r.label} ${r.from}–${r.to}: total ${r.total}, ${r.count} entries${r.groups.length ? `; by ${r.input.group_by}: ${r.groups.slice(0, 14).map(g => `${g.key} ${g.total}`).join(', ')}` : ''}`;
 
 /** One turn: question in, answer (and any numbers it looked up) out. */
-export async function askClaude(history: ChatItem[], question: string): Promise<ChatItem> {
+export async function askClaude(history: ChatItem[], question: string, lite = false): Promise<ChatItem> {
   const system = [
-    { type: 'text', text: CHAT_RULES },
-    { type: 'text', text: 'ABOUT ME\n' + aboutMe() },
+    { type: 'text', text: lite ? LITE_RULES : CHAT_RULES },
+    ...(lite ? [] : [{ type: 'text', text: 'ABOUT ME\n' + aboutMe() }]),
     { type: 'text', text: 'DATA\n' + buildSnapshot(), cache_control: { type: 'ephemeral' } },
   ];
-  const past: ApiMsg[] = history.filter(h => !h.error).slice(-16).map(h => ({
+  const past: ApiMsg[] = (lite ? [] : history).filter(h => !h.error).slice(-16).map(h => ({
     role: h.role,
     content: (h.text || '…') + (h.role === 'assistant' && h.results?.length ? `\n[Looked up: ${h.results.map(memo).join(' | ')}]` : '')
       + (h.proposal ? `\n[Card: ${h.proposal.items.map(i => i.label).join(' | ')} — ${h.proposal.status === 'applied' ? 'he applied it' : h.proposal.status === 'pending' ? 'not applied yet' : 'not applied'}]` : ''),
@@ -390,7 +412,7 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
   const results: QueryResult[] = [];
   let proposal: Proposal | null = null;
   for (let step = 0; step < 8; step++) {
-    const r = await complete(system, msgs, [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL]);
+    const r = await complete(system, msgs, lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL]);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
     if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: clean(r.content) });
@@ -401,7 +423,7 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
         if (u.name === CHANGES_TOOL.name) {
           const { proposal: p, errors } = resolveChanges(u.input as { summary?: string; changes?: Record<string, unknown>[] });
           if (p.items.length) proposal = p;   // a corrected call replaces the earlier card
-          return { type: 'tool_result' as const, tool_use_id: u.id, content: JSON.stringify({ card_shown_to_him: p.items.map(i => i.label), problems: errors, saved: false, note: 'Nothing is saved until he taps Apply on the card.' }) };
+          return { type: 'tool_result' as const, tool_use_id: u.id, content: JSON.stringify({ card_shown: p.items.map(i => i.label), problems: errors, saved: false, note: 'Nothing is saved until the user taps Apply on the card.' }) };
         }
         const res = runQuery(u.input as QueryInput);
         results.push(res);

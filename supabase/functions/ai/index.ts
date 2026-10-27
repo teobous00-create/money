@@ -1,12 +1,14 @@
 // Supabase Edge Function "ai": the app's only door to Claude.
-// - Only signed-in users whose settings have analytics = true (Teo) can use it.
-// - At most 60 calls a day per user; model and answer length are fixed here, not by the app.
+// - Signed-in users whose settings have analytics = true (Teo): 60 calls a day.
+// - People who share a category with such a user (his girlfriend): 20 calls a day, for the voice commands.
+// - Anyone else is refused. Model and answer length are fixed here, not by the app.
 // - The Anthropic key lives in the secret ANTHROPIC_API_KEY and never reaches the phone.
 //
 // Deploy: Supabase dashboard → Edge Functions → Deploy a new function → Via Editor → name "ai" → paste this file.
 
 const MODEL = 'claude-sonnet-5-5';
 const DAILY_LIMIT = 60;
+const PARTNER_LIMIT = 20;
 const MAX_TOKENS = 4000;
 
 type Env = Record<string, string | undefined>;
@@ -50,11 +52,15 @@ export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<
   const prefRes = await f(`${url}/rest/v1/user_prefs?select=prefs&user_id=eq.${user.id}`, { headers: adminHeaders(secret) });
   const rows = prefRes.ok ? await prefRes.json() as Array<{ prefs: Record<string, unknown> }> : [];
   const prefs = rows[0]?.prefs ?? {};
-  if (prefs.analytics !== true) return json(403, { error: 'not_allowed' });
+  let limit = DAILY_LIMIT;
+  if (prefs.analytics !== true) {
+    if (!(await isPartner(url, secret, user.id, f))) return json(403, { error: 'not_allowed' });
+    limit = PARTNER_LIMIT;
+  }
   const day = new Date().toISOString().slice(0, 10);
   const usage = prefs.aiUsage as { day?: string; count?: number } | undefined;
   const used = usage?.day === day ? usage.count ?? 0 : 0;
-  if (used >= DAILY_LIMIT) return json(429, { error: 'limit', remaining: 0 });
+  if (used >= limit) return json(429, { error: 'limit', remaining: 0 });
 
   // what the app asks
   let body: { system?: unknown; messages?: unknown; tools?: unknown };
@@ -72,13 +78,27 @@ export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<
   const out = await res.json().catch(() => ({})) as { content?: unknown; stop_reason?: string; usage?: unknown; error?: { message?: string } };
   if (!res.ok) return json(502, { error: 'claude', status: res.status, message: out.error?.message ?? '' });
 
-  // count it
-  await f(`${url}/rest/v1/user_prefs?user_id=eq.${user.id}`, {
-    method: 'PATCH', headers: adminHeaders(secret),
-    body: JSON.stringify({ prefs: { ...prefs, aiUsage: { day, count: used + 1 } } }),
+  // count it (she may have no settings row yet)
+  await f(`${url}/rest/v1/user_prefs?on_conflict=user_id`, {
+    method: 'POST', headers: { ...adminHeaders(secret), Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ user_id: user.id, prefs: { ...prefs, aiUsage: { day, count: used + 1 } } }),
   }).catch(() => {});
 
-  return json(200, { content: out.content, stop_reason: out.stop_reason, usage: out.usage, remaining: DAILY_LIMIT - used - 1 });
+  return json(200, { content: out.content, stop_reason: out.stop_reason, usage: out.usage, remaining: limit - used - 1 });
+}
+
+/** Shares at least one category (either way round) with a user who has analytics on. */
+async function isPartner(url: string, secret: string, id: string, f: Fetch): Promise<boolean> {
+  const h = { headers: adminHeaders(secret) };
+  const get = async (path: string) => { const r = await f(`${url}/rest/v1/${path}`, h); return r.ok ? await r.json() as Array<Record<string, unknown>> : []; };
+  const leads = (await get('user_prefs?select=user_id&prefs->>analytics=eq.true')).map(r => r.user_id as string).filter(x => x && x !== id);
+  if (!leads.length) return false;
+  const list = leads.join(',');
+  // she is a member of his category, or he is a member of hers
+  const a = await get(`category_members?select=category_id,categories!inner(owner_id)&user_id=eq.${id}&categories.owner_id=in.(${list})&limit=1`);
+  if (a.length) return true;
+  const b = await get(`category_members?select=category_id,categories!inner(owner_id)&user_id=in.(${list})&categories.owner_id=eq.${id}&limit=1`);
+  return b.length > 0;
 }
 
 // deno-lint-ignore no-explicit-any

@@ -4,6 +4,7 @@ import { ArrowUp, Mic, RotateCcw, ChevronDown } from 'lucide-react';
 import { askClaude, aiErrorText, aiRemaining, loadChat, saveChat, type ChatItem, type QueryResult } from '../lib/ai';
 import { useListen } from './QuickEntry';
 import { setUi, useUi } from '../lib/ui';
+import { useStore } from '../lib/store';
 import { haptic, money, num, shortDate } from '../lib/format';
 import { ease, toast, Sheet } from './ui';
 import { applyProposal, type Proposal } from '../lib/aiActions';
@@ -99,6 +100,7 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
 /** A question from the top mic: answered in a small window, kept in the chat history. */
 export function AskSheet() {
   const ask = useUi(u => u.ask);
+  const lite = !useStore(st => !!st.prefs.analytics);   // her account: one command or question, no chat
   const [q, setQ] = useState<string | null>(null);
   const [reply, setReply] = useState<ChatItem | null>(null);
   const [at, setAt] = useState(-1);   // where the reply sits in the chat history
@@ -106,13 +108,14 @@ export function AskSheet() {
     if (!ask) return;
     let alive = true;
     setQ(ask); setReply(null);
-    const before = loadChat();
+    const before = lite ? [] : loadChat();
     const mine: ChatItem = { role: 'user', text: ask, at: new Date().toISOString() };
-    saveChat([...before, mine]);
+    if (!lite) saveChat([...before, mine]);
     (async () => {
       let r: ChatItem;
-      try { r = await askClaude(before, ask); }
+      try { r = await askClaude(before, ask, lite); }
       catch (e) { r = { role: 'assistant', text: aiErrorText(e), error: true, at: new Date().toISOString() }; }
+      if (lite) { if (alive) setReply(r); return; }
       const now = loadChat();
       saveChat([...now, r]);   // kept even if the window was closed meanwhile
       if (alive) { setReply(r); setAt(now.length); }
@@ -122,17 +125,18 @@ export function AskSheet() {
   const close = () => setUi({ ask: null });
   const onProposal = (status: Proposal['status']) => {
     setReply(r => (r?.proposal ? { ...r, proposal: { ...r.proposal, status } } : r));
+    if (lite) return;
     const all = loadChat();
     if (all[at]?.proposal) { all[at] = { ...all[at], proposal: { ...all[at].proposal!, status } }; saveChat(all); }
   };
   return (
-    <Sheet open={!!ask} onClose={close} title="Ask">
+    <Sheet open={!!ask} onClose={close} title={lite ? 'Voice' : 'Ask'}>
       <div className="sheet-body">
       <div className="ask-q small muted">“{q}”</div>
       <div className="ask-a">
         {reply ? <Bubble m={reply} onProposal={onProposal} /> : <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
       </div>
-      <button className="btn secondary" style={{ width: '100%', marginTop: 12 }} disabled={!reply} onClick={() => setUi({ ask: null, chat: true })}>Continue in chat</button>
+      {!lite && <button className="btn secondary" style={{ width: '100%', marginTop: 12 }} disabled={!reply} onClick={() => setUi({ ask: null, chat: true })}>Continue in chat</button>}
       </div>
     </Sheet>
   );

@@ -16,7 +16,7 @@ await ctx.addInitScript(() => {
     if (Array.isArray(last.content)) {
       const r = JSON.parse(last.content[0].content);
       window.__lastTool = r;
-      return { content: [{ type: 'text', text: `Prepared ${r.card_shown_to_him.length} changes — tap Apply.` }], stop_reason: 'end_turn' };
+      return { content: [{ type: 'text', text: `Prepared ${r.card_shown.length} changes — tap Apply.` }], stop_reason: 'end_turn' };
     }
     return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' };
   };

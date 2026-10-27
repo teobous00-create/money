@@ -8,7 +8,6 @@ export interface AddTxArgs {
   categoryId?: string;
   accountId?: string;
   date?: string;
-  voice?: boolean;   // start listening right away (app-icon shortcut)
   prefill?: { p: Parsed; repeat: Freq | null; until: string | null };   // a spoken entry that still needs you
 }
 

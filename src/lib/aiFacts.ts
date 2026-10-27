@@ -256,7 +256,7 @@ export function chatDetail(s: State, today: string): string {
   const L: string[] = [];
   const cur = monthStart(today);
   const months = Array.from({ length: 12 }, (_, i) => addMonths(cur, -11 + i));
-  L.push('MONTHS (his own income/expenses; transfers excluded; the current month is up to today). Format: total (count × average):');
+  L.push('MONTHS (the user’s own income/expenses; transfers excluded; the current month is up to today). Format: total (count × average):');
   for (const m of months) {
     const w = span(b, m, m === cur ? today : monthEnd(m));
     if (!w.income && !w.expense) continue;

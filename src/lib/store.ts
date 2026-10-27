@@ -516,4 +516,4 @@ async function pullPrefs() {
 }
 
 // test hook: only in the on-device (local) build used by the e2e scripts
-if (!REMOTE) (window as unknown as { __money: unknown }).__money = { getState, putMany };
+if (!REMOTE) (window as unknown as { __money: unknown }).__money = { getState, putMany, setPrefs };
