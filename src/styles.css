@@ -373,3 +373,5 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .review-skel span { height: 12px; border-radius: 8px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; }
 .review-skel span:nth-child(2) { width: 85%; } .review-skel span:nth-child(3) { width: 92%; } .review-skel span:nth-child(4) { width: 60%; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+.review-h { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin-top: 6px; }
+.input.about { height: auto; min-height: 120px; padding: 12px 14px; line-height: 1.4; resize: vertical; font: inherit; }

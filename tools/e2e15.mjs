@@ -8,6 +8,11 @@ await ctx.addInitScript(() => {
     await new Promise(r => setTimeout(r, 400));
     if (typeof body.system === 'string') return { content: [{ type: 'text', text: '• Αποταμίευσες 239,04 € (μέσος όρος 71,58 €).\n• Μεγαλύτερη κατηγορία: Σπίτι.' }], stop_reason: 'end_turn', remaining: 58 };
     const last = body.messages[body.messages.length - 1];
+    if (last.content === 'Continue exactly where you stopped. Do not repeat anything.') return { content: [{ type: 'text', text: ' and this is the rest.' }], stop_reason: 'end_turn', remaining: 50 };
+    if (typeof last.content === 'string' && /long one/.test(last.content)) {
+      window.__sawMemo = body.messages.some(m => typeof m.content === 'string' && m.content.includes('[Looked up: Delivery'));
+      return { content: [{ type: 'text', text: 'This answer was cut' }], stop_reason: 'max_tokens', remaining: 51 };
+    }
     if (window.__limit) { const e = new Error('limit'); e.code = 'limit'; throw Object.assign(new (class extends Error {})('limit'), { code: 'limit' }); }
     if (typeof last.content === 'string') return { content: [{ type: 'text', text: 'Κοιτάζω…' }, { type: 'tool_use', id: 't1', name: 'query_transactions', input: { category: 'Delivery', from: '2026-01-01', group_by: 'month' } }], stop_reason: 'tool_use', remaining: 59 };
     const res = JSON.parse(last.content[0].content);
@@ -48,10 +53,18 @@ const ans = await p.locator('.chat .bubble.ai').last().innerText();
 ok(tr && tr.count > 100 && tr.total > 500, `the phone computed it: ${tr?.total} € over ${tr?.count}`);
 ok(ans.includes(String(tr.total)), 'answer uses the computed number');
 ok(await p.locator('.chat .qcard').count() === 1 && (await p.locator('.chat .qbar').count()) >= 3, 'card with the exact numbers and monthly bars');
-const sys = await p.evaluate(() => window.__calls[0].system[1].text);
+const sys = await p.evaluate(() => window.__calls[0].system[2].text);
 ok(/ACCOUNTS/.test(sys) && /MONTHS/.test(sys) && /Σπίτι/.test(sys) && !/Netflix/.test(sys), 'summary sent, not single entries (no notes)');
 ok(/58 left today/.test(await p.locator('.chat-head').innerText()), 'shows what is left today');
 await p.screenshot({ path: `${OUT}/c2.png` });
+// follow-up: remembers what it looked up; a cut answer is continued automatically
+await p.locator('.chat .quick-input').fill('and a long one please');
+await p.locator('.chat .quick-input').press('Enter'); await p.waitForTimeout(1500);
+ok(await p.evaluate(() => window.__sawMemo) === true, 'follow-up carries the numbers it found before');
+ok((await p.locator('.chat .bubble.ai').last().innerText()).trim() === 'This answer was cut and this is the rest.', 'cut answer continued and joined');
+await p.locator('[aria-label="New chat"]').click(); await p.waitForTimeout(300);
+await p.locator('.chat .quick-input').fill('Πόσα έδωσα σε delivery φέτος;');
+await p.locator('.chat .quick-input').press('Enter'); await p.waitForTimeout(1800);
 // close by dragging up, reopen: history kept
 const g = await p.locator('.chat-grip').boundingBox();
 await p.mouse.move(g.x + g.width / 2, g.y + 10); await p.mouse.down();
@@ -69,7 +82,7 @@ ok(await p.locator('.review-skel').count() === 1, 'review: placeholder while wri
 await p.waitForTimeout(900);
 ok(/Αποταμίευσες 239,04/.test(await p.locator('.review').innerText()), 'review written');
 const facts = await p.evaluate(() => window.__calls.find(c => typeof c.system === 'string').messages[0].content);
-ok(/saved 239,04/.test(facts) && /not over/.test(facts), 'facts computed by the app (saved 239,04, month not over)');
+ok(/saved 239,04/.test(facts) && /Not over/.test(facts), 'facts computed by the app (saved 239,04, month not over)');
 await p.screenshot({ path: `${OUT}/c3.png` });
 const before = await p.evaluate(() => window.__calls.length);
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(500);

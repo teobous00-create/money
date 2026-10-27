@@ -23,7 +23,7 @@ const msg = { messages: [{ role: 'user', content: 'hi' }], system: 'sys', tools:
 
 let w = world(); let r = await handle(req({ ...msg, model: 'claude-opus-x', max_tokens: 99999 }), env, w.f); let j = await r.json();
 ok(r.status === 200 && j.content[0].text === 'Γεια' && j.remaining === 59, 'answers, 59 left');
-ok(world.sent.model === 'claude-sonnet-5-5' && world.sent.max_tokens === 1500, 'model and length fixed by the server, not the app');
+ok(world.sent.model === 'claude-sonnet-5-5' && world.sent.max_tokens === 4000, 'model and length fixed by the server, not the app');
 ok(world.sentHeaders['x-api-key'] === 'sk-ant-test', 'uses the secret key');
 ok(world.patched.prefs.aiUsage.count === 1 && world.patched.prefs.analytics === true, 'counts the call, keeps other settings');
 w = world({ prefs: { analytics: true, aiUsage: { day: new Date().toISOString().slice(0, 10), count: 60 } } }); r = await handle(req(msg), env, w.f);

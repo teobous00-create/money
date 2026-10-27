@@ -7,7 +7,7 @@
 
 const MODEL = 'claude-sonnet-5-5';
 const DAILY_LIMIT = 60;
-const MAX_TOKENS = 1500;
+const MAX_TOKENS = 4000;
 
 type Env = Record<string, string | undefined>;
 type Fetch = typeof fetch;

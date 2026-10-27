@@ -149,11 +149,12 @@ export interface Prefs {
   budgets?: Record<string, number>; // category id → monthly limit
   tipsCats?: string[];              // category ids counted as tips (empty/undefined = automatic)
   favorites?: Favorite[];           // one-tap entries on Transactions
+  aboutMe?: string;                 // "About me": goals and situation, sent to the AI
   reviews?: Record<string, Review>; // 'YYYY-MM' → monthly review written by the AI
   aiUsage?: { day: string; count: number }; // written by the server only
 }
 
-export interface Review { text: string; upTo: string; at: string }
+export interface Review { text: string; upTo: string; at: string; v?: number }
 
 export interface Favorite {
   id: string;

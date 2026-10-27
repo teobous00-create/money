@@ -9,6 +9,7 @@ import { alive, computeBalances, catName } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
 import { payPeriods, rateAt, shiftParts, shiftPay } from './tracker';
+import { chatDetail } from './aiFacts';
 import type { Category, Tx } from './types';
 
 // ---------------------------------------------------------------- transport
@@ -84,7 +85,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
   const cats = s.categories;
   const txs = liveTxs(s);
   const mine = txs.filter(t => t.owner_id === me);
-  const months = Array.from({ length: 6 }, (_, i) => addMonths(today, -5 + i));
+  const months = Array.from({ length: 6 }, (_, i) => addMonths(today, -5 + i));   // work + trading detail
   const L: string[] = [];
   const name = s.profiles[me]?.display_name || 'Teo';
   L.push(`Today: ${today} (${new Intl.DateTimeFormat('en-GB', { weekday: 'long' }).format(fromISO(today))}). User: ${name}. Currency EUR.`);
@@ -93,31 +94,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
   const bal = computeBalances(accs, mine, today);
   L.push('', 'ACCOUNTS (balance now): ' + accs.map(a => `${a.name}${a.kind === 'savings' ? ' [savings]' : ''} ${r2(bal.get(a.id) ?? 0)}`).join(' | '));
 
-  L.push('', 'MONTHS (only what the user paid/earned; transfers excluded; current month is up to today):');
-  for (const m of months) {
-    const a = m, b = m === monthStart(today) ? today : monthEnd(m);
-    const inM = mine.filter(t => t.date >= a && t.date <= b && t.type !== 'transfer');
-    const inc = r2(inM.filter(t => t.type === 'income').reduce((x, t) => x + t.amount, 0));
-    const exp = r2(inM.filter(t => t.type === 'expense').reduce((x, t) => x + t.amount, 0));
-    if (!inc && !exp) continue;
-    const by = (type: 'income' | 'expense') => {
-      const top = new Map<string, number>(), sub = new Map<string, Map<string, number>>();
-      for (const t of inM) if (t.type === type) {
-        const k = topOf(t.category_id, cats);
-        top.set(k, (top.get(k) ?? 0) + t.amount);
-        if (t.category_id && cats[t.category_id]?.parent_id) {
-          const m2 = sub.get(k) ?? new Map(); m2.set(t.category_id, (m2.get(t.category_id) ?? 0) + t.amount); sub.set(k, m2);
-        }
-      }
-      return [...top.entries()].sort((x, y) => y[1] - x[1]).map(([k, v]) => {
-        const subs = [...(sub.get(k) ?? new Map()).entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([sid, sv]) => `${cats[sid]?.name} ${r2(sv)}`);
-        return `${cats[k]?.name ?? 'Other'} ${r2(v)}${subs.length ? ` (${subs.join(', ')})` : ''}`;
-      }).join('; ');
-    };
-    L.push(`${ym(m)}: income ${inc}, expenses ${exp}, saved ${r2(inc - exp)}`);
-    L.push(`  expenses: ${by('expense')}`);
-    L.push(`  income: ${by('income')}`);
-  }
+  L.push('', chatDetail(s, today));
 
   // budgets this month
   const budgets = s.prefs.budgets ?? {};
@@ -193,7 +170,7 @@ export interface QueryResult {
 
 export const QUERY_TOOL = {
   name: 'query_transactions',
-  description: 'Sum, count and list the user\'s transactions with filters, computed on the phone from the full data. Use it whenever you need a number that is not in DATA (a specific category, period, weekday, account, note text, or the partner\'s spending). Dates are YYYY-MM-DD; weekdays 0=Sunday…6=Saturday.',
+  description: 'Exact sums, counts and lists over all of the user\'s transactions, computed on his phone. Use it for any figure that is not in DATA, and to test an explanation before giving it (compare two periods, group by weekday to find a pattern, filter by note text). Returns total, count, average per entry, groups, and the 12 latest matching entries. Dates are YYYY-MM-DD; weekdays 0=Sunday…6=Saturday. who: me (default), partner, or both.',
   input_schema: {
     type: 'object',
     properties: {
@@ -258,16 +235,36 @@ export function runQuery(q: QueryInput, s: State = getState(), today = todayISO(
   };
 }
 
-const forClaude = (r: QueryResult) => JSON.stringify({ count: r.count, total: r.total, first_date: r.from, last_date: r.to, groups: r.groups.slice(0, 40), latest: r.rows.slice(0, 12).map(x => `${x.date} ${x.amount} ${x.what}${x.note ? ` "${x.note}"` : ''}`) });
+const forClaude = (r: QueryResult) => JSON.stringify({ count: r.count, total: r.total, average: r.count ? r2(r.total / r.count) : 0, first_date: r.from, last_date: r.to, groups: r.groups.slice(0, 40).map(g => ({ ...g, average: g.count ? r2(g.total / g.count) : 0 })), latest: r.rows.slice(0, 12).map(x => `${x.date} ${x.amount} ${x.what}${x.note ? ` "${x.note}"` : ''}`) });
 
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are the assistant inside the user's personal budgeting app (his name, jobs, trading and money are in DATA).
-Answer in the language of his message (usually Greek), briefly: 1–6 short sentences or a short list. No greetings, no filler, no motivational talk.
-Numbers: use only DATA below or the query_transactions tool. Never estimate or invent a figure; if it is not available, say so. Format money like 1.234,56 €.
-When he asks for advice (what to cut, how to earn more, is X worth it), be concrete and honest, grounded in his numbers: name categories and amounts, compare with his own averages, and translate money into hours of his work using his real hourly pay with tips from DATA when useful. Say plainly when something looks like a problem.
-For trading or investing decisions give facts and trade-offs from his data, not orders. You are not a financial advisor and need not say so unless it matters.
-Shared categories: his totals are only his part; the partner's spending is separate.`;
+const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes), the query_transactions tool (exact sums over every transaction, computed on his phone), and ABOUT ME (his own description of his goals and situation; it may be empty).
+
+Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
+
+How to answer
+- Put the answer in the first sentence. Then the evidence: the 2–4 numbers that support it.
+- As short as the question allows: a number question gets 1–3 sentences; an advice question gets at most about 8 short lines or bullets.
+- No greetings, no filler, no motivational language, no generic tips that would fit anyone.
+
+Numbers
+- Use only DATA, tool results, or tool results from earlier in this conversation. Never estimate, round or invent a figure. If something is not in the data, say so and say what would answer it.
+- Before stating any figure that is not literally in DATA, call query_transactions. Call it as many times as you need (other periods, filters, group_by) to check an explanation before you give it.
+- Simple arithmetic on known numbers is fine (differences, per month, hours = € ÷ hourly pay); show it plainly.
+- Money format: 1.234,56 €.
+
+Advice (what to cut, how to earn more, is X worth it)
+- Find the drivers: how often × average amount, which subcategories, which days of the week, and what changed against his own 3- and 12-month averages.
+- Rank options by impact in € per month and translate each into hours of his work at his real hourly pay with tips (in DATA).
+- Check against ABOUT ME: say whether he is on track for his goals and how big the gap is.
+- Be direct when something is a problem. If he is doing fine, say so in one line and stop.
+- Trading: report results and trade-offs from his data (P&L against hours of work, consistency, worst stretches). Do not tell him to buy, sell, or change position size.
+
+Context
+- Shared categories (with his girlfriend): his totals are only his part. For questions about joint spending use who "partner" or "both" in the tool.
+- Future-dated (planned) entries do not count until their date.
+- The current month is not over: compare by pace, not by totals.`;
 
 export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; error?: boolean; at: string }
 
@@ -275,13 +272,36 @@ const CHAT_KEY = 'money:chat';
 export function loadChat(): ChatItem[] { try { return JSON.parse(localStorage.getItem(CHAT_KEY) ?? '[]'); } catch { return []; } }
 export function saveChat(items: ChatItem[]) { try { localStorage.setItem(CHAT_KEY, JSON.stringify(items.slice(-60))); } catch { /* full */ } }
 
+const CONTINUE = 'Continue exactly where you stopped. Do not repeat anything.';
+const textOf = (r: ApiReply) => r.content.filter((x): x is Extract<Block, { type: 'text' }> => x.type === 'text').map(x => x.text).join('');
+const aboutMe = () => (getState().prefs.aboutMe ?? '').trim() || '(empty)';
+
+/** Asks; if the answer hits the length limit, asks for the rest (twice at most) and joins it. */
+async function complete(system: unknown, msgs: ApiMsg[], tools?: unknown): Promise<ApiReply> {
+  let r = await callAI({ system, messages: msgs, tools });
+  let text = textOf(r);
+  for (let i = 0; i < 2 && r.stop_reason === 'max_tokens'; i++) {
+    const more = [...msgs, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: CONTINUE }];
+    r = await callAI({ system, messages: more, tools });
+    text += textOf(r);
+  }
+  return { ...r, content: [...r.content.filter(x => x.type !== 'text'), { type: 'text', text }] };
+}
+
+/** What it looked up in a turn, kept in the conversation so follow-up questions can build on it. */
+const memo = (r: QueryResult) => `${r.label} ${r.from}–${r.to}: total ${r.total}, ${r.count} entries${r.groups.length ? `; by ${r.input.group_by}: ${r.groups.slice(0, 14).map(g => `${g.key} ${g.total}`).join(', ')}` : ''}`;
+
 /** One turn: question in, answer (and any numbers it looked up) out. */
 export async function askClaude(history: ChatItem[], question: string): Promise<ChatItem> {
   const system = [
     { type: 'text', text: CHAT_RULES },
+    { type: 'text', text: 'ABOUT ME\n' + aboutMe() },
     { type: 'text', text: 'DATA\n' + buildSnapshot(), cache_control: { type: 'ephemeral' } },
   ];
-  const past: ApiMsg[] = history.filter(h => !h.error).slice(-12).map(h => ({ role: h.role, content: h.text || '…' }));
+  const past: ApiMsg[] = history.filter(h => !h.error).slice(-16).map(h => ({
+    role: h.role,
+    content: (h.text || '…') + (h.role === 'assistant' && h.results?.length ? `\n[Looked up: ${h.results.map(memo).join(' | ')}]` : ''),
+  }));
   // the API wants turns to alternate, starting with the user
   const msgs: ApiMsg[] = [];
   for (const m of [...past, { role: 'user' as const, content: question }]) {
@@ -289,13 +309,10 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
     else if (msgs.length || m.role === 'user') msgs.push(m);
   }
   const results: QueryResult[] = [];
-  for (let step = 0; step < 5; step++) {
-    const r = await callAI({ system, messages: msgs, tools: [QUERY_TOOL] });
-    const uses = r.content.filter((b): b is Extract<Block, { type: 'tool_use' }> => b.type === 'tool_use');
-    if (r.stop_reason !== 'tool_use' || !uses.length) {
-      const text = r.content.filter((b): b is Extract<Block, { type: 'text' }> => b.type === 'text').map(b => b.text).join('\n').trim();
-      return { role: 'assistant', text, results, at: new Date().toISOString() };
-    }
+  for (let step = 0; step < 8; step++) {
+    const r = await complete(system, msgs, [QUERY_TOOL]);
+    const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
+    if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: r.content });
     msgs.push({
       role: 'user', content: uses.map(u => {
@@ -310,11 +327,24 @@ export async function askClaude(history: ChatItem[], question: string): Promise<
 
 // ---------------------------------------------------------------- monthly review
 
-const REVIEW_RULES = `Write a short monthly review of the user's money for his budgeting app, in Greek.
-4–6 bullet lines starting with "• ", each one fact with its number, most important first. Neutral and honest: no praise, no motivational words, no advice unless a number clearly calls for one short remark. Use only the facts given; never add numbers. Money like 1.234,56 €.
-If the month is not over, the facts are "up to" a date: say "μέχρι σήμερα" where it matters.`;
+const REVIEW_RULES = `You write the monthly review in Teo's budgeting app. He already sees every total in the app, so do not repeat totals. Explain them: what drove the changes, what is unusual, where the month is heading, and what to do about it.
+
+Input: FACTS (computed by the app; the only numbers you may use) and ABOUT ME (his goals and situation; may be empty).
+
+Write in English, in exactly these three sections, with these headings:
+
+What changed and why
+2–3 bullets. Each names a change against his usual (3-month average) and its cause from FACTS: more often vs. more expensive, which subcategories, which days of the week, one-off large expenses, recurring items that changed price.
+
+Watch out
+1–3 bullets: where the month ends if this pace continues, budgets on track to be exceeded and on which day, anything outside his normal pattern, the gap to the goals in ABOUT ME. If nothing needs attention, write one bullet saying so.
+
+One move for next month
+Exactly one concrete action, with its expected effect in € per month and in hours of his work at his hourly pay. It must follow from the facts above.
+
+Rules: each bullet is one or two short sentences, with numbers as evidence. Use only numbers in FACTS; simple arithmetic on them is fine and must be shown plainly. No praise, no motivational language, no generic advice. Money format 1.234,56 €. If the month is not over, treat totals as "so far" and reason by pace. Keep the whole review under 170 words.`;
 
 export async function writeReview(facts: string): Promise<string> {
-  const r = await callAI({ system: REVIEW_RULES, messages: [{ role: 'user', content: facts }] });
-  return r.content.filter((b): b is Extract<Block, { type: 'text' }> => b.type === 'text').map(b => b.text).join('\n').trim();
+  const r = await complete(REVIEW_RULES, [{ role: 'user', content: `ABOUT ME\n${aboutMe()}\n\nFACTS\n${facts}` }]);
+  return textOf(r).trim();
 }

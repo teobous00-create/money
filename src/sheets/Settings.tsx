@@ -5,7 +5,7 @@ import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
 import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, signOut, sync, wipeMyData, discardFailed } from '../lib/store';
+import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs } from '../lib/store';
 import { exportCsv } from '../lib/import1money';
 import { REMOTE } from '../lib/supabase';
 import { todayISO } from '../lib/format';
@@ -35,6 +35,7 @@ function Body() {
   const standalone = window.matchMedia('(display-mode: standalone)').matches;
   const name = (user && profiles[user.id]?.display_name) || 'Me';
   const theme = useTheme();
+  const analytics = useStore(s => !!s.prefs.analytics);
   const [voiceAuto, setVoiceAuto] = useState(voiceAutoSave);
 
   const doExport = () => {
@@ -81,6 +82,8 @@ function Body() {
         </div>
       </div>
 
+      {analytics && <AboutMe />}
+
       <div className="section list">
         <button className="list-row" onClick={() => setUi({ recurring: true })}>
           <Repeat size={21} /><span className="grow">Recurring</span><span className="muted small">{recCount}</span><ChevronRight size={18} className="faint" />
@@ -114,6 +117,24 @@ function Body() {
         )}
       </AnimatePresence>
       <div className="tiny faint" style={{ textAlign: 'center', marginTop: 20 }}>Money · v{__APP_VERSION__}</div>
+    </div>
+  );
+}
+
+/** "About me": goals and situation, sent to the AI with every chat and review. Synced to your devices. */
+function AboutMe() {
+  const saved = useStore(s => s.prefs.aboutMe ?? '');
+  const [text, setText] = useState(saved);
+  const dirty = text.trim() !== saved.trim();
+  return (
+    <div className="section">
+      <div className="section-head"><span className="section-title">About me · for the AI</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
+      <textarea className="input about" rows={6} value={text} onChange={e => setText(e.target.value)} onBlur={() => dirty && setPrefs({ aboutMe: text.trim() })}
+        placeholder={'Goals, debts, plans — e.g. "I want 3.000 € saved by June", "Eurobank loan 2.000 €, 150 €/month"'} />
+      <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <span className="tiny muted">Sent with every chat and monthly review. Only you see it.</span>
+        {dirty && <button className="small bold" style={{ color: 'var(--accent)' }} onClick={() => { setPrefs({ aboutMe: text.trim() }); toast('Saved'); }}>Save</button>}
+      </div>
     </div>
   );
 }
