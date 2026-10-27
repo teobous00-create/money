@@ -2,12 +2,27 @@ import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: process.env.SCHEME || 'light' });
 await ctx.addInitScript(() => localStorage.setItem('money:rule-contacts', '1'));   // keeps the old per-day bonus (no contacts target) for this test
+await ctx.addInitScript(() => {
+  window.__say = '';
+  window.SpeechRecognition = window.webkitSpeechRecognition = class {
+    start() { setTimeout(() => { const t = window.__say; this.onresult?.({ results: [Object.assign([{ transcript: t }], { isFinal: true })] }); this.onend?.(); }, 200); }
+    stop() {} abort() {}
+  };
+});
 const p = await ctx.newPage();
 const errors = []; p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
 const OUT = process.env.OUT;
 const shot = async n => { await p.waitForTimeout(700); await p.screenshot({ path: `${OUT}/${n}.png` }); };
 const top = () => p.locator('.sheet').last();
+// speak through the top mic (on Transactions), then come back to where we were
+const mic = async (t, wait = 1000) => {
+  const back = await p.locator('.nav-item.on').evaluate(e => [...e.parentNode.querySelectorAll('.nav-item')].indexOf(e) + 1);
+  if (back !== 3) { await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(600); }
+  await p.evaluate(s => { window.__say = s; }, t);
+  await p.click('[aria-label="Speak a command"]'); await p.waitForTimeout(wait);
+  if (back !== 3 && !(await p.locator('.sheet').count())) { await p.click(`.nav-item:nth-child(${back})`); await p.waitForTimeout(700); }
+};
 await p.goto(process.env.URL); await p.waitForTimeout(700);
 await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
 await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
@@ -35,7 +50,7 @@ ok(/Cake & Roll/.test(await top().locator('.field', { hasText: 'Salary goes to c
 await top().locator('.field', { hasText: 'Per hour' }).locator('input').fill('6');
 await top().getByRole('button', { name: 'Save', exact: true }).click(); await p.waitForTimeout(600);
 await p.goBack(); await p.waitForTimeout(700);
-const say = async (t) => { await p.locator('.screen .quick-input').fill(t); await p.locator('.screen .quick-input').press('Enter'); await p.waitForTimeout(900); };
+const say = t => mic(t);
 const toastText = () => p.locator('.toast').innerText().catch(() => '');
 // shift by voice from the Tracker
 await say('απογευματινή 6 ώρες tips 25');
@@ -66,8 +81,7 @@ await say('ddg συν 8');
 ok(/\+8 € \(was −12,40 €\)/.test(await toastText()), 'replaced, says what it was: ' + await toastText());
 // entries by voice in "+" (auto-save, 🎤 mark, Undo)
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(800);
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('delivery 12,50 χθες revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+await mic('delivery 12,50 χθες revolut');
 ok(await p.locator('.sheet').count() === 0 || !(await p.locator('.sheet').last().isVisible()), 'sheet closed after saving');
 ok(/Delivery.*Revolut 12,50 € · yesterday/.test(await toastText()), 'toast: ' + await toastText());
 const row = p.locator('.screen .list-row', { hasText: 'Delivery' }).first();
@@ -78,19 +92,16 @@ ok(/12,5/.test((await top().locator('.amount').innerText()).replace(/\s/g, '')),
 await top().locator('.key.go').click(); await p.waitForTimeout(900);
 ok(await p.locator('.screen .list-row', { hasText: 'Delivery' }).first().locator('[aria-label="Added by voice"]').count() === 0, 'saved after checking → 🎤 gone');
 // several at once
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('καφές 3, supermarket 20 και τσιγάρα 5,5'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+await mic('καφές 3, supermarket 20 και τσιγάρα 5,5');
 ok(/✓ 3 entries · 28,50 €/.test(await toastText()), 'multi: ' + await toastText());
 const before = await p.locator('.screen .list-row').count();
 await p.locator('.toast button').click(); await p.waitForTimeout(900);
 ok(await p.locator('.screen .list-row').count() === before - 3, 'Undo removes all three');
 // recurring
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('claude 20 κάθε μήνα'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+await mic('claude 20 κάθε μήνα');
 ok(/Claude · .* 20 € · every month/.test(await toastText()), 'recurring: ' + await toastText());
 // incomplete → opens filled in
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('netflix 12,49 revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+await mic('netflix 12,49 revolut');
 ok(/Choose a category/.test(await top().innerText()), 'no category → asks for it');
 await top().locator('.cat-tile', { hasText: 'Εφαρμογές' }).click(); await p.waitForTimeout(700);
 ok(/12,49/.test((await top().locator('.amount').innerText()).replace(/\s/g, '')) && /Revolut/.test(await top().innerText()), 'amount + account kept');
@@ -99,8 +110,7 @@ await p.goBack(); await p.waitForTimeout(500);
 await p.click('[aria-label=Settings]'); await p.waitForTimeout(500);
 await top().locator('.list-row', { hasText: 'Voice: save right away' }).locator('.toggle').click(); await p.waitForTimeout(300);
 await p.goBack(); await p.waitForTimeout(500);
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('καφές 2 revolut'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(1000);
+await mic('καφές 2 revolut');
 ok(/Expense/.test(await top().innerText()) && await top().locator('.key.go').count() === 1, 'auto-save off → form filled, waiting for ✓');
 await shot('v-off');
 console.log('errors:', errors.length ? errors : 'none');

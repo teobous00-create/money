@@ -26,6 +26,9 @@ export interface UiState {
   importer: boolean;
   search: boolean;
   hidden: boolean;
+  chat?: boolean;               // the full chat is open
+  ask?: string | null;          // a question from the mic, answered in a small window
+  listenNow?: boolean;          // start the top mic right away (app-icon shortcut)
   shiftDay?: string | null;   // open this day's shift (shortcut, voice)
   payJob?: string | null;     // open "got paid" for this job (voice)
 }

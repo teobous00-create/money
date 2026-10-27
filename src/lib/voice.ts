@@ -225,3 +225,30 @@ export function complete(c: Cmd): boolean {
   return true; // payout: no amount = what's owed for that period
 }
 
+
+// ---- question or command? (top mic: a question goes to the AI)
+const ASK = new Set(['ποσα', 'ποσεσ', 'ποσο', 'ποσοι', 'ποσουσ', 'ποση', 'ποσην', 'τι', 'ποιο', 'ποια', 'ποιοσ', 'ποιεσ', 'ποιον', 'ποιουσ', 'ποτε', 'γιατι', 'πωσ', 'που',
+  'αξιζει', 'μπορω', 'πρεπει', 'ποσοστο', 'συγκρινε', 'εξηγησε', 'αναλυσε', 'δειξε', 'πεσ', 'βρεσ', 'ποιαν',
+  'how', 'what', 'when', 'why', 'which', 'who', 'where', 'should', 'can', 'could', 'do', 'does', 'did', 'is', 'are', 'am', 'will', 'tell', 'show', 'compare', 'explain']);
+// asking to change what's already there — the local parser only adds, so these go to the AI
+const EDIT = /^(διεγραψ|σβησ|σβηνε|αφαιρεσ|ακυρωσ|αλλαξ|αλλαζε|διορθωσ|μετακινησ|μεταφερε|κανε|βαλε|προσθεσε|γραψε|delete|remove|change|move|fix|cancel|undo|add|put|make)/;
+const LEAD = new Set(['ε', 'λοιπον', 'καλα', 'οκ', 'ok', 'hey', 'so', 'και', 'μου', 'ρε']);
+export function isQuestion(text: string): boolean {
+  const t = text.trim();
+  if (/[?;;]\s*$/.test(t) && !/\d/.test(t)) return true;   // a "?" after an amount is more likely a mis-hearing
+  const words = norm(t).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  let i = 0;
+  while (i < words.length - 1 && LEAD.has(words[i])) i++;
+  return ASK.has(words[i] ?? '');
+}
+/** For the top mic: should this go to the AI rather than the quick parser? */
+export function wantsAI(text: string, cmds: Cmd[]): boolean {
+  if (isQuestion(text)) return true;
+  const words = norm(text.trim()).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  let i = 0;
+  while (i < words.length - 1 && LEAD.has(words[i])) i++;
+  const first = words[i] ?? '';
+  // "βάλε/πρόσθεσε καφέ 3" is still a plain entry when it parses with an amount
+  if (EDIT.test(first) && !(/^(βαλε|προσθεσε|γραψε|κανε|add|put)/.test(first) && cmds.length > 0 && cmds.every(c => c.kind !== 'tx' || c.p.amount != null) && words.length <= 6)) return true;
+  return cmds.some(c => c.kind === 'tx' && c.p.amount == null);   // nothing to save without an amount
+}

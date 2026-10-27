@@ -5,7 +5,6 @@ import { Segmented, Sheet, toast, ease } from '../components/ui';
 import { useStore, put, putMany, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
 import { getUi, setUi, useUi } from '../lib/ui';
-import { QuickEntry, useVoiceHandler } from '../components/QuickEntry';
 import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
@@ -30,12 +29,10 @@ let lastSection: 'work' | 'trading' = (lsGet('money:tracker') as 'work' | 'tradi
 export function TrackerScreen() {
   const [section, setSectionState] = useState(() => (getUi().shiftDay || getUi().payJob ? 'work' : lastSection));
   const setSection = (s: typeof section) => { lastSection = s; lsSet('money:tracker', s); setSectionState(s); };
-  const onVoice = useVoiceHandler(c => setUi({ addTx: { prefill: { p: c.p, repeat: c.repeat, until: c.until } } }));
   const wants = useUi(u => !!(u.shiftDay || u.payJob));
   useEffect(() => { if (wants) setSectionState('work'); }, [wants]);
   return (
     <div className="screen" style={{ width: '100%' }}>
-      <QuickEntry onText={onVoice} placeholder={section === 'work' ? 'Say: απογευματινή 6 ώρες tips 25' : 'Say: DDG συν 8 · DDG μείον 12,40'} />
       <Segmented value={section} onChange={setSection} style={{ margin: '4px 0 12px' }}
         options={[{ value: 'work', label: 'Work' }, { value: 'trading', label: 'Trading' }]} />
       <AnimatePresence mode="wait" initial={false}>

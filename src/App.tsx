@@ -19,6 +19,7 @@ import { OverviewScreen } from './screens/Overview';
 // loaded when first needed, so the app opens faster
 const TrackerScreen = lazy(() => import('./screens/Tracker').then(m => ({ default: m.TrackerScreen })));
 const ChatPanel = lazy(() => import('./components/Chat').then(m => ({ default: m.ChatPanel })));
+const AskSheet = lazy(() => import('./components/Chat').then(m => ({ default: m.AskSheet })));
 const ImportSheet = lazy(() => import('./sheets/Import').then(m => ({ default: m.ImportSheet })));
 import { AddTransactionSheet } from './sheets/AddTransaction';
 import { AccountSheet } from './sheets/AccountEdit';
@@ -48,7 +49,7 @@ function useShortcut() {
     const a = new URLSearchParams(location.search).get('a');
     if (!a) { if (analytics) setUi({ tab: 'transactions' }); return; }   // your account always opens on Transactions
     history.replaceState(null, '', location.pathname);
-    if (a === 'voice') setUi({ addTx: { voice: true } });
+    if (a === 'voice') setUi(analytics ? { tab: 'transactions', listenNow: true } : { addTx: { voice: true } });   // your account: the top mic
     else if (a === 'expense') setUi({ addTx: { type: 'expense' } });
     else if (a === 'shift' && analytics) setUi({ tab: 'tracker', shiftDay: todayISO() });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,9 +60,13 @@ function Shell() {
   const dir = useUi(u => u.tabDir);
   useShortcut();
   const ai = useStore(s => !!s.prefs.analytics);   // the chat is only on your account
-  const [chat, setChat] = useState(false);
+  const chat = useUi(u => !!u.chat);
+  const ask = useUi(u => u.ask);
   const [chatEver, setChatEver] = useState(false);
-  const pull = usePullToChat(ai && !chat, () => { setChatEver(true); setChat(true); }, isDragging);
+  const [askEver, setAskEver] = useState(false);
+  useEffect(() => { if (chat) setChatEver(true); }, [chat]);
+  useEffect(() => { if (ask) setAskEver(true); }, [ask]);
+  const pull = usePullToChat(ai && !chat, () => setUi({ chat: true }), isDragging);
   return (
     <div className="app">
       <TopBar />
@@ -101,7 +106,8 @@ function Shell() {
         )}
       </AnimatePresence>
       <BottomNav />
-      {ai && chatEver && <Suspense fallback={null}><ChatPanel open={chat} onClose={() => setChat(false)} /></Suspense>}
+      {ai && chatEver && <Suspense fallback={null}><ChatPanel open={chat} onClose={() => setUi({ chat: false })} /></Suspense>}
+      {ai && askEver && <Suspense fallback={null}><AskSheet /></Suspense>}
       <ToastHost />
       <Sheets />
     </div>

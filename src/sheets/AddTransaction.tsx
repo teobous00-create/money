@@ -97,6 +97,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     }
     parsed.current = { words: p.words, categoryId: p.categoryId };
   };
+  const topMic = useStore(s => !!s.prefs.analytics);   // your account speaks through the top mic instead
   const onVoice = useVoiceHandler(c => applyParsed(c.p, c.repeat, c.until), () => close());
   // opened from elsewhere with a phrase that still needs you
   useEffect(() => { if (args.prefill) applyParsed(args.prefill.p, args.prefill.repeat, args.prefill.until); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -309,7 +310,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
         <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
           initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
           <Picker type={type} onType={setType} onPick={onPick} exclude={accountId}
-            quick={!editing ? <QuickEntry onText={onVoice} autoListen={!!args.voice} /> : null} />
+            quick={!editing && !topMic ? <QuickEntry onText={onVoice} autoListen={!!args.voice} /> : null} />
         </motion.div>
       ) : (
         <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}

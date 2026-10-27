@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { setUi } from '../lib/ui';
+import { setUi, useUi } from '../lib/ui';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, Mic, Sparkles } from 'lucide-react';
 import { haptic } from '../lib/format';
 import { toast } from './ui';
-import { interpret, type Cmd } from '../lib/voice';
+import { interpret, isQuestion, wantsAI, type Cmd } from '../lib/voice';
 import { openFor, runVoice, understood, voiceCtxNow } from '../lib/voiceRun';
 
 type Rec = {
@@ -108,8 +108,22 @@ export function useVoiceHandler(fillTx: (c: Extract<Cmd, { kind: 'tx' }>) => voi
 
 /** Mic button (top bar): tap, say a command, done. Shows what it hears while listening. */
 export function VoiceButton() {
-  const onVoice = useVoiceHandler(c => setUi({ addTx: { prefill: { p: c.p, repeat: c.repeat, until: c.until } } }));
+  const onVoice = (text: string) => {
+    if (isQuestion(text)) { setUi({ ask: text }); return; }           // a question → the AI, in a small window
+    const cmds = interpret(text, voiceCtxNow());
+    if (!understood(cmds) || wantsAI(text, cmds)) { setUi({ ask: text }); return; }   // not a plain new entry → let the AI handle it
+    const open = runVoice(cmds);
+    if (!open) return;
+    if (open.kind === 'tx') setUi({ addTx: { prefill: { p: open.p, repeat: open.repeat, until: open.until } } });
+    else openFor(open);
+  };
   const { listening, heard, start, supported } = useListen(onVoice);
+  const now = useUi(u => !!u.listenNow);
+  useEffect(() => {   // app-icon shortcut "Say entry": start listening right away
+    if (!now || !supported) return;
+    const t = setTimeout(() => { setUi({ listenNow: false }); start(); }, 400);
+    return () => clearTimeout(t);
+  }, [now]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!supported) return null;
   return (
     <>

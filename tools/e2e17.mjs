@@ -1,11 +1,26 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1243/chrome-linux64/chrome' });
 const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await ctx.addInitScript(() => {
+  window.__say = '';
+  window.SpeechRecognition = window.webkitSpeechRecognition = class {
+    start() { setTimeout(() => { const t = window.__say; this.onresult?.({ results: [Object.assign([{ transcript: t }], { isFinal: true })] }); this.onend?.(); }, 200); }
+    stop() {} abort() {}
+  };
+});
 const p = await ctx.newPage();
 const errors = []; p.on('pageerror', e => errors.push(e.message));
 const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
 const OUT = process.env.OUT;
 const top = () => p.locator('.sheet').last();
+// speak through the top mic (on Transactions), then come back to where we were
+const mic = async (t, wait = 1000) => {
+  const back = await p.locator('.nav-item.on').evaluate(e => [...e.parentNode.querySelectorAll('.nav-item')].indexOf(e) + 1);
+  if (back !== 3) { await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(600); }
+  await p.evaluate(s => { window.__say = s; }, t);
+  await p.click('[aria-label="Speak a command"]'); await p.waitForTimeout(wait);
+  if (back !== 3 && !(await p.locator('.sheet').count())) { await p.click(`.nav-item:nth-child(${back})`); await p.waitForTimeout(700); }
+};
 await p.goto(process.env.URL); await p.waitForTimeout(700);
 await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
 await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
@@ -44,7 +59,7 @@ card = await p.locator('.card', { hasText: 'Morning' }).first().innerText();
 ok(/48\s*\/\s*75/.test(card) && /need 13,50 a day on the 2 planned days/.test(card), 'planned days: target 75, need 13,5 a day: ' + card.replace(/\n/g, ' | '));
 await p.screenshot({ path: `${OUT}/t1.png` });
 // voice: "πρωινή 18 επαφές" today
-await p.locator('.screen .quick-input').fill('πρωινή 18 επαφές'); await p.locator('.screen .quick-input').press('Enter'); await p.waitForTimeout(900);
+await mic('πρωινή 18 επαφές');
 ok(/Morning · 18 contacts/.test(await p.locator('.toast').innerText()), 'voice: ' + await p.locator('.toast').innerText());
 card = await p.locator('.card', { hasText: 'Morning' }).first().innerText();
 ok(/66\s*\/\s*90/.test(card), 'today counted: 66 / 90');

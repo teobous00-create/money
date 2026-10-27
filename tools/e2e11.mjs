@@ -15,6 +15,14 @@ const errors = []; p.on('pageerror', e => errors.push(e.message));
 const ok = (c, m) => console.log((c ? 'ok  ' : 'FAIL') + ' ' + m);
 const OUT = process.env.OUT;
 const top = () => p.locator('.sheet').last();
+// speak through the top mic (on Transactions), then come back to where we were
+const mic = async (t, wait = 1000) => {
+  const back = await p.locator('.nav-item.on').evaluate(e => [...e.parentNode.querySelectorAll('.nav-item')].indexOf(e) + 1);
+  if (back !== 3) { await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(600); }
+  await p.evaluate(s => { window.__say = s; }, t);
+  await p.click('[aria-label="Speak a command"]'); await p.waitForTimeout(wait);
+  if (back !== 3 && !(await p.locator('.sheet').count())) { await p.click(`.nav-item:nth-child(${back})`); await p.waitForTimeout(700); }
+};
 await p.goto(process.env.URL); await p.waitForTimeout(700);
 await p.click('[aria-label=Settings]'); await p.waitForTimeout(400);
 await p.getByText('Import from 1Money').click(); await p.waitForTimeout(400);
@@ -23,10 +31,8 @@ await p.getByRole('button', { name: 'Import', exact: true }).click(); await p.wa
 await p.getByText('Go to accounts').click(); await p.waitForTimeout(600);
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(800);
 // typed
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
 await p.screenshot({ path: `${OUT}/q0.png` });
-await top().locator('.quick-input').fill('καφές με Γιώργο 4 Παρασκευή μετρητά');
-await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(900);
+await mic('καφές με Γιώργο 4 Παρασκευή μετρητά');
 let t = await top().innerText();
 await p.screenshot({ path: `${OUT}/q1.png` });
 ok(/Μετρητά/.test(t) && /Supermarket/.test(t) && /Expense/.test(t), 'typed: Supermarket, Μετρητά');
@@ -51,13 +57,11 @@ ok(/26 Oct 2026/.test(t) && /Yesterday/.test(t), 'yesterday');
 ok(!(await p.evaluate(() => location.search)), 'url cleaned');
 // learned: next time "καφές" goes to Διασκέδαση
 await p.goto(process.env.URL); await p.waitForTimeout(700);
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('καφές 2'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(900);
+await mic('καφές 2');
 ok(/Διασκέδαση/.test(await top().innerText()), 'learned: καφές → Διασκέδαση now');
 // transfer
 await p.goto(process.env.URL); await p.waitForTimeout(700);
-await p.click('[aria-label="Add transaction"]'); await p.waitForTimeout(800);
-await top().locator('.quick-input').fill('από revolut σε μετρητά 50'); await top().locator('.quick-input').press('Enter'); await p.waitForTimeout(900);
+await mic('από revolut σε μετρητά 50');
 t = await top().innerText();
 ok(/Transfer/.test(t) && /Revolut/.test(t) && /Μετρητά/.test(t), 'transfer Revolut → Μετρητά');
 await p.screenshot({ path: `${OUT}/q3.png` });
