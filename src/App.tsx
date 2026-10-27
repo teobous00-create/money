@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
@@ -10,6 +10,7 @@ import { num } from './lib/format';
 import { Money, ToastHost, softSpring, ease } from './components/ui';
 import { AuthScreen } from './screens/Auth';
 import { VoiceButton } from './components/QuickEntry';
+import { ChatPanel, PullHint, usePullToChat } from './components/Chat';
 import { isDragging } from './components/Sortable';
 import { AccountsScreen } from './screens/Accounts';
 import { CategoriesScreen } from './screens/Categories';
@@ -55,6 +56,9 @@ function Shell() {
   const tab = useUi(u => u.tab);
   const dir = useUi(u => u.tabDir);
   useShortcut();
+  const ai = useStore(s => !!s.prefs.analytics);   // the chat is only on your account
+  const [chat, setChat] = useState(false);
+  const pull = usePullToChat(ai && !chat, () => setChat(true), isDragging);
   return (
     <div className="app">
       <TopBar />
@@ -66,7 +70,8 @@ function Shell() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }} {...pull.handlers}>
+        <PullHint pull={pull.pull} ready={pull.ready} />
         <AnimatePresence initial={false} custom={dir} mode="popLayout">
           <motion.div key={tab} custom={dir} style={{ position: 'absolute', inset: 0, display: 'flex' }}
             variants={{
@@ -93,6 +98,7 @@ function Shell() {
         )}
       </AnimatePresence>
       <BottomNav />
+      {ai && <ChatPanel open={chat} onClose={() => setChat(false)} />}
       <ToastHost />
       <Sheets />
     </div>

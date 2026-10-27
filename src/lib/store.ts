@@ -475,9 +475,9 @@ export function setBudget(categoryId: string, amount: number | null) {
 
 async function pushPrefs() {
   if (!REMOTE || !state.user || !prefsPending || !navigator.onLine) return;
-  // keep server-only flags (analytics) as they are on the server
-  const { analytics: _a, ...mine } = state.prefs;
-  void _a;
+  // keep server-only values (analytics flag, AI usage counter) as they are on the server
+  const { analytics: _a, aiUsage: _u, ...mine } = state.prefs;
+  void _a; void _u;
   const { data } = await supabase!.from('user_prefs').select('prefs').eq('user_id', state.user.id).maybeSingle();
   const merged = { ...((data?.prefs as Prefs) ?? {}), ...mine };
   const { error } = await supabase!.from('user_prefs').upsert({ user_id: state.user.id, prefs: merged }, { onConflict: 'user_id' });

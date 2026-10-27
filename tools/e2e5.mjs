@@ -42,6 +42,7 @@ ok(await p.locator('.split').count() === 1, 'tap opens the add screen');
 await p.goBack(); await p.waitForTimeout(700);
 // persists after reload
 await p.reload(); await p.waitForTimeout(1800);
+await p.click('.nav-item:nth-child(2)'); await p.waitForTimeout(900);   // your account opens on Transactions
 ok(JSON.stringify((await names()).slice(0, 8)) === JSON.stringify(after.slice(0, 8)), 'order kept after reload');
 // add picker uses the same order
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(500);
