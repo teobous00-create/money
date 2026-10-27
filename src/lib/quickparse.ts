@@ -29,7 +29,7 @@ export const norm = (s: string) => s.toLocaleLowerCase('el').normalize('NFD').re
 export const clean = (s: string) => norm(s).replace(/[^\p{L}\p{N}.,/+-]/gu, '');
 
 const STOP = new Set(['το', 'τα', 'τον', 'την', 'τη', 'της', 'του', 'των', 'ο', 'η', 'οι', 'ενα', 'μια', 'για', 'σε', 'στο', 'στη', 'στην', 'στα', 'στον', 'στις', 'στουσ',
-  'απο', 'απ', 'και', 'με', 'μεσω', 'ευρω', 'ευρο', 'euro', 'euros', 'eur', '€', 'λεπτα', 'σημερα', 'the', 'for', 'on', 'from', 'to', 'at', 'in', 'a']);
+  'απο', 'απ', 'και', 'με', 'μεσω', 'βαλε', 'προσθεσε', 'γραψε', 'add', 'put', 'ευρω', 'ευρο', 'euro', 'euros', 'eur', '€', 'λεπτα', 'σημερα', 'the', 'for', 'on', 'from', 'to', 'at', 'in', 'a']);
 const PREP = new Set(['απο', 'απ', 'σε', 'στο', 'στη', 'στην', 'στον', 'με', 'μεσω', 'from', 'to', 'with']);
 // exact words only (no stemming): "μεταφορά" must not catch "Μεταφορικά"
 const INCOME = ['μπηκαν', 'μπηκε', 'εσοδο', 'εσοδα', 'πληρωθηκα', 'κερδισα', 'income', 'earned'];

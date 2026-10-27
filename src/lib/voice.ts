@@ -244,6 +244,7 @@ export function isQuestion(text: string): boolean {
 /** For the top mic: should this go to the AI rather than the quick parser? */
 export function wantsAI(text: string, cmds: Cmd[]): boolean {
   if (isQuestion(text)) return true;
+  if (/(budget|μπατζετ|προυπολογισμ|οριο|ορια)/.test(norm(text))) return true;   // budgets are only set through the AI card
   const words = norm(text.trim()).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   let i = 0;
   while (i < words.length - 1 && LEAD.has(words[i])) i++;
