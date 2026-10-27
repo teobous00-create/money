@@ -139,6 +139,12 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
         const tips = j.tips_category_id ? r2(mine.filter(t => t.type === 'income' && t.category_id === j.tips_category_id && t.date >= m && t.date <= e && t.date <= today).reduce((x, t) => x + t.amount, 0)) : 0;
         L.push(`  ${ym(m)}: ${sh.length} ${j.kind === 'daily' ? 'days' : 'shifts'}, ${j.kind === 'hourly' ? `${hours}h, ` : ''}earned ${earned}${bonus ? ` (bonus ${bonus})` : ''}${tips ? `, tips ${tips} (${r2(tips / sh.length)}/shift)` : ''}${j.kind === 'hourly' && hours ? `, ${r2((earned + tips) / hours)}/h with tips` : ''}`);
       }
+      const fut = shifts.filter(x => x.job_id === j.id && x.date > today).sort((a, b) => a.date.localeCompare(b.date));
+      if (fut.length) {
+        const byM = new Map<string, { n: number; hours: number; pay: number }>();
+        for (const x of fut) { const k = ym(x.date); const v = byM.get(k) ?? { n: 0, hours: 0, pay: 0 }; v.n++; v.hours += x.hours ?? 0; v.pay += shiftParts(j, x).base; byM.set(k, v); }
+        L.push(`  PLANNED (future shifts already entered; bonus/tips not known yet): ${[...byM.entries()].map(([k, v]) => `${k}: ${v.n} ${j.kind === 'daily' ? 'days' : `shifts, ${r2(v.hours)}h`}, pay ${r2(v.pay)}`).join('; ')}`);
+      }
       const owed = payPeriods(j, shifts, s.payouts, s.transactions);
       L.push(`  owed now: ${owed.owed}${j.kind === 'daily' ? ` (salary ${owed.owedBase} + bonus ${owed.owedBonus})` : ''}`);
     }

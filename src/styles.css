@@ -379,3 +379,4 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .pcard.applied, .pcard.cancelled, .pcard.undone { border-color: transparent; opacity: .8; }
 .prow { font-size: 14px; padding: 5px 0; border-top: 1px solid var(--line); }
 .prow:first-of-type { border-top: 0; }
+.plan-row { padding: 6px 0; border-top: 1px solid var(--line); }

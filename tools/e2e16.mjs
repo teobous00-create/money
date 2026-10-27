@@ -50,9 +50,18 @@ await p.screenshot({ path: `${OUT}/p1.png` });
 await p.locator('.pcard').getByRole('button', { name: 'Apply' }).click(); await p.waitForTimeout(600);
 ok(await p.evaluate(() => Object.values(window.__money.getState().shifts).filter(s => s.date.startsWith('2026-11') && !s.deleted_at && s.hours === 5.5).length) === 4, 'Apply saves the 4 shifts');
 ok(/✓ Applied/.test(await p.locator('.pcard').innerText()), 'card says applied');
-await p.locator('.toast button').click(); await p.waitForTimeout(500);
-ok(await p.evaluate(() => Object.values(window.__money.getState().shifts).filter(s => s.date.startsWith('2026-11') && !s.deleted_at).length) === 0, 'Undo takes all 4 back');
-ok(/Undone/.test(await p.locator('.pcard').innerText()), 'card says undone');
+// November plan in the Tracker
+await p.goBack(); await p.waitForTimeout(700);
+await p.locator('[aria-label=Next]').last().click(); await p.waitForTimeout(800);
+const plan = await p.locator('.card', { hasText: 'November 2026' }).innerText().catch(() => '');
+await p.screenshot({ path: `${OUT}/p-plan.png`, fullPage: true });
+ok(/expected/.test(plan) && /132 €/.test(plan) && /Planned: 2 shifts · 11h · 66 €/.test(plan) && /16–30 Nov/.test(plan), 'November plan: 4 × 5,5h × 6 € = 132 €, split 1–15 / 16–30: ' + plan.replace(/\n/g, ' | '));
+await pull();
+await p.locator('.pcard').first().scrollIntoViewIfNeeded();
+await p.evaluate(() => {});
+// undo from the card's toast is gone by now: undo through the store instead
+await p.evaluate(() => { const m = window.__money; const st = m.getState(); m.putMany('shifts', Object.values(st.shifts).filter(s => s.date.startsWith('2026-11')).map(s => ({ ...s, deleted_at: new Date().toISOString() }))); });
+ok(await p.evaluate(() => Object.values(window.__money.getState().shifts).filter(s => s.date.startsWith('2026-11') && !s.deleted_at).length) === 0, 'cleaned up');
 // delete + add + a bad one
 await ask('delete the Netflix entry and add the cheaper plan');
 const tool = await p.evaluate(() => window.__lastTool);

@@ -163,10 +163,72 @@ function Work() {
           })}
         </div>
       </div>
+      <MonthPlan anchor={anchor} />
       <ShiftSheet date={day} onClose={() => setDay(null)} />
       <PayoutSheet job={payJob} onClose={() => setPayJob(null)} />
       <JobsSheet open={settings} onClose={() => setSettings(false)} />
     </div>
+  );
+}
+
+/** What this month brings per pay period: worked so far + planned shifts (+ tips estimated from your recent average). */
+function MonthPlan({ anchor }: { anchor: string }) {
+  const jobs = useJobs();
+  const shifts = useJobShifts();
+  const txs = useStore(s => s.transactions);
+  const today = todayISO();
+  const d = fromISO(anchor);
+  const first = toISO(new Date(d.getFullYear(), d.getMonth(), 1)), last = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  const rows = useMemo(() => jobs.map(job => {
+    const tipOf = (s: (typeof shifts)[number]) => { const t = s.tips_tx_id ? txs[s.tips_tx_id] : null; return t && !t.deleted_at ? t.amount : 0; };
+    // tips per shift over the last 90 days, to estimate planned shifts
+    const recent = shifts.filter(s => s.job_id === job.id && s.date <= today && s.date > addDays(today, -90));
+    const tipAvg = job.kind === 'hourly' && recent.length ? recent.reduce((x, s) => x + tipOf(s), 0) / recent.length : 0;
+    const periods: Array<[string, string]> = job.pay === 'monthly' ? [[first, last]] : [[first, toISO(new Date(d.getFullYear(), d.getMonth(), 15))], [toISO(new Date(d.getFullYear(), d.getMonth(), 16)), last]];
+    return {
+      job, tipAvg: round2(tipAvg),
+      periods: periods.map(([a, b]) => {
+        const inP = shifts.filter(s => s.job_id === job.id && s.date >= a && s.date <= b);
+        const sum = (l: typeof inP) => ({ n: l.length, hours: round2(l.reduce((x, s) => x + (s.hours ?? 0), 0)), base: round2(l.reduce((x, s) => x + shiftParts(job, s).base, 0)), bonus: round2(l.reduce((x, s) => x + shiftParts(job, s).bonus, 0)), tips: round2(l.reduce((x, s) => x + tipOf(s), 0)) });
+        const worked = sum(inP.filter(s => s.date <= today)), planned = sum(inP.filter(s => s.date > today));
+        return { a, b, worked, planned, tipsEst: round2(planned.n * tipAvg) };
+      }),
+    };
+  }).filter(r => r.periods.some(p => p.worked.n || p.planned.n)), [jobs, shifts, txs, first, last, today, d]);
+  if (!rows.length) return null;
+  const pay = round2(rows.reduce((x, r) => x + r.periods.reduce((y, p) => y + p.worked.base + p.worked.bonus + p.planned.base + p.planned.bonus, 0), 0));
+  const tips = round2(rows.reduce((x, r) => x + r.periods.reduce((y, p) => y + p.worked.tips, 0), 0));
+  const tipsEst = round2(rows.reduce((x, r) => x + r.periods.reduce((y, p) => y + p.tipsEst, 0), 0));
+  const anyPlanned = rows.some(r => r.periods.some(p => p.planned.n));
+  const line = (job: Job, v: { n: number; hours: number; base: number; bonus: number }) =>
+    job.kind === 'daily' ? `${v.n} ${v.n === 1 ? 'day' : 'days'} · ${money(v.base)}${v.bonus ? ` + bonus ${money(v.bonus)}` : ''}` : `${v.n} ${v.n === 1 ? 'shift' : 'shifts'} · ${num(v.hours)}h · ${money(v.base)}`;
+  return (
+    <motion.div className="card" style={{ marginTop: 14 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }}>
+      <div className="row" style={{ alignItems: 'baseline', marginBottom: 10 }}>
+        <span className="grow bold">{monthFmt.format(d)}{anyPlanned ? ' · expected' : ''}</span>
+        <span className="num bold">{money(pay)}</span>
+      </div>
+      {(tips > 0 || tipsEst > 0) && <div className="tiny muted num" style={{ marginTop: -6, marginBottom: 10, textAlign: 'right' }}>+ tips {money(tips)}{tipsEst > 0 ? ` + ≈ ${money(tipsEst)} expected` : ''}</div>}
+      {rows.map(r => (
+        <div key={r.job.id} style={{ marginBottom: 10 }}>
+          <div className="row small bold" style={{ gap: 8, marginBottom: 4 }}><span className="dot" style={{ background: r.job.color }} />{r.job.name}</div>
+          {r.periods.filter(p => p.worked.n || p.planned.n).map(p => {
+            const total = round2(p.worked.base + p.worked.bonus + p.planned.base + p.planned.bonus);
+            return (
+              <div key={p.a} className="plan-row">
+                <div className="row small" style={{ justifyContent: 'space-between' }}>
+                  <span className="muted" style={{ fontWeight: 600 }}>{r.job.pay === 'monthly' ? 'Whole month' : periodLabel({ start: p.a, end: p.b })}</span>
+                  <span className="num bold">{money(total)}{r.job.kind === 'hourly' && (p.worked.tips || p.tipsEst) ? <span className="muted" style={{ fontWeight: 500 }}> + tips {p.worked.tips ? money(p.worked.tips) : ''}{p.worked.tips && p.tipsEst ? ' + ' : ''}{p.tipsEst ? `≈ ${money(p.tipsEst)}` : ''}</span> : null}</span>
+                </div>
+                {p.worked.n > 0 && <div className="tiny muted num">Worked: {line(r.job, p.worked)}</div>}
+                {p.planned.n > 0 && <div className="tiny num" style={{ color: 'var(--accent)' }}>Planned: {line(r.job, p.planned)}{p.tipsEst ? ` · tips ≈ ${money(p.tipsEst)}` : ''}</div>}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {tipsEst > 0 && <div className="tiny faint">≈ tips for planned shifts use your average of the last 90 days ({rows.filter(r => r.tipAvg).map(r => `${money(r.tipAvg)}/shift`).join(', ')}). Planned bonus isn't known yet.</div>}
+    </motion.div>
   );
 }
 
