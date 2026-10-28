@@ -193,7 +193,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
 
 export interface QueryInput {
   type?: 'expense' | 'income' | 'transfer' | 'any'; category?: string; account?: string; text?: string;
-  from?: string; to?: string; weekdays?: number[]; group_by?: 'none' | 'month' | 'week' | 'weekday' | 'category' | 'subcategory'; who?: 'me' | 'partner' | 'both';
+  from?: string; to?: string; weekdays?: number[]; group_by?: 'none' | 'day' | 'month' | 'week' | 'weekday' | 'category' | 'subcategory'; who?: 'me' | 'partner' | 'both';
 }
 export interface QueryResult {
   input: QueryInput; label: string; count: number; total: number; from: string; to: string;
@@ -212,7 +212,7 @@ export const QUERY_TOOL = {
       text: { type: 'string', description: 'words to find in notes' },
       from: { type: 'string' }, to: { type: 'string' },
       weekdays: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 6 } },
-      group_by: { type: 'string', enum: ['none', 'month', 'week', 'weekday', 'category', 'subcategory'] },
+      group_by: { type: 'string', enum: ['none', 'day', 'month', 'week', 'weekday', 'category', 'subcategory'] },
       who: { type: 'string', enum: ['me', 'partner', 'both'], description: 'default me' },
     },
   },
@@ -246,6 +246,7 @@ export function runQuery(q: QueryInput, s: State = getState(), today = todayISO(
   ).sort((a, b) => b.date.localeCompare(a.date) || b.seq - a.seq);
   const keyOf = (t: Tx): string => {
     switch (q.group_by) {
+      case 'day': return t.date;
       case 'month': return ym(t.date);
       case 'week': { const d = fromISO(t.date); return addDays(t.date, -((d.getDay() + 6) % 7)); }
       case 'weekday': return WD[fromISO(t.date).getDay()];
@@ -257,7 +258,7 @@ export function runQuery(q: QueryInput, s: State = getState(), today = todayISO(
   const g = new Map<string, { total: number; count: number }>();
   if (q.group_by && q.group_by !== 'none') for (const t of list) { const k = keyOf(t); const x = g.get(k) ?? { total: 0, count: 0 }; x.total += t.amount; x.count++; g.set(k, x); }
   const groups = [...g.entries()].map(([key, v]) => ({ key, total: r2(v.total), count: v.count }))
-    .sort((a, b) => (q.group_by === 'month' || q.group_by === 'week' ? a.key.localeCompare(b.key) : q.group_by === 'weekday' ? WD.indexOf(a.key) - WD.indexOf(b.key) : b.total - a.total));
+    .sort((a, b) => (q.group_by === 'day' || q.group_by === 'month' || q.group_by === 'week' ? a.key.localeCompare(b.key) : q.group_by === 'weekday' ? WD.indexOf(a.key) - WD.indexOf(b.key) : b.total - a.total));
   const label = [q.category ?? (type === 'income' ? 'Income' : type === 'transfer' ? 'Transfers' : 'Expenses'), q.account, q.text && `“${q.text}”`, q.who === 'partner' ? 'partner' : q.who === 'both' ? 'both of you' : null].filter(Boolean).join(' · ');
   return {
     input: q, label, count: list.length, total: r2(list.reduce((x, t) => x + t.amount, 0)),
@@ -434,8 +435,9 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   }
   const results: QueryResult[] = [];
   let proposal: Proposal | null = null;
-  for (let step = 0; step < 8; step++) {
-    const r = await complete(system, msgs, lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL]);
+  const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL];
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const r = await complete(system, msgs, tools);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
     if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: clean(r.content) });
@@ -454,8 +456,17 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
       }),
     });
   }
+  // out of lookups: answer with what it has instead of giving up
+  const last = msgs[msgs.length - 1];
+  if (Array.isArray(last.content)) last.content = [...last.content, { type: 'text', text: OUT_OF_STEPS } as Block];
+  const r = await complete(system, msgs, tools);
+  const text = textOf(r).trim();
+  if (text) return { role: 'assistant', text, results, proposal: proposal ?? undefined, at: new Date().toISOString() };
   return { role: 'assistant', text: 'I couldn’t finish that one — try asking it more simply.', results, error: true, at: new Date().toISOString() };
 }
+
+const MAX_STEPS = 12;
+const OUT_OF_STEPS = 'You have no more lookups. Answer now with what you found so far, and say in one line what you could not check.';
 
 // ---------------------------------------------------------------- monthly review
 

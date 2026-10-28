@@ -210,7 +210,7 @@ function ResultCard({ r }: { r: QueryResult }) {
         <div style={{ display: 'grid', gap: 4, marginBottom: 6 }}>
           {r.groups.slice(0, 12).map(g => (
             <div key={g.key} className="row tiny num" style={{ gap: 8 }}>
-              <span style={{ width: 62, flex: 'none' }} className="ellipsis">{g.key}</span>
+              <span style={{ width: 62, flex: 'none' }} className="ellipsis">{/^\d{4}-\d{2}-\d{2}$/.test(g.key) ? shortDate(g.key) : g.key}</span>
               <span className="grow"><span className="qbar" style={{ width: `${(g.total / max) * 100}%` }} /></span>
               <span style={{ width: 70, textAlign: 'right', fontWeight: 600 }}>{num(g.total)} €</span>
             </div>
