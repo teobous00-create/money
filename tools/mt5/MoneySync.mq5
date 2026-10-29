@@ -25,14 +25,16 @@ string   g_name[];
 bool     g_pending = true;
 datetime g_last    = 0;
 string   g_warned  = "";
+bool     g_slowed  = false;
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
    if(StringLen(SyncKey) < 20) { Print("MoneySync: fill in SyncKey."); return INIT_PARAMETERS_INCORRECT; }
    if(!ParseStrategies()) return INIT_PARAMETERS_INCORRECT;
-   EventSetTimer(60);
-   Print("MoneySync: watching ", ArraySize(g_magic), " strategies.");
+   g_pending = true; g_last = 0; g_slowed = false;   // send right away — also after changing inputs (MT5 keeps old values then)
+   EventSetTimer(10);              // first send within ~10 s, then every minute
+   Print("MoneySync: watching ", ArraySize(g_magic), " magic numbers.");
    return INIT_SUCCEEDED;
   }
 
@@ -46,6 +48,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
 
 void OnTimer()
   {
+   if(!g_slowed) { EventKillTimer(); EventSetTimer(60); g_slowed = true; }
    if(g_pending || TimeLocal() - g_last >= EveryMinutes * 60) Sync();
   }
 
