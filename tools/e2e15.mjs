@@ -86,21 +86,10 @@ await pullDown();
 ok(await p.locator('.chat .bubble').count() === 2, 'conversation kept');
 await p.goBack(); await p.waitForTimeout(700);
 ok(await p.locator('.chat').count() === 0, 'back button closes it');
-// review card
+// no monthly review any more
 await p.click('.nav-item:nth-child(4)'); await p.waitForTimeout(800);
-await p.locator('.seg button', { hasText: 'Analytics' }).click(); await p.waitForTimeout(300);
-ok(await p.locator('.review-skel').count() === 1, 'review: placeholder while writing');
-await p.waitForTimeout(900);
-ok(/Αποταμίευσες 239,04/.test(await p.locator('.review').innerText()), 'review written');
-const facts = await p.evaluate(() => window.__calls.find(c => typeof c.system === 'string').messages[0].content);
-ok(/saved 239,04/.test(facts) && /Not over/.test(facts), 'facts computed by the app (saved 239,04, month not over)');
-await p.screenshot({ path: `${OUT}/c3.png` });
-const before = await p.evaluate(() => window.__calls.length);
-await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(500);
-await p.click('.nav-item:nth-child(4)'); await p.waitForTimeout(900);
-ok(await p.evaluate(() => window.__calls.length) === before && /Αποταμίευσες/.test(await p.locator('.review').innerText()), 'saved: not written again');
-// previous month: its own review
-await p.locator('[aria-label=Previous]').click(); await p.waitForTimeout(1500);
-ok(await p.evaluate(() => window.__calls.length) === before + 1 && /September 2026/.test(await p.locator('.review').innerText()), 'September gets its own review');
+await p.locator('.seg button', { hasText: 'Analytics' }).click(); await p.waitForTimeout(1200);
+ok(await p.locator('.review, .review-skel').count() === 0 && !(await p.evaluate(() => window.__calls.some(c => typeof c.system === 'string'))), 'no review card, no review call');
+ok(/compared with the 3 months before/.test(await p.locator('.screen').last().innerText()), 'analytics still there');
 console.log('errors:', errors.length ? errors : 'none');
 await b.close();

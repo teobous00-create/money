@@ -6,7 +6,6 @@ import { useTips, useCategoryCompare, useSavings, useWorkStats, prev3, tipsCateg
 import { catStyle } from '../lib/calc';
 import { IconBox, Sheet, ease, softSpring } from '../components/ui';
 import { fromISO, money, num } from '../lib/format';
-import { ReviewCard } from '../components/Review';
 
 const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'long' });
 const shortM = new Intl.DateTimeFormat('en-GB', { month: 'short' });
@@ -19,7 +18,6 @@ export function AnalyticsView() {
   const range = `${shortM.format(fromISO(pa))}–${shortM.format(fromISO(pb))}`;
   return (
     <div>
-      <ReviewCard anchor={anchor} />
       <div className="small muted" style={{ margin: '0 4px 10px' }}>{month} compared with the 3 months before ({range})</div>
       <TipsCard anchor={anchor} month={month} />
       <WorkCard anchor={anchor} month={month} />

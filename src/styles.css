@@ -369,12 +369,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .pull-hint { position: absolute; top: 0; left: 50%; translate: -50% 0; z-index: 30; display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); font-weight: 650; font-size: 14px; color: var(--ink-2); pointer-events: none; white-space: nowrap; }
 .pull-hint.ready { color: var(--accent); }
 .pull-dot { width: 8px; height: 8px; border-radius: 9px; background: currentColor; }
-.review-text { display: grid; gap: 6px; font-size: 15px; line-height: 1.45; }
-.review-skel { display: grid; gap: 9px; }
-.review-skel span { height: 12px; border-radius: 8px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; }
-.review-skel span:nth-child(2) { width: 85%; } .review-skel span:nth-child(3) { width: 92%; } .review-skel span:nth-child(4) { width: 60%; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-.review-h { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); margin-top: 6px; }
 .input.about { height: auto; min-height: 120px; padding: 12px 14px; line-height: 1.4; resize: vertical; font: inherit; }
 .pcard { margin-top: 10px; border-radius: 14px; padding: 10px 12px; background: var(--surface-2); border: 1.5px solid var(--accent); }
 .pcard.applied, .pcard.cancelled, .pcard.undone { border-color: transparent; opacity: .8; }

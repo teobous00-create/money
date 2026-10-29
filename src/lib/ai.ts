@@ -467,27 +467,3 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
 
 const MAX_STEPS = 12;
 const OUT_OF_STEPS = 'You have no more lookups. Answer now with what you found so far, and say in one line what you could not check.';
-
-// ---------------------------------------------------------------- monthly review
-
-const REVIEW_RULES = `You write the monthly review in Teo's budgeting app. He already sees every total in the app, so do not repeat totals. Explain them: what drove the changes, what is unusual, where the month is heading, and what to do about it.
-
-Input: FACTS (computed by the app; the only numbers you may use) and ABOUT ME (his goals and situation; may be empty).
-
-Write in English, in exactly these three sections, with these headings:
-
-What changed and why
-2–3 bullets. Each names a change against his usual (3-month average) and its cause from FACTS: more often vs. more expensive, which subcategories, which days of the week, one-off large expenses, recurring items that changed price.
-
-Watch out
-1–3 bullets: where the month ends if this pace continues, budgets on track to be exceeded and on which day, anything outside his normal pattern, the gap to the goals in ABOUT ME. If nothing needs attention, write one bullet saying so.
-
-One move for next month
-Exactly one concrete action, with its expected effect in € per month and in hours of his work at his hourly pay. It must follow from the facts above.
-
-Rules: each bullet is one or two short sentences, with numbers as evidence. Use only numbers in FACTS; simple arithmetic on them is fine and must be shown plainly. No praise, no motivational language, no generic advice. Money format 1.234,56 €. If the month is not over, treat totals as "so far" and reason by pace. Keep the whole review under 170 words.`;
-
-export async function writeReview(facts: string): Promise<string> {
-  const r = await complete(REVIEW_RULES, [{ role: 'user', content: `ABOUT ME\n${aboutMe()}\n\nFACTS\n${facts}` }]);
-  return textOf(r).trim();
-}
