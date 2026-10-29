@@ -26,7 +26,10 @@ ok(r.status === 200 && j.saved === 2, 'saves the known strategies: ' + JSON.stri
 ok(w.written[0].id === 's1:2026-10-28' && w.written[0].pnl === -12.4 && w.written[0].owner_id === 'teo' && w.written[0].deleted_at === null, 'row id strategy:date, rounded, owner Teo, undeleted');
 ok(w.written[1].strategy_id === 's2', 'name match ignores case and extra spaces');
 ok(/merge-duplicates/.test(w.writeInit.headers.Prefer) && /on_conflict=id/.test(w.calls.at(-1).url), 'replaces the day, never adds');
-ok(j.unknown_strategies.join() === 'Nope' && j.bad === 1, 'reports unknown strategy names and bad rows');
+ok(j.unknown_strategies.join() === 'Nope' && j.bad === 1 && j.strategies_in_app.join() === 'DEEP DIP GOLD,Gold Sniper', 'reports unknown names, bad rows, and the names the app has');
+w = world({ strategies: [{ id: 's1', name: 'Deep Dip Gold' }, { id: 's3', name: 'TimeSlotScanner' }, { id: 's4', name: 'ΝΕWS-TRΑDΙΝG' }] });
+r = await handle(req({ days: [{ strategy: 'DEEP DIP GOLD', date: '2026-10-28', pnl: 1 }, { strategy: 'TIMESLOTSCANNER', date: '2026-10-28', pnl: 2 }, { strategy: 'NEWSTRADING', date: '2026-10-28', pnl: 3 }] }), env, w.f); j = await r.json();
+ok(j.saved === 3 && !j.strategies_in_app, 'matches despite case, spaces, dashes and Greek look-alike letters');
 ok(/owner_id=eq\.teo/.test(w.stratUrl) && /deleted_at=is\.null/.test(w.stratUrl), 'only Teo\'s live strategies');
 w = world(); r = await handle(req({ days }, 'wrong'.padEnd(32, 'x')), env, w.f);
 ok(r.status === 401 && !w.written, 'wrong key refused, nothing written');

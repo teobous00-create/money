@@ -25,7 +25,10 @@ function sameSecret(a: string, b: string) {
   return d === 0;
 }
 
-const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+// Greek capitals that look like Latin ones (a name typed on a Greek keyboard)
+const LOOKALIKE: Record<string, string> = { 'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'h', 'ι': 'i', 'κ': 'k', 'μ': 'm', 'ν': 'n', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'y', 'χ': 'x', 'ζ': 'z' };
+/** "Deep-Dip Gold", "DEEP DIP GOLD" and "deepdipgold" are the same strategy */
+const norm = (s: string) => [...s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')].map(c => LOOKALIKE[c] ?? c).join('').replace(/[^\p{L}\p{N}]+/gu, '');
 
 export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<Response> {
   if (req.method !== 'POST') return json(405, { error: 'method' });
@@ -74,7 +77,7 @@ export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<
     });
     if (!r.ok) return json(502, { error: 'db_write', status: r.status, message: (await r.text()).slice(0, 300) });
   }
-  return json(200, { saved: rows.length, unknown_strategies: [...unknown], bad: bad.length });
+  return json(200, { saved: rows.length, unknown_strategies: [...unknown], bad: bad.length, ...(unknown.size ? { strategies_in_app: strategies.map(x => String(x.name)) } : {}) });
 }
 
 // deno-lint-ignore no-explicit-any

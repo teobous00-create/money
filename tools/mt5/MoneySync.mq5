@@ -187,7 +187,7 @@ bool Send(string body, int count)
       return false;
      }
    if(code != 200) { Print("MoneySync: server said ", code, " ", reply); return false; }
-   if(StringFind(reply, "\"unknown_strategies\":[]") < 0) Print("MoneySync: some names are not strategies in the app — check spelling: ", reply);
+   if(StringFind(reply, "\"unknown_strategies\":[]") < 0) Print("MoneySync: some names in Strategies are not in the app. Use the names from strategies_in_app: ", reply);
    Print("MoneySync: sent ", count, " day totals. ", reply);
    return true;
   }
