@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, ChevronLeft, ChevronRight, Delete, Pencil, Plus, Settings2, Check, Sun, Moon, Wallet } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Delete, Menu, Pencil, Plus, Settings2, Check, Sun, Moon, Wallet } from 'lucide-react';
 import { Segmented, Sheet, toast, ease } from '../components/ui';
+import { Sortable } from '../components/Sortable';
 import { useStore, put, putMany, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
 import { getUi, setUi, useUi } from '../lib/ui';
@@ -10,7 +11,7 @@ import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
 import {
   useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
-  useStrategies, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
+  useStrategies, useArchivedStrategies, saveStrategyOrder, nextStrategySort, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
 import { parseNum } from '../sheets/AccountEdit';
@@ -882,24 +883,69 @@ function PnlAllForm({ date, onClose }: { date: string; onClose: () => void }) {
 
 function StrategyPicker({ open, onClose, selected, onSelect, startNew = false }: { open: boolean; onClose: () => void; selected: string; onSelect: (s: string) => void; startNew?: boolean }) {
   const strategies = useStrategies();
+  const archived = useArchivedStrategies();
   const [edit, setEdit] = useState<Strategy | 'new' | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
   useEffect(() => { if (open && startNew) setEdit('new'); }, [open, startNew]);
+  const byId = new Map(strategies.map(s => [s.id, s]));
+  const pick = (id: string) => { onSelect(id); onClose(); };
+  const restore = (s: Strategy) => {
+    put('strategies', { ...s, archived: false, sort: nextStrategySort(strategies) });
+    toast(`${s.name} restored`);
+  };
   return (
     <Sheet open={open} onClose={onClose} title="Strategy">
       <div className="sheet-body">
-        <div className="list">
-          {[{ id: 'all', name: 'All strategies', color: 'var(--accent)' } as Strategy, ...strategies].map(s => (
-            <div key={s.id} className="list-row" style={{ paddingRight: 6 }}>
-              <button className="row grow" style={{ textAlign: 'left' }} onClick={() => { onSelect(s.id); onClose(); }}>
-                <span className="dot" style={{ background: s.color }} />
-                <span className="grow" style={{ fontWeight: 600 }}>{s.name}</span>
-                {selected === s.id && <Check size={18} style={{ color: 'var(--accent)' }} />}
-              </button>
-              {s.id !== 'all' ? <button className="iconbtn" style={{ width: 38 }} onClick={() => setEdit(s)} aria-label={`Edit ${s.name}`}><Pencil size={16} /></button> : <span style={{ width: 38 }} />}
-            </div>
-          ))}
+        <div className="list" style={{ marginBottom: 8 }}>
+          <button className="list-row" onClick={() => pick('all')}>
+            <span className="dot" style={{ background: 'var(--accent)' }} />
+            <span className="grow" style={{ fontWeight: 600 }}>All strategies</span>
+            {selected === 'all' && <Check size={18} style={{ color: 'var(--accent)' }} />}
+          </button>
         </div>
+        {strategies.length > 1 && <div className="tiny muted" style={{ margin: '0 4px 6px' }}>Drag ≡ to reorder</div>}
+        <Sortable ids={strategies.map(s => s.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03} handle
+          onCommit={saveStrategyOrder}
+          render={id => {
+            const s = byId.get(id);
+            if (!s) return null;
+            return (
+              <div className="sub-row">
+                <button className="row grow" style={{ textAlign: 'left', height: '100%', minWidth: 0 }} onClick={() => pick(s.id)}>
+                  <span className="dot" style={{ background: s.color }} />
+                  <span className="grow ellipsis" style={{ fontWeight: 600 }}>{s.name}</span>
+                  {selected === s.id && <Check size={18} style={{ color: 'var(--accent)' }} />}
+                </button>
+                <button className="iconbtn" style={{ width: 38 }} onClick={() => setEdit(s)} aria-label={`Edit ${s.name}`}><Pencil size={16} /></button>
+                <span className="grip" data-drag-handle aria-label={`Move ${s.name}`}><Menu size={22} /></span>
+              </div>
+            );
+          }} />
         <button className="btn secondary" style={{ marginTop: 10 }} onClick={() => setEdit('new')}><Plus size={18} />New strategy</button>
+        {archived.length > 0 && (
+          <div className="section" style={{ marginTop: 14 }}>
+            <button className="section-head" style={{ width: '100%' }} onClick={() => setShowArchive(v => !v)}>
+              <span className="section-title row" style={{ gap: 6 }}><Archive size={14} />Archived · {archived.length}</span>
+              <motion.span animate={{ rotate: showArchive ? 180 : 0 }} transition={{ duration: 0.25, ease }} className="muted"><ChevronDown size={18} /></motion.span>
+            </button>
+            <AnimatePresence initial={false}>
+              {showArchive && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3, ease }} style={{ overflow: 'hidden' }}>
+                  <div className="list">
+                    {archived.map(s => (
+                      <div key={s.id} className="list-row">
+                        <span className="dot" style={{ background: s.color, opacity: 0.5 }} />
+                        <span className="grow ellipsis muted" style={{ fontWeight: 600 }}>{s.name}</span>
+                        <button className="chip" onClick={() => restore(s)}><ArchiveRestore size={16} />Restore</button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="tiny muted" style={{ padding: '8px 6px 0' }}>Archived strategies keep their results and MT5 sync, but don't show in the calendar or totals.</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
       <Sheet open={!!edit} onClose={() => setEdit(null)} title={edit === 'new' ? 'New strategy' : 'Edit strategy'} z={1}>
         {edit && <StrategyForm key={edit === 'new' ? 'new' : edit.id} s={edit === 'new' ? null : edit} onDone={id => { setEdit(null); if (id) { onSelect(id); onClose(); } }} />}
@@ -916,7 +962,7 @@ function StrategyForm({ s, onDone }: { s: Strategy | null; onDone: (id?: string)
   const save = () => {
     if (!name.trim()) return toast('Give it a name');
     const id = s?.id ?? uuid();
-    put('strategies', { id, owner_id: '', name: name.trim(), color, goal: goal.trim() ? parseNum(goal) : null, sort: s?.sort ?? strategies.length, archived: false });
+    put('strategies', { id, owner_id: '', name: name.trim(), color, goal: goal.trim() ? parseNum(goal) : null, sort: s?.sort ?? nextStrategySort(strategies), archived: false });
     toast('Saved');
     onDone(s ? undefined : id);
   };
@@ -928,7 +974,7 @@ function StrategyForm({ s, onDone }: { s: Strategy | null; onDone: (id?: string)
         <div className="pick-grid">{COLORS.map(c => <button key={c} className={c === color ? 'on' : ''} style={{ background: c }} onClick={() => setColor(c)} aria-label={c} />)}</div>
       </div>
       <button className="btn" onClick={save}>Save</button>
-      {s && <button className="btn secondary" style={{ marginTop: 10 }} onClick={() => { put('strategies', { ...s, archived: true }); toast(`${s.name} hidden · results kept`); onDone(); }}>Hide strategy</button>}
+      {s && <button className="btn secondary" style={{ marginTop: 10 }} onClick={() => { put('strategies', { ...s, archived: true }); toast(`${s.name} archived · results kept`); onDone(); }}><Archive size={18} />Archive strategy</button>}
     </div>
   );
 }

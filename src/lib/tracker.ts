@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useStore, getState, put, remove } from './store';
+import { useStore, getState, put, putMany, remove } from './store';
 import { alive } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
 import type { Job, JobRate, Payout, Pnl, Shift, Strategy, Tx } from './types';
@@ -245,6 +245,21 @@ export const pnlId = (strategyId: string, date: string) => `${strategyId}:${date
 export function useStrategies() {
   const rec = useStore(s => s.strategies);
   return useMemo(() => alive(rec).filter(s => !s.archived).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name)), [rec]);
+}
+
+/** Archived strategies: hidden from the calendar and totals, still receive MT5 sync, can be restored. */
+export function useArchivedStrategies() {
+  const rec = useStore(s => s.strategies);
+  return useMemo(() => alive(rec).filter(s => s.archived).sort((a, b) => a.name.localeCompare(b.name)), [rec]);
+}
+
+/** Sort value that puts a strategy after all the visible ones. */
+export const nextStrategySort = (visible: Strategy[]) => Math.max(-1, ...visible.map(s => s.sort)) + 1;
+
+/** Saves a new order from a drag (ids in their new order). */
+export function saveStrategyOrder(ids: string[]) {
+  const rec = getState().strategies;
+  putMany('strategies', ids.flatMap((id, i) => (rec[id] && rec[id].sort !== i ? [{ ...rec[id], sort: i }] : [])));
 }
 
 export function tRange(mode: TMode, anchor: string): [string, string] {
