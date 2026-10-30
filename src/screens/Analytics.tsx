@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, Coins, PiggyBank, Shapes, Settings2, Check, Briefcase } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Coins, PiggyBank, Settings2, Check, Briefcase } from 'lucide-react';
 import { useStore, setPrefs } from '../lib/store';
-import { useTips, useCategoryCompare, useSavings, useWorkStats, prev3, tipsCategoryIds, type CatCompare } from '../lib/insights';
-import { catStyle } from '../lib/calc';
-import { IconBox, Sheet, ease, softSpring } from '../components/ui';
+import { useTips, useSavings, useWorkStats, prev3, tipsCategoryIds } from '../lib/insights';
+import { Sheet, ease } from '../components/ui';
 import { fromISO, money, num } from '../lib/format';
+import { HouseholdCard } from '../components/Household';
 
 const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'long' });
 const shortM = new Intl.DateTimeFormat('en-GB', { month: 'short' });
@@ -22,7 +22,7 @@ export function AnalyticsView() {
       <TipsCard anchor={anchor} month={month} />
       <WorkCard anchor={anchor} month={month} />
       <SavingsCard anchor={anchor} month={month} />
-      <CompareCard anchor={anchor} month={month} />
+      <HouseholdCard anchor={anchor} />
     </div>
   );
 }
@@ -126,54 +126,6 @@ function SavingsCard({ anchor, month }: { anchor: string; month: string }) {
   );
 }
 
-function CompareCard({ anchor, month }: { anchor: string; month: string }) {
-  const rows = useCategoryCompare(anchor);
-  const [open, setOpen] = useState<string | null>(null);
-  return (
-    <motion.div className="card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease, delay: 0.1 }} style={{ paddingBottom: 6 }}>
-      <CardHead icon={<Shapes size={20} />} title="Expenses by category" />
-      <div className="row tiny muted" style={{ fontWeight: 600, padding: '0 0 6px 46px' }}>
-        <span className="grow" />
-        <span style={{ width: 92, textAlign: 'right' }}>{month.slice(0, 3)}</span>
-        <span style={{ width: 84, textAlign: 'right' }}>3-mo avg</span>
-      </div>
-      {rows.length === 0 && <div className="small muted" style={{ paddingBottom: 10 }}>No expenses in these months.</div>}
-      {rows.map(r => (
-        <div key={r.id}>
-          <CompareRow r={r} onClick={() => r.subs.length && setOpen(open === r.id ? null : r.id)} expanded={open === r.id} />
-          <AnimatePresence initial={false}>
-            {open === r.id && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25, ease }} style={{ overflow: 'hidden' }}>
-                {r.subs.map(s => <CompareRow key={s.id} r={s} sub />)}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      ))}
-    </motion.div>
-  );
-}
-
-function CompareRow({ r, sub = false, onClick, expanded }: { r: CatCompare; sub?: boolean; onClick?: () => void; expanded?: boolean }) {
-  const cats = useStore(s => s.categories);
-  const isGeneral = r.id.startsWith('general:');
-  const c = cats[isGeneral ? r.id.slice(8) : r.id];
-  const st = catStyle(c?.id ?? null, cats);
-  const higher = r.now > r.avg + 0.004;
-  return (
-    <button className="row" onClick={onClick} style={{ width: '100%', padding: sub ? '7px 0 7px 50px' : '8px 0', textAlign: 'left' }}>
-      {!sub && <IconBox icon={st.icon} color={st.color} round size="sm" />}
-      <span className={`grow ellipsis ${sub ? 'small muted' : ''}`} style={{ fontWeight: sub ? 500 : 550 }}>
-        {isGeneral ? 'General' : c?.name ?? '—'}
-        {!sub && (r.subs.length > 0) && (
-          <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={softSpring} style={{ display: 'inline-grid', verticalAlign: 'middle', marginLeft: 4 }} className="faint"><ChevronDown size={15} /></motion.span>
-        )}
-      </span>
-      <span className={`num ${sub ? 'small' : ''}`} style={{ width: 92, textAlign: 'right', fontWeight: 650, whiteSpace: 'nowrap', color: higher ? 'var(--expense)' : undefined }}>{money(r.now)}</span>
-      <span className={`num muted ${sub ? 'small' : ''}`} style={{ width: 84, textAlign: 'right', whiteSpace: 'nowrap' }}>{money(r.avg)}</span>
-    </button>
-  );
-}
 
 function WorkCard({ anchor, month }: { anchor: string; month: string }) {
   const rows = useWorkStats(anchor).filter(r => r.now.shifts > 0 || r.avg);
