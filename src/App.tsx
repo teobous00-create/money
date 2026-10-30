@@ -121,7 +121,6 @@ function TopBar() {
   const view = tabNow === 'accounts' ? { mode: 'month' as const, anchor: todayISO() } : period;
   const plan = usePlanned(view);
   const when = view.mode === 'month' ? new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(new Date(view.anchor)) : '';
-  const endWord = view.mode === 'month' ? 'end of month' : view.mode === 'all' ? 'in a year' : view.mode === 'year' ? 'end of year' : view.mode === 'week' ? 'end of week' : 'end of day';
   const user = useStore(s => s.user);
   const profiles = useStore(s => s.profiles);
   const pending = useStore(s => s.pending);
@@ -147,7 +146,7 @@ function TopBar() {
         <AnimatePresence initial={false}>
           {plan.show && plan.inPeriod !== 0 && (
             <motion.span className="tiny muted num" style={{ whiteSpace: 'nowrap' }} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-              Planned{when ? ` in ${when}` : ''} {plan.inPeriod > 0 ? '+' : '−'}{num(Math.abs(plan.inPeriod))} € · {endWord}: {num(plan.endBalance)} €
+              Planned{when ? ` in ${when}` : ''} {plan.inPeriod > 0 ? '+' : '−'}{num(Math.abs(plan.inPeriod))} €
             </motion.span>
           )}
         </AnimatePresence>
