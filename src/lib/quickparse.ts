@@ -227,6 +227,8 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
         amount += cur.v; toks[cur.i].used = true;
       } else break;
     }
+    // "50 λεπτά" on its own = 0,50 €
+    if (nums.length === 1 && /^(λεπτα|cents?)$/.test(nt(nums[0].i + 1)) && !nums[0].dec) amount = amount / 100;
     // "12+3" in one token
     out.amount = round2(amount);
   }

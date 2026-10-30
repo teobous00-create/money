@@ -44,6 +44,8 @@ const LAST = /^(τελευταιο|τελευταια|τελευταιοσ|τε�
 const DEL = /^(σβησ\p{L}*|σβηνε|διεγραψ\p{L}*|διαγραψ\p{L}*|αφαιρεσ\p{L}*|ακυρωσ\p{L}*|delete|remove|undo)$/u;
 const CHG = /^(αλλαξ\p{L}*|αλλαζε|διορθωσ\p{L}*|fix|change)$/u;
 const NOT = /^(οχι|αντι|not)$/;
+const ADD = /^(προσθεσ\p{L}*|ακομα|ακομη|συν|plus|add)$/u;    // "πρόσθεσε 1,20 στο τελευταίο" → old + 1,20
+const SUB = /^(αφαιρεσ\p{L}*|βγαλε|μειον|minus)$/u;           // "αφαίρεσε 2 από το τελευταίο" → old − 2
 
 // ---------------------------------------------------------------- delete the one you describe
 
@@ -93,7 +95,8 @@ export function tryLocalEdit(text: string): boolean {
   const t = lastTx();
   if (!t) { toast('Nothing to change yet'); return true; }
 
-  if (del) {
+  const relative = hasLast && /\d/.test(text) && ws.some(x => ADD.test(x) || SUB.test(x)) ? (ws.some(x => SUB.test(x)) ? -1 : 1) : 0;
+  if (del && !relative) {
     if (!ws.every(x => DEL.test(x) || LAST.test(x) || ENTRY.test(x) || FILLER.has(x))) return false;   // "σβήσε τον καφέ των 3" → the AI
     remove('transactions', t.id);
     toast(`Deleted ${describe(t)}`, { label: 'Undo', run: () => restore('transactions', t.id) }, { ms: 6000 });
@@ -111,7 +114,8 @@ export function tryLocalEdit(text: string): boolean {
   }
   const p = parseQuick(keep.join(' '), voiceCtxNow());
   const next: Tx = { ...t };
-  if (p.amount !== null && p.amount > 0) next.amount = p.amount;
+  if (p.amount !== null && p.amount > 0) next.amount = relative ? Math.round((t.amount + relative * p.amount) * 100) / 100 : p.amount;
+  if (next.amount <= 0) return false;
   if (p.date) next.date = p.date;
   if (t.type !== 'transfer' && p.categoryId) {
     const c = getState().categories[p.categoryId];
