@@ -4,6 +4,7 @@ import { range, type Period } from './period';
 import type { Account, Category, Recurring, Tx } from './types';
 import { round2, todayISO, addDays } from './format';
 import { nextOccurrence } from './store';
+import { isPending, useTimesVersion } from './txTime';
 
 export const alive = <T extends { deleted_at?: string | null }>(rec: Record<string, T>) =>
   Object.values(rec).filter(r => !r.deleted_at);
@@ -34,14 +35,14 @@ export function useTxs() {
   return useMemo(() => alive(rec).filter(t => !accRec[t.account_id]?.deleted_at), [rec, accRec]);
 }
 
-/** A transaction dated after today is "planned": it doesn't touch balances or totals until its day. */
-export const isPlanned = (t: Tx, today = todayISO()) => t.date > today;
+/** A transaction dated after today (or today, before its set time) is "planned": it doesn't touch balances or totals yet. */
+export const isPlanned = (t: Tx, today = todayISO()) => isPending(t, today);
 
 export function computeBalances(accounts: Account[], txs: Tx[], today = todayISO()): Map<string, number> {
   const b = new Map<string, number>();
   for (const a of accounts) b.set(a.id, a.opening_balance);
   for (const t of txs) {
-    if (t.date > today) continue; // planned
+    if (isPending(t, today)) continue; // planned
 
     if (t.type === 'expense') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! - t.amount);
     else if (t.type === 'income') b.has(t.account_id) && b.set(t.account_id, b.get(t.account_id)! + t.amount);
@@ -58,7 +59,8 @@ export function useBalances() {
   const accounts = useAccounts();
   const txs = useTxs();
   const today = todayISO();
-  return useMemo(() => computeBalances(accounts, txs, today), [accounts, txs, today]);
+  const v = useTimesVersion();
+  return useMemo(() => computeBalances(accounts, txs, today), [accounts, txs, today, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function defaultSelection(accounts: Account[]) {
@@ -90,20 +92,21 @@ export function useHeaderTotal() {
   const bal = useBalances();
   const txs = useTxs();
   const today = todayISO();
+  const v = useTimesVersion();
   return useMemo(() => {
     let total = 0;
     sel.forEach(id => { total += bal.get(id) ?? 0; });
     // net effect of planned (future-dated) transactions on the selected accounts
     let planned = 0;
     for (const t of txs) {
-      if (t.date <= today) continue;
+      if (!isPending(t, today)) continue;
       const fromIn = sel.has(t.account_id), toIn = t.to_account_id != null && sel.has(t.to_account_id);
       if (t.type === 'expense' && fromIn) planned -= t.amount;
       else if (t.type === 'income' && fromIn) planned += t.amount;
       else if (t.type === 'transfer') { if (fromIn && !toIn) planned -= t.amount; if (toIn && !fromIn) planned += t.amount; }
     }
     return { total: round2(total), count: sel.size, planned: round2(planned) };
-  }, [sel, bal, txs, today]);
+  }, [sel, bal, txs, today, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export interface PeriodStats {
@@ -128,7 +131,7 @@ export function periodStats(txs: Tx[], period: Period, sel: Set<string>, cats: R
   const b = b0 > today ? today : b0; // planned transactions don't count yet
   const res: PeriodStats = { txs: [], all: [], expense: 0, income: 0, byCat: new Map(), bySub: new Map(), byDay: new Map() };
   for (const t of txs) {
-    if (t.date < a || t.date > b) continue;
+    if (t.date < a || t.date > b || isPending(t, today)) continue;
     const touches = sel.has(t.account_id) || (t.to_account_id != null && sel.has(t.to_account_id));
     if (!touches) continue;
     res.all.push(t);
@@ -157,7 +160,8 @@ export function usePeriodStats(override?: Period) {
   const sel = useSelection();
   const p = override ?? period;
   const today = todayISO();
-  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats, today]); // eslint-disable-line react-hooks/exhaustive-deps
+  const v = useTimesVersion();
+  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats, today, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function catName(id: string | null, cats: Record<string, Category>, withParent = true): string {
@@ -264,6 +268,7 @@ export function usePlanned(p: Period) {
   const today = todayISO();
   const [a, b] = viewWindow(p);
   const projected = useProjected(addDays(today, 1), b);
+  const v = useTimesVersion();
   return useMemo(() => {
     const effect = (t: Tx) => {
       const fromIn = sel.has(t.account_id), toIn = t.to_account_id != null && sel.has(t.to_account_id);
@@ -272,11 +277,12 @@ export function usePlanned(p: Period) {
       return (toIn ? t.amount : 0) - (fromIn ? t.amount : 0);
     };
     let inPeriod = 0, untilEnd = 0;
-    for (const t of [...txs.filter(t => t.date > today && t.date <= b), ...projected]) {
+    const pending = txs.filter(t => isPending(t, today) && t.date <= b);
+    for (const t of [...pending, ...projected]) {
       const e = effect(t);
       untilEnd += e;
       if (t.date >= a) inPeriod += e;
     }
-    return { show: b > today, inPeriod: round2(inPeriod), endBalance: round2(total + untilEnd), end: b };
-  }, [txs, projected, sel, total, today, a, b]);
+    return { show: b > today || (b === today && pending.length > 0), inPeriod: round2(inPeriod), endBalance: round2(total + untilEnd), end: b };
+  }, [txs, projected, sel, total, today, a, b, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic } from 'lucide-react';
+import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic, Clock } from 'lucide-react';
 import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
 import { useVoiceMarks } from '../lib/voiceRun';
 import { FavoritesBar } from '../components/Favorites';
@@ -12,6 +12,7 @@ import { IconBox, Icon, Money, toast, ease } from '../components/ui';
 import { RecurringBanner } from '../components/RecurringBanner';
 import { fromISO, haptic, num, relativeDay, round2, todayISO } from '../lib/format';
 import type { Tx } from '../lib/types';
+import { isPending, timeOf, useTimesVersion } from '../lib/txTime';
 
 const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
 
@@ -26,6 +27,7 @@ export function TransactionsScreen() {
   const [limit, setLimit] = useState(12);   // days drawn at first; more load as you scroll
   const [wa, wb] = viewWindow(period);
   const projected = useProjected(wa, wb);
+  const tv = useTimesVersion();
 
   const groups = useMemo(() => {
     const [a, b] = range(period);
@@ -43,7 +45,7 @@ export function TransactionsScreen() {
       let g = out[out.length - 1];
       if (!g || g.date !== t.date) out.push((g = { date: t.date, txs: [], net: 0 }));
       g.txs.push(t);
-      if (t.date > todayISO()) continue; // planned entries don't count in the day total yet
+      if (isPending(t)) continue; // planned entries don't count in the day total yet
       if (t.type === 'income' && sel.has(t.account_id)) g.net += t.amount;
       else if (t.type === 'expense' && sel.has(t.account_id)) g.net -= t.amount;
     }
@@ -52,7 +54,7 @@ export function TransactionsScreen() {
       g.net = round2(g.net);
     });
     return out;
-  }, [txs, projected, sel, period, q, cats, accs]);
+  }, [txs, projected, sel, period, q, cats, accs, tv]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setLimit(12), [period, q]);
   const more = useRef<HTMLDivElement>(null);
@@ -126,6 +128,8 @@ const TxRow = memo(function TxRow({ t, index }: { t: Tx; index: number }) {
   const to = t.to_account_id ? accs[t.to_account_id] : null;
   const ownerName = profiles[t.owner_id]?.display_name ?? 'Partner';
   const voice = useVoiceMarks().has(t.id);   // added by voice, not checked yet
+  useTimesVersion();
+  const time = timeOf(t);
 
   // swipe left to delete — a light hand-made gesture (a full drag engine on every row made the list slow)
   const btn = useRef<HTMLButtonElement>(null);
@@ -158,7 +162,7 @@ const TxRow = memo(function TxRow({ t, index }: { t: Tx; index: number }) {
     } else setX(0, true);
   };
   const anim = index < 14;
-  const planned = t.date > todayISO();
+  const planned = isPending(t);
   const Wrap = anim ? motion.div : 'div';
   return (
     <Wrap className="swipe-wrap" style={planned ? { opacity: 0.6 } : undefined}
@@ -179,6 +183,7 @@ const TxRow = memo(function TxRow({ t, index }: { t: Tx; index: number }) {
               : <><Icon name={acc?.icon ?? 'wallet'} size={13} />{acc?.name ?? '—'}</>}
             {t.recurring_id && <Repeat size={12} />}
             {voice && <Mic size={12} style={{ color: 'var(--accent)' }} aria-label="Added by voice" />}
+            {time && t.date >= todayISO() && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 4 }}><Clock size={12} />{time}</span>}
             {planned && <span className="badge" style={{ marginLeft: 4 }}>Planned</span>}
             {!mine && <span className="badge" style={{ marginLeft: 4 }}>by {ownerName}</span>}
           </div>

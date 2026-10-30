@@ -10,6 +10,7 @@ import { money, round2, shortDate, todayISO } from '../lib/format';
 import { tint } from '../lib/icons';
 import { BudgetLine } from '../components/Budget';
 import { useBudgetSpend } from '../lib/insights';
+import { isPending, useTimesVersion } from '../lib/txTime';
 
 type Scope = 'mine' | 'theirs' | 'both';
 
@@ -48,6 +49,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const myName = (me && profiles[me]?.display_name) || 'Me';
   const nameOf = (uid: string) => (uid === me ? myName : profiles[uid]?.display_name ?? 'Partner');
 
+  const tv = useTimesVersion();
   const data = useMemo(() => {
     if (!cat) return null;
     const [a, b] = range(period);
@@ -57,7 +59,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
     const isMine = (t: (typeof txs)[number]) => t.owner_id === me && sel.has(t.account_id);
     const scoped = sortTxs(inCat.filter(t => scope === 'both' ? (isMine(t) || t.owner_id !== me) : scope === 'mine' ? isMine(t) : t.owner_id !== me));
     const today = todayISO();
-    const counted = scoped.filter(t => t.date <= today); // planned entries are listed but not counted yet
+    const counted = scoped.filter(t => !isPending(t, today)); // planned entries are listed but not counted yet
     const total = round2(counted.reduce((s, t) => s + t.amount, 0));
     const perPerson = new Map<string, number>();
     for (const t of counted) perPerson.set(t.owner_id, round2((perPerson.get(t.owner_id) ?? 0) + t.amount));
@@ -72,7 +74,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
       .filter(r => r.v > 0 || (r.isSub && !r.hidden))
       .sort((x, y) => y.v - x.v);
     return { scoped, total, perPerson, rows };
-  }, [cat, cats, id, txs, projected, period, scope, me, sel]);
+  }, [cat, cats, id, txs, projected, period, scope, me, sel, tv]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!cat || !data) return null;
   // joint budget: say who spent what
@@ -161,8 +163,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
                           </div>
                           {t.note && <div className="tx-note ellipsis">{t.note}</div>}
                         </div>
-                        {t.date > todayISO() && <span className="badge">Planned</span>}
-                        <span className="tx-amt num" style={{ opacity: t.date > todayISO() ? 0.5 : 1, color: cat.type === 'expense' ? 'var(--expense)' : 'var(--income)' }}>{money(t.amount)}</span>
+                        {isPending(t) && <span className="badge">Planned</span>}
+                        <span className="tx-amt num" style={{ opacity: isPending(t) ? 0.5 : 1, color: cat.type === 'expense' ? 'var(--expense)' : 'var(--income)' }}>{money(t.amount)}</span>
                       </motion.button>
                     );
                   })}

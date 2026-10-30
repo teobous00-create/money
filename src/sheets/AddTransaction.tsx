@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Delete, Repeat, Star, Trash2, Users } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Clock, Delete, Repeat, Star, Trash2, Users, X } from 'lucide-react';
 import { Sheet, DragZone, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
 import { useUi, setUi, type AddTxArgs } from '../lib/ui';
 import { useStore, put, putMany, remove, restore, getState, nextOccurrence } from '../lib/store';
@@ -11,10 +11,12 @@ import type { Freq, Recurring, Tx, TxType } from '../lib/types';
 import { unmarkVoice } from '../lib/voiceRun';
 import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
 import { learn, type Parsed } from '../lib/quickparse';
+import { setRuleTime, setTxTime, timeOf } from '../lib/txTime';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
 const TYPE_LABEL: Record<TxType, string> = { expense: 'Expense', income: 'Income', transfer: 'Transfer' };
 const longDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const shortDay = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
 type Scope = 'one' | 'next' | 'all';
 
 /** First occurrence on/after `min`, walking the schedule from `start`. */
@@ -65,6 +67,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   const [expr, setExpr] = useState(editing ? num(editing.amount).replace(/\./g, '') : '');
   const [date, setDate] = useState(editing?.date ?? args.date ?? todayISO());
   const [note, setNote] = useState(editing?.note ?? '');
+  const [time, setTime] = useState<string | null>(editing ? timeOf(editing) : null);   // optional, this device only
+  const timeRef = useRef<HTMLInputElement>(null);
   const rule = editing?.recurring_id ? recRec[editing.recurring_id] : undefined;
   const ruleLive = !!rule && rule.active && !rule.deleted_at;
   const [repeat, setRepeat] = useState<'never' | Freq>(ruleLive ? rule!.freq : 'never');
@@ -130,6 +134,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
   };
 
   const openDate = () => { const el = dateRef.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
+  const openTime = () => { const el = timeRef.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
 
   const validate = () => {
     if (amount <= 0) { toast('Enter an amount'); return false; }
@@ -177,8 +182,10 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
       const r = newRule(date, repeat, { next_date: firstOnOrAfter(nextOccurrence(date, repeat, anchor), repeat, anchor, addDays(todayISO(), 1)) });
       put('recurring', r);
       tx.recurring_id = r.id;
+      setRuleTime(r.id, time);
     }
     put('transactions', tx);
+    setTxTime(tx.id, tx.recurring_id && repeat !== 'never' ? null : time);
     finish(editing ? 'Changes saved' : `${TYPE_LABEL[type]} of ${money(amount)} saved`);
   };
 
@@ -195,8 +202,11 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
       seq: realTx && realTx.date === date ? realTx.seq : nextSeq(date),
     });
 
+    const ruleTime = timeOf({ id: '', recurring_id: r.id, virtual: true });
     if (scope === 'one') {
-      put('transactions', thisTx(r.id));
+      const one = thisTx(r.id);
+      put('transactions', one);
+      setTxTime(one.id, time === ruleTime ? null : time);
       if (!realTx) put('recurring', { ...r, skip_dates: [...(r.skip_dates ?? []), D] }); // the rule won't add this date again
       return finish('Changed only this one');
     }
@@ -204,7 +214,9 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     if (stopping) {
       // stop repeating: before this one (next) or completely (all)
       put('recurring', scope === 'next' ? { ...r, end_date: addDays(D, -1) } : { ...r, active: false });
-      put('transactions', thisTx(null));
+      const last = thisTx(null);
+      put('transactions', last);
+      setTxTime(last.id, time);
       if (scope === 'all') updatePast(r, v);
       return finish('Repeating stopped');
     }
@@ -215,7 +227,9 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     if (scope === 'next' && !realTx && D !== r.next_date) {
       // split: the old rule ends before this one, a new rule starts here
       put('recurring', { ...r, end_date: addDays(D, -1) });
-      put('recurring', { ...newRule(date, freq), anchor_day: anchor, next_date: date, skip_dates: (r.skip_dates ?? []).filter(x => x > D) });
+      const nr = { ...newRule(date, freq), anchor_day: anchor, next_date: date, skip_dates: (r.skip_dates ?? []).filter(x => x > D) };
+      put('recurring', nr);
+      setRuleTime(nr.id, time);
       return finish('Changed this and the next ones');
     }
     // update the rule in place (applies to every future one)
@@ -223,7 +237,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     if (!realTx && D === r.next_date) next = date;
     else if (dateChanged || freq !== r.freq) next = firstOnOrAfter(realTx ? date : r.next_date, freq, anchor, addDays(todayISO(), 1));
     put('recurring', { ...r, ...v, freq, anchor_day: anchor, next_date: next, end_date: until, active: true });
-    if (realTx) put('transactions', thisTx(r.id));
+    setRuleTime(r.id, time);
+    if (realTx) { put('transactions', thisTx(r.id)); setTxTime(realTx.id, null); }
     if (scope === 'all') updatePast(r, v);
     finish(scope === 'all' ? 'Changed all of them' : 'Changed this and the next ones');
   };
@@ -367,9 +382,17 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
             <button className={`chip ${repeat !== 'never' ? 'on' : ''}`} style={{ height: 34, fontSize: 13 }} onClick={() => setPicker('repeat')}>
               <Repeat size={15} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}{repeat !== 'never' && until ? ` · until ${shortDate(until)}` : ''}
             </button>
-            <button className="grow" onClick={openDate} style={{ position: 'relative', fontWeight: 600, color: 'var(--ink-2)' }}>
-              {relativeDay(date).match(/Today|Yesterday|Tomorrow/) ? relativeDay(date) + ', ' : ''}{longDate.format(fromISO(date))}
+            <button className="grow" onClick={openDate} style={{ position: 'relative', fontWeight: 600, color: 'var(--ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {relativeDay(date).match(/Today|Yesterday|Tomorrow/) ? relativeDay(date) + ', ' : ''}{(date.slice(0, 4) === todayISO().slice(0, 4) ? shortDay : longDate).format(fromISO(date))}
               <input ref={dateRef} type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)}
+                style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
+            </button>
+            <button className={`chip ${time ? 'on' : ''}`} style={{ height: 34, fontSize: 13, padding: time ? '0 8px 0 10px' : '0 10px', gap: 5, position: 'relative' }}
+              onClick={openTime} aria-label={time ? `Kicks in at ${time}` : 'Set a time'}>
+              <Clock size={15} />{time && <span className="num">{time}</span>}
+              {time && <span role="button" aria-label="Clear time" style={{ display: 'grid', opacity: 0.7 }}
+                onClick={e => { e.stopPropagation(); haptic(4); setTime(null); }}><X size={14} /></span>}
+              <input ref={timeRef} type="time" value={time ?? ''} onChange={e => setTime(e.target.value || null)}
                 style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
             </button>
             <button className="iconbtn" style={{ width: 40, height: 34, color: fav ? 'var(--warn)' : 'var(--ink-3)' }} onClick={star} aria-label={fav ? 'Remove from favorites' : 'Add to favorites'}>

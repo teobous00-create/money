@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { isPending, useTimesVersion } from './txTime';
 import { useStore } from './store';
 import { useTxs, useSelection, useSharedRoots } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
@@ -33,13 +34,14 @@ export function useBudgetSpend(anchor: string) {
   const cats = useStore(s => s.categories);
   const me = useStore(s => s.user?.id ?? '');
   const shared = useSharedRoots();
+  const tv = useTimesVersion();
   return useMemo(() => {
     const today = todayISO();
     const [a, b] = [monthStart(anchor), monthEnd(anchor)];
     const total = new Map<string, number>(), mine = new Map<string, number>();
     const add = (m: Map<string, number>, id: string, v: number) => m.set(id, round2((m.get(id) ?? 0) + v));
     for (const t of txs) {
-      if (t.type !== 'expense' || !t.category_id || t.date < a || t.date > b || t.date > today) continue;
+      if (t.type !== 'expense' || !t.category_id || t.date < a || t.date > b || isPending(t, today)) continue;
       const parent = cats[t.category_id]?.parent_id ?? null;
       const root = parent ?? t.category_id;
       const own = t.owner_id === me;
@@ -48,7 +50,7 @@ export function useBudgetSpend(anchor: string) {
     }
     const joint = (id: string) => shared.has(cats[id]?.parent_id ?? id);
     return { total, mine, joint };
-  }, [txs, sel, cats, me, shared, anchor]);
+  }, [txs, sel, cats, me, shared, anchor, tv]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 // ---------------------------------------------------------------- tips
