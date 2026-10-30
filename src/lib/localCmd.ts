@@ -14,11 +14,11 @@ import { voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
 import type { Tx } from './types';
 
-const toks = (text: string) => norm(text).split(/[^\p{L}\p{N},.]+/u).map(w => w.replace(/^[.,]+|[.,]+$/g, '')).filter(Boolean);
-const LEAD = new Set(['ε', 'λοιπον', 'καλα', 'οκ', 'ok', 'ρε', 'και', 'πεσ', 'μου']);
+export const toks = (text: string) => norm(text).split(/[^\p{L}\p{N},.]+/u).map(w => w.replace(/^[.,]+|[.,]+$/g, '')).filter(Boolean);
+export const LEAD = new Set(['ε', 'λοιπον', 'καλα', 'οκ', 'ok', 'ρε', 'και', 'πεσ', 'μου']);
 // words that say nothing on their own
-const FILLER = new Set(['το', 'τα', 'τον', 'την', 'τη', 'του', 'τησ', 'των', 'μου', 'μασ', 'αυτο', 'αυτον', 'αυτη', 'αυτην', 'εκεινο', 'ενα', 'μια', 'για', 'σε', 'στο', 'στη', 'στην', 'στον', 'στα',
-  'απο', 'με', 'και', 'λεφτα', 'χρηματα', 'ευρω', 'συνολο', 'συνολικα', 'εχω', 'εχουμε', 'εγω', 'ηταν', 'ειναι', 'να', 'θα', 'ειχα', 'μεχρι', 'τωρα', 'ολα', 'ολο']);
+export const FILLER = new Set(['το', 'τα', 'τον', 'την', 'τη', 'του', 'τησ', 'των', 'μου', 'μασ', 'αυτο', 'αυτον', 'αυτη', 'αυτην', 'εκεινο', 'ενα', 'μια', 'για', 'σε', 'στο', 'στη', 'στην', 'στον', 'στα',
+  'απο', 'με', 'και', 'τισ', 'τουσ', 'οι', 'λεφτα', 'χρηματα', 'ευρω', 'συνολο', 'συνολικα', 'εχω', 'εχουμε', 'εγω', 'ηταν', 'ειναι', 'να', 'θα', 'ειχα', 'μεχρι', 'τωρα', 'ολα', 'ολο']);
 
 /** my newest entry (added most recently, not by date) */
 function lastTx(): Tx | null {
@@ -32,7 +32,7 @@ function lastTx(): Tx | null {
   }
   return best;
 }
-const describe = (t: Tx) => {
+export const describe = (t: Tx) => {
   const s = getState();
   const what = t.type === 'transfer' ? `${s.accounts[t.account_id]?.name} → ${s.accounts[t.to_account_id ?? '']?.name}` : catName(t.category_id, s.categories, false);
   return `${what} ${money(t.amount)}${t.date === todayISO() ? '' : ` · ${shortDate(t.date)}`}`;
@@ -40,7 +40,7 @@ const describe = (t: Tx) => {
 
 // ---------------------------------------------------------------- 4. fix the last entry
 
-const LAST = /^(τελευται\p{L}*|last)$/u;
+const LAST = /^(τελευταιο|τελευταια|τελευταιοσ|τελευταιου|τελευταιη|τελευταιησ|τελευταιον|τελευταιην|last)$/;   // not "τελευταίες 3 μέρες"
 const DEL = /^(σβησ\p{L}*|σβηνε|διεγραψ\p{L}*|διαγραψ\p{L}*|αφαιρεσ\p{L}*|ακυρωσ\p{L}*|delete|remove|undo)$/u;
 const CHG = /^(αλλαξ\p{L}*|αλλαζε|διορθωσ\p{L}*|fix|change)$/u;
 const NOT = /^(οχι|αντι|not)$/;
@@ -81,6 +81,7 @@ export function tryLocalEdit(text: string): boolean {
   let i = 0;
   while (i < w.length - 1 && LEAD.has(w[i])) i++;
   const ws = w.slice(i);
+  if (/^(ποσα|ποσο|ποσεσ|ποσουσ|ποσοι|ποση|που|ποια|ποιεσ|ποιο|ποιοσ|τι|πωσ|ποτε|γιατι)$/.test(ws[0] ?? '') || /[?;;]\s*$/.test(text.trim())) return false;   // a question never changes anything
   const hasLast = ws.some(x => LAST.test(x));
   const del = ws.some(x => DEL.test(x));
   // "σβήσε / διέγραψε …" names one; "αφαίρεσε / ακύρωσε" only when it also says "συναλλαγή" ("αφαίρεσε 5 από τον καφέ" is an edit → the AI)
@@ -133,31 +134,41 @@ const BAL = /^(εχω|μενουν|εμειναν|υπολοιπο|balance)$/;
 const FULL_MONTHS = [/^(ιανουαρ|jan)/, /^(φεβρουαρ|feb)/, /^(μαρτ|mar)/, /^(απριλ|apr)/, /^(μαιο|μαιου|may)/, /^(ιουνι|jun)/, /^(ιουλι|jul)/, /^(αυγουστ|aug)/, /^(σεπτεμβρ|sep)/, /^(οκτωβρ|oct)/, /^(νοεμβρ|nov)/, /^(δεκεμβρ|dec)/];
 const PAST = /^(προηγουμεν\p{L}*|περασμεν\p{L}*|last)$/u;
 
-function period(ws: string[], used: Set<number>): { from: string; to: string; label: string } | null {
+export interface Range { from: string; to: string; label: string; kind?: 'week' | 'month' | 'year' }
+/** "αυτή την εβδομάδα", "τον προηγούμενο μήνα", "φέτος", "τον Οκτώβριο" — `future` lets a month name / this month run to its end */
+export function period(ws: string[], used: Set<number>, future = false): Range | null {
   const today = todayISO(), T = fromISO(today);
   const mark = (...ix: number[]) => ix.forEach(i => used.add(i));
   for (let i = 0; i < ws.length; i++) {
     const w = ws[i], past = PAST.test(ws[i - 1] ?? '');
+    // "τις τελευταίες 3 μέρες"
+    if (/^(τελευται\p{L}*|last)$/u.test(w) && /^\d{1,3}$/.test(ws[i + 1] ?? '') && /^(μερεσ|ημερεσ|days)$/.test(ws[i + 2] ?? '')) {
+      const n = Math.max(1, Number(ws[i + 1]));
+      mark(i, i + 1, i + 2);
+      return { from: addDays(today, -(n - 1)), to: today, label: `last ${n} days` };
+    }
     const pi = past ? [i - 1] : [];
     if (/^(εβδομαδα|βδομαδα|week)$/.test(w)) {
       const mon = addDays(today, -((T.getDay() + 6) % 7));
       mark(i, ...pi);
-      return past ? { from: addDays(mon, -7), to: addDays(mon, -1), label: 'last week' } : { from: mon, to: today, label: 'this week' };
+      return past ? { from: addDays(mon, -7), to: addDays(mon, -1), label: 'last week', kind: 'week' } : { from: mon, to: future ? addDays(mon, 6) : today, label: 'this week', kind: 'week' };
     }
     if (/^(μηνα|μηνασ|month)$/.test(w)) {
       mark(i, ...pi);
-      if (past) { const a = new Date(T.getFullYear(), T.getMonth() - 1, 1); return { from: toISO(a), to: toISO(new Date(T.getFullYear(), T.getMonth(), 0)), label: 'last month' }; }
-      return { from: toISO(new Date(T.getFullYear(), T.getMonth(), 1)), to: today, label: 'this month' };
+      if (past) { const a = new Date(T.getFullYear(), T.getMonth() - 1, 1); return { from: toISO(a), to: toISO(new Date(T.getFullYear(), T.getMonth(), 0)), label: 'last month', kind: 'month' }; }
+      if (/^(επομεν\p{L}*|next)$/u.test(ws[i - 1] ?? '')) { mark(i - 1); return { from: toISO(new Date(T.getFullYear(), T.getMonth() + 1, 1)), to: toISO(new Date(T.getFullYear(), T.getMonth() + 2, 0)), label: 'next month', kind: 'month' }; }
+      return { from: toISO(new Date(T.getFullYear(), T.getMonth(), 1)), to: future ? toISO(new Date(T.getFullYear(), T.getMonth() + 1, 0)) : today, label: 'this month', kind: 'month' };
     }
-    if (/^(φετοσ|χρονο|χρονια|year)$/.test(w)) { mark(i, ...pi); return { from: `${T.getFullYear()}-01-01`, to: today, label: String(T.getFullYear()) }; }
+    if (/^(φετοσ|χρονο|χρονια|year)$/.test(w)) { mark(i, ...pi); return { from: `${T.getFullYear()}-01-01`, to: today, label: String(T.getFullYear()), kind: 'year' }; }
     const m = FULL_MONTHS.findIndex(re => re.test(w));
     const mon = m >= 0 ? MONTHS[m] : undefined;
     if (mon) {
       mark(i);
       let y = T.getFullYear();
-      if (mon[1] > T.getMonth()) y--;
+      if (!future && mon[1] > T.getMonth()) y--;
+      if (future && mon[1] < T.getMonth()) y++;
       const a = new Date(y, mon[1], 1), b = new Date(y, mon[1] + 1, 0);
-      return { from: toISO(a), to: toISO(b) < today ? toISO(b) : today, label: new Intl.DateTimeFormat('en-GB', { month: 'long' }).format(a) };
+      return { from: toISO(a), to: future || toISO(b) < today ? toISO(b) : today, label: new Intl.DateTimeFormat('en-GB', { month: 'long' }).format(a), kind: 'month' };
     }
   }
   return null;
