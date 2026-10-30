@@ -8,6 +8,7 @@ import { containsToday, elapsedDays, range } from '../lib/period';
 import { IconBox, Money, Bar, Segmented, ease, softSpring } from '../components/ui';
 const AnalyticsView = lazy(() => import('./Analytics').then(m => ({ default: m.AnalyticsView })));
 import { BudgetLine } from '../components/Budget';
+import { HouseholdCard } from '../components/Household';
 import { useBudgetSpend } from '../lib/insights';
 import { catName, catStyle, alive } from '../lib/calc';
 import { addDays, fromISO, money, num, round2, todayISO } from '../lib/format';
@@ -167,6 +168,7 @@ export function OverviewScreen() {
         ))}
       </div>
 
+      {period.mode === 'month' && <HouseholdCard anchor={period.anchor} />}
       {period.mode === 'month' && <BudgetsCard anchor={period.anchor} />}
 
       <div className="section">
