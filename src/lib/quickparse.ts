@@ -66,6 +66,39 @@ export function sameWord(a: string, b: string) {
   return false;
 }
 
+// ---- Greek ↔ Latin: dictation writes "σούπερ μάρκετ", "νέτφλιξ" for the categories Supermarket, Netflix
+const GR: Record<string, string> = { α: 'a', β: 'v', γ: 'g', δ: 'd', ε: 'e', ζ: 'z', η: 'i', ι: 'i', κ: 'k', λ: 'l', μ: 'm', ν: 'n', ο: 'o', π: 'p', ρ: 'r', σ: 's', τ: 't', υ: 'i', φ: 'f', ω: 'o' };
+const latin = (s: string) => /[a-z]/.test(s);
+const greek = (s: string) => /[α-ω]/.test(s);
+/** a rough sound-alike spelling in Latin letters, the same for "σουπερμαρκετ" and "supermarket" */
+export function phon(s: string): string {
+  let x = norm(s)
+    .replace(/ου/g, 'u').replace(/μπ/g, 'b').replace(/ντ/g, 'd').replace(/γκ/g, 'g').replace(/γγ/g, 'ng')
+    .replace(/αι/g, 'e').replace(/ει|οι|υι/g, 'i').replace(/αυ/g, 'av').replace(/ευ/g, 'ev')
+    .replace(/θ/g, 't').replace(/χ/g, 'h').replace(/ψ/g, 'ps').replace(/ξ/g, 'ks')
+    .replace(/[α-ω]/g, c => GR[c] ?? '');
+  x = x.replace(/ph/g, 'f').replace(/th/g, 't').replace(/ck/g, 'k').replace(/c(?=[eiy])/g, 's').replace(/c/g, 'k').replace(/q/g, 'k')
+    .replace(/x/g, 'ks').replace(/y/g, 'i').replace(/w/g, 'v').replace(/oo/g, 'u').replace(/ee/g, 'i').replace(/ou/g, 'u');
+  return x.replace(/[^a-z0-9]/g, '').replace(/(.)\1+/g, '$1');
+}
+function lev1(a: string, b: string): boolean {   // edit distance ≤ 1
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, d = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++d > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return d + (a.length - i) + (b.length - j) <= 1;
+}
+/** same word, or the same name written in the other alphabet */
+export function like(a: string, b: string): boolean {
+  if (sameWord(a, b)) return true;
+  if (!((greek(a) && latin(b)) || (latin(a) && greek(b)))) return false;
+  const x = phon(a), y = phon(b);
+  return x === y || (Math.min(x.length, y.length) >= 5 && lev1(x, y));
+}
+
 interface Tok { raw: string; n: string; used: boolean }
 
 /** Dictation adds punctuation ("χθες.", "3,", "«καφές»"): drop it around a word, keep it inside numbers ("12,50", "15/10"). */
@@ -84,6 +117,15 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
     .map(stripPunct).filter(Boolean)
     .map(raw => ({ raw, n: clean(raw), used: false })).filter(t => t.n || t.raw === '€');
   const out: Parsed = { type: null, amount: null, accountId: null, toAccountId: null, categoryId: null, date: null, note: '', words: [] };
+  // "σούπερ μάρκετ" → one word when together they sound like one of your names ("Supermarket")
+  const vocab = [...ctx.categories.map(c => c.name), ...ctx.accounts.map(a => a.name)]
+    .flatMap(n => norm(n).split(/[^\p{L}\p{N}]+/u)).filter(w => w.length >= 5 && latin(w));
+  const known = (n: string) => vocab.some(w => like(n, w));
+  for (let i = 0; i + 1 < toks.length; i++) {
+    const a = toks[i], b = toks[i + 1];
+    if (!greek(a.n) || !greek(b.n) || /\d/.test(a.n + b.n)) continue;
+    if (known(a.n + b.n) && !known(a.n) && !known(b.n)) toks.splice(i, 2, { raw: `${a.raw} ${b.raw}`, n: a.n + b.n, used: false });
+  }
   const nt = (i: number) => toks[i]?.n ?? '';
   const phrase = (list: string[]) => {
     for (const p of list) {
@@ -197,13 +239,13 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
     for (let i = from; i <= toks.length - 1; i++) {
       if (toks[i].used) continue;
       if (onlyAfterPrep && !PREP.has(nt(i - 1))) continue;
-      if (sameWord(toks[i].n, words[0]) && words.every((w, k) => k === 0 || toks.slice(i + 1, i + 4).some(t => !t.used && sameWord(t.n, w)))) return i;
+      if (like(toks[i].n, words[0]) && words.every((w, k) => k === 0 || toks.slice(i + 1, i + 4).some(t => !t.used && like(t.n, w)))) return i;
     }
     return -1;
   };
   const useWords = (start: number, words: string[]) => {
     toks[start].used = true;
-    for (const w of words.slice(1)) { const t = toks.slice(start + 1, start + 4).find(x => !x.used && sameWord(x.n, w)); if (t) t.used = true; }
+    for (const w of words.slice(1)) { const t = toks.slice(start + 1, start + 4).find(x => !x.used && like(x.n, w)); if (t) t.used = true; }
   };
   const findAccounts = (onlyAfterPrep: boolean) => {
     const hits: Array<{ a: Account; i: number }> = [];
@@ -232,16 +274,16 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   if (!cat) {
     const scored: Array<{ c: Category; score: number; use: number; at: number }> = [];
     // a word that is also one of your account names counts for the account
-    const accountish = (n: string) => ctx.accounts.some(a => accTokens(a).some(w => sameWord(n, w)));
+    const accountish = (n: string) => ctx.accounts.some(a => accTokens(a).some(w => like(n, w)));
     for (const c of ctx.categories) {
       if (!fits(c)) continue;
       const words = catWords(c);
-      const hits = words.map(w => toks.findIndex(t => !t.used && sameWord(t.n, w)));
+      const hits = words.map(w => toks.findIndex(t => !t.used && like(t.n, w)));
       const matched = words.filter((_, k) => hits[k] >= 0);
       if (!matched.length) continue;
       const parent = c.parent_id ? byId.get(c.parent_id) : null;
       let score = matched.join('').length + (matched.length === words.length ? 10 : 0);    // "delivery" still finds "Delivery καφές"
-      if (parent && catWords(parent).some(w => toks.some(t => !t.used && sameWord(t.n, w)))) score += 40;   // "σπίτι delivery" → that subcategory
+      if (parent && catWords(parent).some(w => toks.some(t => !t.used && like(t.n, w)))) score += 40;   // "σπίτι delivery" → that subcategory
       if (matched.every((_, k) => accountish(toks[hits.filter(h => h >= 0)[k]].n))) continue;   // "revolut" is the account, not Εφαρμογές › Revolut
       scored.push({ c, score, use: ctx.usage.get(c.id) ?? 0, at: Math.min(...hits.filter(h => h >= 0)) });
     }
@@ -250,7 +292,7 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
     if (cat) {
       const parent = cat.parent_id ? byId.get(cat.parent_id) : null;
       for (const w of [...catWords(cat), ...(parent ? catWords(parent) : [])]) {
-        const t = toks.find(x => !x.used && sameWord(x.n, w));
+        const t = toks.find(x => !x.used && like(x.n, w));
         if (t) { t.used = true; out.words.push(t.n); }
       }
     }

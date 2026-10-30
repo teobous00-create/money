@@ -7,6 +7,7 @@ import { haptic } from '../lib/format';
 import { toast } from './ui';
 import { interpret, isQuestion, wantsAI } from '../lib/voice';
 import { openFor, runVoice, understood, voiceCtxNow } from '../lib/voiceRun';
+import { tryLocalAsk, tryLocalEdit } from '../lib/localCmd';
 
 type Rec = {
   lang: string; interimResults: boolean; continuous: boolean; maxAlternatives: number;
@@ -64,6 +65,7 @@ export function useListen(onFinal: (text: string) => void) {
 /** Mic button (top bar): tap, say a command, done. Shows what it hears while listening. */
 export function VoiceButton() {
   const onVoice = (text: string) => {
+    if (tryLocalAsk(text) || tryLocalEdit(text)) return;             // simple sums and fixes to the last entry: on the phone
     if (isQuestion(text)) { setUi({ ask: text }); return; }           // a question → the AI, in a small window
     const cmds = interpret(text, voiceCtxNow());
     if (!understood(cmds) || wantsAI(text, cmds)) { setUi({ ask: text }); return; }   // not a plain new entry → let the AI handle it

@@ -16,7 +16,7 @@ import { setRuleTime, setTxTime, timeOf } from '../lib/txTime';
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };
 const TYPE_LABEL: Record<TxType, string> = { expense: 'Expense', income: 'Income', transfer: 'Transfer' };
 const longDate = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-const shortDay = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+const shortDay = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 type Scope = 'one' | 'next' | 'all';
 
 /** First occurrence on/after `min`, walking the schedule from `start`. */
@@ -380,10 +380,10 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
           </div>
           <div className="dateline">
             <button className={`chip ${repeat !== 'never' ? 'on' : ''}`} style={{ height: 34, fontSize: 13 }} onClick={() => setPicker('repeat')}>
-              <Repeat size={15} />{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}{repeat !== 'never' && until ? ` · until ${shortDate(until)}` : ''}
+              <Repeat size={15} />{time ? '' : <>{repeat === 'never' ? 'Repeat' : FREQ_LABEL[repeat]}{repeat !== 'never' && until ? ` · until ${shortDate(until)}` : ''}</>}
             </button>
             <button className="grow" onClick={openDate} style={{ position: 'relative', fontWeight: 600, color: 'var(--ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {relativeDay(date).match(/Today|Yesterday|Tomorrow/) ? relativeDay(date) + ', ' : ''}{(date.slice(0, 4) === todayISO().slice(0, 4) ? shortDay : longDate).format(fromISO(date))}
+              {/Today|Yesterday|Tomorrow/.test(relativeDay(date)) ? relativeDay(date) : (date.slice(0, 4) === todayISO().slice(0, 4) ? shortDay : longDate).format(fromISO(date))}
               <input ref={dateRef} type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)}
                 style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none' }} tabIndex={-1} />
             </button>
