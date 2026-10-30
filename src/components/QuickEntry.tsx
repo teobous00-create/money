@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Mic } from 'lucide-react';
 import { haptic } from '../lib/format';
 import { toast } from './ui';
-import { interpret, isQuestion, wantsAI } from '../lib/voice';
+import { fixDictation, interpret, isQuestion, wantsAI } from '../lib/voice';
 import { openFor, runVoice, understood, voiceCtxNow } from '../lib/voiceRun';
 import { tryLocalAsk, tryLocalEdit } from '../lib/localCmd';
 import { tryLocalAnswer } from '../lib/localAsk';
@@ -65,7 +65,8 @@ export function useListen(onFinal: (text: string) => void) {
 
 /** Mic button (top bar): tap, say a command, done. Shows what it hears while listening. */
 export function VoiceButton() {
-  const onVoice = (text: string) => {
+  const onVoice = (heard: string) => {
+    const text = fixDictation(heard);
     if (tryLocalAnswer(text) || tryLocalAsk(text) || tryLocalEdit(text)) return;             // simple sums and fixes to the last entry: on the phone
     if (isQuestion(text)) { setUi({ ask: text }); return; }           // a question → the AI, in a small window
     const cmds = interpret(text, voiceCtxNow());

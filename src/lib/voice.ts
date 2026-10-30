@@ -9,6 +9,25 @@ import { fromISO, round2, toISO } from './format';
 import { NUMWORDS, MONTHS, clean, norm, parseNumber, parseQuick, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
 
+/**
+ * Words dictation keeps getting wrong, fixed before anything reads the phrase:
+ *  - "αλλαγή" (exactly that word) → "συναλλαγή"   ("άλλαξε" etc. stay)
+ *  - "τι" anywhere but the first word → "tips"   (you never start with "tips"; a first "Τι" is a question)
+ */
+export function fixDictation(text: string): string {
+  let first = true;
+  return text.split(/(\s+)/).map(part => {
+    if (!part.trim()) return part;
+    const m = part.match(/^([«"'“(]*)(.*?)([.,;;:!?…»"'”)]*)$/u)!;
+    const n = norm(m[2]);
+    const at = first;
+    first = false;
+    if (n === 'αλλαγη') return m[1] + 'συναλλαγή' + m[3];
+    if (n === 'τι' && !at) return m[1] + 'tips' + m[3];
+    return part;
+  }).join('');
+}
+
 export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[]; hasShift?: (jobId: string, date: string) => boolean }
 
 export type Cmd =
