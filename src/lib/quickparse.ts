@@ -159,6 +159,11 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
     else if (w === 'προχθεσ' || w === 'προχτεσ') take(addDays(today, -2));
     else if (w === 'αυριο' || w === 'tomorrow') take(addDays(today, 1));
     else if (w === 'μεθαυριο') take(addDays(today, 2));
+    // "η χθεσινή βάρδια", "τη σημερινή απογευματινή"
+    else if (/^χθεσιν/.test(w)) take(addDays(today, -1));
+    else if (/^προχθεσιν/.test(w)) take(addDays(today, -2));
+    else if (/^σημεριν/.test(w)) take(today);
+    else if (/^αυριαν/.test(w)) take(addDays(today, 1));
     else if ((w === 'πριν' || w === 'before') && /^\d+$/.test(nt(i + 1)) && /^(μερ|ημερ|day)/.test(nt(i + 2))) take(addDays(today, -Number(nt(i + 1))), 3);
     else if (/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(w)) {
       const [d, m, y] = w.split('/').map(Number);

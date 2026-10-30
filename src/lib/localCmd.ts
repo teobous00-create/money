@@ -8,7 +8,10 @@
 import { getState, put, remove, restore } from './store';
 import { alive, catName, computeBalances } from './calc';
 import { addDays, fromISO, money, shortDate, toISO, todayISO } from './format';
-import { MONTHS, like, norm, parseQuick } from './quickparse';
+import { MONTHS, like, norm, parseQuick, sameWord } from './quickparse';
+import { DAY_ALIASES, EVE_ALIASES } from './voice';
+import { writeShift } from './tracker';
+import { relativeDay } from './format';
 import { isPending } from './txTime';
 import { voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
@@ -37,6 +40,34 @@ export const describe = (t: Tx) => {
   const what = t.type === 'transfer' ? `${s.accounts[t.account_id]?.name} → ${s.accounts[t.to_account_id ?? '']?.name}` : catName(t.category_id, s.categories, false);
   return `${what} ${money(t.amount)}${t.date === todayISO() ? '' : ` · ${shortDate(t.date)}`}`;
 };
+
+// ---------------------------------------------------------------- shifts: remove one
+
+/** "σβήσε τη βάρδια χθες", "σβήσε τη χθεσινή απογευματινή", "δεν δούλεψα σήμερα", "δεν θα δουλέψω αύριο στην πρωινή" */
+export function tryLocalShift(text: string): boolean {
+  const ws = toks(text);
+  const s = getState();
+  const jobs = alive(s.jobs).filter(j => !j.archived);
+  if (!jobs.length) return false;
+  const named = jobs.filter(j => ws.some(w => (j.kind === 'daily' ? DAY_ALIASES : EVE_ALIASES).some(a => sameWord(w, a))
+    || norm(j.name).split(/[^\p{L}\p{N}]+/u).some(x => x.length >= 3 && like(w, x))));
+  const shiftWord = ws.some(w => /^(βαρδι\p{L}*|shifts?)$/u.test(w));
+  const del = DEL.test(ws.find(w => !LEAD.has(w)) ?? '') && (shiftWord || named.length > 0);
+  const notWorked = ws.includes('δεν') && ws.some(w => /^(δουλεψ\p{L}*|δουλευ\p{L}*|πηγα|πηγαινω|παω)$/u.test(w));
+  if (!del && !notWorked) return false;
+  // an amount or a category means it's about an entry ("σβήσε τον καφέ το πρωί") → leave it
+  const p = parseQuick(text, voiceCtxNow());
+  if (!shiftWord && (p.categoryId || p.amount !== null)) return false;
+  const date = p.date ?? todayISO();
+  const pool = named.length ? named : jobs;
+  const hits = pool.map(j => ({ j, sh: s.shifts[`${j.id}:${date}`] })).filter(x => x.sh && !x.sh.deleted_at);
+  const rel = relativeDay(date);
+  const when = /^(Today|Yesterday|Tomorrow)$/.test(rel) ? rel.toLowerCase() : `on ${shortDate(date)}`;
+  if (!hits.length) { toast(`No shift ${named.length ? `at ${named.map(j => j.name).join(' / ')} ` : ''}${when}`); return true; }
+  const undos = hits.map(({ j }) => writeShift(j, date, { worked: false, hours: 0, base: null, bonus: null, tips: 0, tipsAccount: null }));
+  toast(`Removed ${hits.map(x => x.j.name).join(' + ')} · ${when}`, { label: 'Undo', run: () => undos.forEach(u => u()) }, { ms: 7000 });
+  return true;
+}
 
 // ---------------------------------------------------------------- 4. fix the last entry
 
