@@ -14,7 +14,7 @@ import { addDays, fromISO, money, num, round2, shortDate, toISO, todayISO } from
 import { like, norm, parseQuick, sameWord } from './quickparse';
 import { isPending } from './txTime';
 import { voiceCtxNow } from './voiceRun';
-import { DAY_ALIASES, EVE_ALIASES } from './voice';
+import { DAY_ALIASES, EVE_ALIASES, findStrategy } from './voice';
 import { monthBonus, payPeriods, periodLabel, shiftParts } from './tracker';
 import { LEAD, period, toks, type Range } from './localCmd';
 import { toast } from '../components/ui';
@@ -221,13 +221,8 @@ function top(ws: string[]): boolean {
 function strategiesNamed(ws: string[]): Strategy[] | null {
   const all = alive(getState().strategies).filter(s => !s.archived);
   if (!all.length) return null;
-  const named = all.filter(s => {
-    const nw = norm(s.name).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-    const initials = nw.map(x => x[0]).join('');
-    return ws.some((w, i) => (initials.length >= 2 && w === initials) || (nw.length > 1 && nw.every((x, k) => sameWord(ws[i + k] ?? '', x)))
-      || (nw.length === 1 && nw[0].length >= 3 && like(w, nw[0])));
-  });
-  if (named.length) return named;
+  const found = findStrategy(ws, all);
+  if (found) return [found.s];
   return has(ws, /^(στρατηγικ\p{L}*|trading|ea|eas|bots?|strateg\p{L}*)$/u) ? all : null;
 }
 function trading(ws: string[]): boolean {

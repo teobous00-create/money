@@ -6,8 +6,38 @@
  *  - entries:     "netflix 12,49 κάθε μήνα", "καφές 3, supermarket 20 και τσιγάρα 5,5"
  */
 import { fromISO, round2, toISO } from './format';
-import { NUMWORDS, MONTHS, clean, norm, parseNumber, parseQuick, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
+import { NUMWORDS, MONTHS, clean, lev1, norm, parseNumber, parseQuick, phon, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
+
+/**
+ * A strategy named in the phrase. Dictation splits and bends names ("BillTrades Elite" → "bill trade elite",
+ * "NewsTrading" → "news trading"), so 1–4 neighbouring words are joined and compared loosely; initials ("DDG")
+ * and the first word alone ("bill trade") also count. The longest match wins.
+ */
+export function findStrategy(ws: string[], strategies: Strategy[]): { s: Strategy; at: number; len: number } | null {
+  const w = ws.map(x => norm(x).replace(/[^\p{L}\p{N}]/gu, ''));
+  const near = (a: string, b: string) => a === b || (b.length >= 6 && lev1(a, b)) || (/[α-ω]/.test(a) && phon(a).length >= 5 && (phon(a) === phon(b) || lev1(phon(a), phon(b))));
+  let best: { s: Strategy; at: number; len: number; score: number } | null = null;
+  for (const s of strategies) {
+    const nw = norm(s.name).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const compact = nw.join(''), initials = nw.map(x => x[0]).join('');
+    const firstOnly = nw.length > 1 && nw[0].length >= 5 && !strategies.some(o => o !== s && norm(o.name).replace(/[^\p{L}\p{N}]/gu, '').startsWith(nw[0].slice(0, 5)));
+    for (let i = 0; i < w.length; i++) {
+      if (!w[i]) continue;
+      if (initials.length >= 2 && w[i] === initials) { if (!best || best.score < 1) best = { s, at: i, len: 1, score: 1 }; continue; }
+      for (let L = Math.min(4, w.length - i); L >= 1; L--) {
+        const cand = w.slice(i, i + L).join('');
+        let score = 0;
+        if (near(cand, compact)) score = 10 + L;
+        else if (firstOnly && near(cand, nw[0])) score = 5 + L;
+        else if (nw.length === 1 && compact.length >= 3 && L === 1 && cand.length >= 4 && compact.startsWith(cand)) score = 2;
+        if (score && (!best || score > best.score)) best = { s, at: i, len: L, score };
+        if (score) break;
+      }
+    }
+  }
+  return best && { s: best.s, at: best.at, len: best.len };
+}
 
 /**
  * Words dictation keeps getting wrong, fixed before anything reads the phrase:
@@ -213,18 +243,9 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
   }
 
   // ---- P&L: a strategy's name or initials ("DDG")
-  for (const s of ctx.strategies) {
-    const nw = norm(s.name).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-    const initials = nw.map(x => x[0]).join('');
-    const compact = norm(s.name).replace(/[^\p{L}\p{N}]/gu, '');
-    let hit = -1, len = 0;
-    for (let i = 0; i < ws.length; i++) {
-      const w = ws[i].n.replace(/[^\p{L}\p{N}]/gu, '');
-      if (!w) continue;
-      if ((initials.length >= 2 && w === initials) || (compact.length >= 3 && (w === compact || compact.startsWith(w) && w.length >= 4 && nw.length === 1))) { hit = i; len = 1; break; }
-      if (nw.length > 1 && nw.every((x, k) => sameWord(ws[i + k]?.n ?? '', x) || (ws[i + k]?.n ?? '') === x)) { hit = i; len = nw.length; break; }
-    }
-    if (hit < 0) continue;
+  const found = findStrategy(ws.map(x => x.n), ctx.strategies);
+  if (found) {
+    const { s, at: hit, len } = found;
     const rest = ws.filter((_, i) => i < hit || i >= hit + len);
     const n = labelled(rest).find(x => x.label === null);
     let sign = n?.sign ?? 1;

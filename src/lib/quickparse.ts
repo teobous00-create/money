@@ -81,7 +81,7 @@ export function phon(s: string): string {
     .replace(/x/g, 'ks').replace(/y/g, 'i').replace(/w/g, 'v').replace(/oo/g, 'u').replace(/ee/g, 'i').replace(/ou/g, 'u');
   return x.replace(/[^a-z0-9]/g, '').replace(/(.)\1+/g, '$1');
 }
-function lev1(a: string, b: string): boolean {   // edit distance ≤ 1
+export function lev1(a: string, b: string): boolean {   // edit distance ≤ 1
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0, j = 0, d = 0;
   while (i < a.length && j < b.length) {
