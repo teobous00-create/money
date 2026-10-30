@@ -152,6 +152,7 @@ export interface Prefs {
   aboutMe?: string;                 // "About me": goals and situation, sent to the AI
   reviews?: Record<string, Review>; // 'YYYY-MM' → monthly review written by the AI
   aiUsage?: { day: string; count: number }; // written by the server only
+  learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
 }
 
 export interface Review { text: string; upTo: string; at: string; v?: number }

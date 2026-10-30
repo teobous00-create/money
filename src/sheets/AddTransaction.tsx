@@ -8,9 +8,9 @@ import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
-import { unmarkVoice } from '../lib/voiceRun';
+import { learn, unmarkVoice } from '../lib/voiceRun';
 import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
-import { learn, type Parsed } from '../lib/quickparse';
+import { type Parsed } from '../lib/quickparse';
 import { setRuleTime, setTxTime, timeOf } from '../lib/txTime';
 
 const FREQ_LABEL: Record<'never' | Freq, string> = { never: 'Never', weekly: 'Every week', monthly: 'Every month', yearly: 'Every year' };

@@ -328,15 +328,4 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   return out;
 }
 
-// ---------------------------------------------------------------- learning (per device)
-
-const LEARN = 'money:learn';
-export function loadLearned(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(LEARN) ?? '{}'); } catch { return {}; }
-}
-export function learn(words: string[], categoryId: string) {
-  if (!words.length) return;
-  const m = loadLearned();
-  for (const w of words) m[w] = categoryId;
-  try { localStorage.setItem(LEARN, JSON.stringify(m)); } catch { /* ignore */ }
-}
+// learning (word → category) lives in your synced settings: see loadLearned / learn in voiceRun.ts

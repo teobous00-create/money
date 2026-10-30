@@ -1,10 +1,9 @@
 /** Saves voice/typed commands right away (with Undo), or tells the caller which form to open. */
-import { getState, put, remove, nextOccurrence, useStore } from './store';
+import { getState, put, remove, nextOccurrence, setPrefs, useStore } from './store';
 import { setUi } from './ui';
 import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } from './format';
 import { catName, alive } from './calc';
 import { complete, type Cmd, type VoiceCtx } from './voice';
-import { loadLearned } from './quickparse';
 import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf } from './tracker';
 import { toast } from '../components/ui';
 import type { Recurring, Tx, TxType } from './types';
@@ -27,6 +26,30 @@ export function useVoiceMarks() {
   const tick = useStore(s => s.transactions);
   if (!markCache || markCache.tick !== tick) markCache = { tick, set: new Set(marks()) };
   return markCache.set;
+}
+
+// ---------------------------------------------------------------- learning (synced with your settings, every device)
+
+const LEGACY = 'money:learn';   // where it used to be kept, on this phone only
+function legacyLearned(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(LEGACY) ?? '{}'); } catch { return {}; }
+}
+/** word → category id, from the categories you picked instead of the one a phrase gave */
+export function loadLearned(): Record<string, string> {
+  const legacy = legacyLearned();
+  const synced = getState().prefs.learned ?? {};
+  if (Object.keys(legacy).length && getState().user) {   // move this phone's old list into the synced settings, once
+    setPrefs({ learned: { ...legacy, ...synced } });
+    try { localStorage.removeItem(LEGACY); } catch { /* ignore */ }
+    return { ...legacy, ...synced };
+  }
+  return synced;
+}
+export function learn(words: string[], categoryId: string) {
+  if (!words.length) return;
+  const m = { ...loadLearned() };
+  for (const w of words) m[w] = categoryId;
+  setPrefs({ learned: m });
 }
 
 // ---------------------------------------------------------------- context
