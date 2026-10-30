@@ -1,13 +1,14 @@
 /**
  * Phrases the top mic handles on the phone, without the AI:
  *  - fixes to the last entry:  "σβήσε το τελευταίο", "το τελευταίο 5 όχι 3", "άλλαξε το τελευταίο σε delivery"
+ *  - deleting a described one: "σβήσε τη συναλλαγή του καφέ των 3", "σβήσε την cosmote", "σβήσε το delivery χθες"
  *  - simple sums:              "πόσα καφέ αυτόν τον μήνα", "πόσα tips χθες", "πόσα έχω στο revolut"
  * Anything it isn't sure about returns false and goes to the AI as before.
  */
 import { getState, put, remove, restore } from './store';
 import { alive, catName, computeBalances } from './calc';
 import { addDays, fromISO, money, shortDate, toISO, todayISO } from './format';
-import { MONTHS, norm, parseQuick } from './quickparse';
+import { MONTHS, like, norm, parseQuick } from './quickparse';
 import { isPending } from './txTime';
 import { voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
@@ -44,6 +45,37 @@ const DEL = /^(σβησ\p{L}*|σβηνε|διεγραψ\p{L}*|διαγραψ\p{L
 const CHG = /^(αλλαξ\p{L}*|αλλαζε|διορθωσ\p{L}*|fix|change)$/u;
 const NOT = /^(οχι|αντι|not)$/;
 
+// ---------------------------------------------------------------- delete the one you describe
+
+const ENTRY = /^(συναλλαγ\p{L}*|κινησ\p{L}*|εγγραφ\p{L}*|καταχωρησ\p{L}*|εξοδο|εσοδο|entry|transaction)$/u;
+
+/** "σβήσε την Χ συναλλαγή": X = category, amount, date, account or words of the note — the newest match goes, with Undo */
+function deleteDescribed(ws: string[], text: string): boolean {
+  const keep = text.split(/\s+/).filter(x => { const n = norm(x).replace(/[^\p{L}\p{N}]/gu, ''); return n && !DEL.test(n) && !ENTRY.test(n) && !LEAD.has(n); });
+  if (!keep.length || !ws.length) return false;
+  const p = parseQuick(keep.join(' '), voiceCtxNow());
+  const s = getState();
+  const left = p.note ? norm(p.note).split(/[^\p{L}\p{N}]+/u).filter(x => x.length >= 3 && !FILLER.has(x)) : [];
+  if (!p.categoryId && p.amount === null && !p.date && !p.accountId && !left.length) return false;
+  const cat = p.categoryId ? s.categories[p.categoryId] : null;
+  const ids = cat ? new Set([cat.id, ...Object.values(s.categories).filter(c => c.parent_id === cat.id).map(c => c.id)]) : null;
+  const wordsOf = (t: Tx) => [t.note ?? '', catName(t.category_id, s.categories), s.accounts[t.account_id]?.name ?? '', s.accounts[t.to_account_id ?? '']?.name ?? '']
+    .join(' ').split(/[^\p{L}\p{N}]+/u).map(norm).filter(Boolean);
+  const me = s.user?.id;
+  const hits = alive(s.transactions).filter(t => t.owner_id === me && !t.virtual
+    && (!ids || (!!t.category_id && ids.has(t.category_id)))
+    && (p.amount === null || Math.abs(t.amount - p.amount) < 0.005)
+    && (!p.date || t.date === p.date)
+    && (!p.accountId || t.account_id === p.accountId || t.to_account_id === p.accountId)
+    && left.every(w => wordsOf(t).some(x => like(x, w))))
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.created_at ?? b.updated_at ?? '').localeCompare(a.created_at ?? a.updated_at ?? ''));
+  if (!hits.length) return false;   // not found → the AI looks
+  const t = hits[0];
+  remove('transactions', t.id);
+  toast(`Deleted ${describe(t)}${hits.length > 1 ? ` · newest of ${hits.length}` : ''}`, { label: 'Undo', run: () => restore('transactions', t.id) }, { ms: 7000 });
+  return true;
+}
+
 export function tryLocalEdit(text: string): boolean {
   const w = toks(text);
   let i = 0;
@@ -51,12 +83,17 @@ export function tryLocalEdit(text: string): boolean {
   const ws = w.slice(i);
   const hasLast = ws.some(x => LAST.test(x));
   const del = ws.some(x => DEL.test(x));
-  if (!hasLast && !(del && ws.every(x => DEL.test(x) || FILLER.has(x)))) return false;   // "σβήσε" alone = the last one too
+  // "σβήσε / διέγραψε …" names one; "αφαίρεσε / ακύρωσε" only when it also says "συναλλαγή" ("αφαίρεσε 5 από τον καφέ" is an edit → the AI)
+  if (del && !hasLast && !ws.every(x => DEL.test(x) || ENTRY.test(x) || FILLER.has(x))) {
+    if (!/^(σβησ|σβην|διεγραψ|διαγραψ|delete|remove)/.test(ws[0] ?? '') && !ws.some(x => ENTRY.test(x))) return false;
+    return deleteDescribed(ws, text);
+  }
+  if (!hasLast && !(del && ws.every(x => DEL.test(x) || ENTRY.test(x) || FILLER.has(x)))) return false;   // "σβήσε" alone = the last one too
   const t = lastTx();
   if (!t) { toast('Nothing to change yet'); return true; }
 
   if (del) {
-    if (!ws.every(x => DEL.test(x) || LAST.test(x) || FILLER.has(x))) return false;   // "σβήσε τον καφέ των 3" → the AI
+    if (!ws.every(x => DEL.test(x) || LAST.test(x) || ENTRY.test(x) || FILLER.has(x))) return false;   // "σβήσε τον καφέ των 3" → the AI
     remove('transactions', t.id);
     toast(`Deleted ${describe(t)}`, { label: 'Undo', run: () => restore('transactions', t.id) }, { ms: 6000 });
     return true;
