@@ -6,7 +6,6 @@ import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs } from '../lib/store';
-import { exportCsv } from '../lib/import1money';
 import { REMOTE } from '../lib/supabase';
 import { todayISO } from '../lib/format';
 
@@ -38,7 +37,8 @@ function Body() {
   const analytics = useStore(s => !!s.prefs.analytics);
   const [voiceAuto, setVoiceAuto] = useState(voiceAutoSave);
 
-  const doExport = () => {
+  const doExport = async () => {
+    const { exportCsv } = await import('../lib/import1money');   // the CSV library loads only when you export
     const blob = new Blob([exportCsv()], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

@@ -154,23 +154,40 @@ export async function boot() {
     runLocalRecurring();
     return;
   }
-  const { data } = await supabase!.auth.getSession();
-  await onSession(data.session);
+  // open at once with what's on the phone; the sign-in is checked in the background
+  // (an hour after the last use it needs the network to refresh, which used to keep the screen blank)
+  let shown = false;
+  try {
+    const u = JSON.parse(localStorage.getItem(LAST_USER) ?? 'null') as AppUser | null;
+    if (u?.id) { setState({ user: u }); await loadCache(); setState({ phase: 'ready' }); shown = true; }
+  } catch { /* ignore */ }
+  const { data, error } = await supabase!.auth.getSession();
+  // no answer from the network (offline, weak signal): keep showing the phone's data; it syncs when back online
+  const noNetwork = !!error && (error.name === 'AuthRetryableFetchError' || !navigator.onLine);   // vs. a sign-in that's no longer valid
+  if (!(shown && !data.session && noNetwork)) await onSession(data.session);
   supabase!.auth.onAuthStateChange((_e, session) => {
     if ((session?.user.id ?? null) !== (state.user?.id ?? null)) void onSession(session);
   });
 }
 
+const LAST_USER = 'money:last-user';
+type AppUser = { id: string; email: string | null };
+
 async function onSession(session: Session | null) {
   if (!session) {
+    try { localStorage.removeItem(LAST_USER); } catch { /* ignore */ }
     queue = []; failedOps = [];
     prefsPending = false;
     setState({ user: null, phase: 'auth', accounts: {}, categories: {}, transactions: {}, recurring: {}, profiles: {}, members: [], lastSync: null, prefs: {}, ...emptyTracker() });
     return;
   }
-  setState({ user: { id: session.user.id, email: session.user.email ?? null } });
-  await loadCache();
-  setState({ phase: 'ready' });
+  const user: AppUser = { id: session.user.id, email: session.user.email ?? null };
+  try { localStorage.setItem(LAST_USER, JSON.stringify(user)); } catch { /* ignore */ }
+  if (!(state.phase === 'ready' && state.user?.id === user.id)) {   // already open with this user's data → just sync
+    setState({ user });
+    await loadCache();
+    setState({ phase: 'ready' });
+  }
   void sync();
 }
 
