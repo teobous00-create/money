@@ -8,7 +8,7 @@ import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
 import type { Freq, Recurring, Tx, TxType } from '../lib/types';
-import { learn, unmarkVoice } from '../lib/voiceRun';
+import { learn, learnFromFix, unmarkVoice } from '../lib/voiceRun';
 import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
 import { type Parsed } from '../lib/quickparse';
 import { setRuleTime, setTxTime, timeOf } from '../lib/txTime';
@@ -164,6 +164,7 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     try { localStorage.setItem('money:lastacc:' + type, accountId!); } catch { /* ignore */ }
     // you corrected the category the phrase gave → remember those words for next time
     if (parsed.current && type !== 'transfer' && categoryId && parsed.current.categoryId !== categoryId) learn(parsed.current.words, categoryId);
+    else if (editing && type !== 'transfer' && categoryId) learnFromFix(editing.id, categoryId);   // an entry said a moment ago, category fixed
     if (editing) unmarkVoice(editing.id);   // checked: the 🎤 mark goes away
     haptic(12);
     toast(msg);

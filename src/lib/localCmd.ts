@@ -13,7 +13,7 @@ import { DAY_ALIASES, EVE_ALIASES } from './voice';
 import { writeShift } from './tracker';
 import { relativeDay } from './format';
 import { isPending } from './txTime';
-import { voiceCtxNow } from './voiceRun';
+import { learnFromFix, voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
 import type { Tx } from './types';
 
@@ -156,6 +156,7 @@ export function tryLocalEdit(text: string): boolean {
   const changed = next.amount !== t.amount || next.date !== t.date || next.category_id !== t.category_id || next.account_id !== t.account_id;
   if (!changed) return false;   // nothing we could read → the AI
   put('transactions', next);
+  if (next.category_id !== t.category_id) learnFromFix(t.id, next.category_id);   // "άλλαξε το τελευταίο σε delivery" teaches too
   toast(`Changed: ${describe(next)}`, { label: 'Undo', run: () => put('transactions', t) }, { ms: 6000 });
   return true;
 }

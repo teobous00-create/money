@@ -4,6 +4,7 @@ import { setUi } from './ui';
 import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } from './format';
 import { catName, alive } from './calc';
 import { complete, type Cmd, type VoiceCtx } from './voice';
+import { norm } from './quickparse';
 import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf } from './tracker';
 import { toast } from '../components/ui';
 import type { Recurring, Tx, TxType } from './types';
@@ -50,6 +51,39 @@ export function learn(words: string[], categoryId: string) {
   const m = { ...loadLearned() };
   for (const w of words) m[w] = categoryId;
   setPrefs({ learned: m });
+}
+
+// what you said for an entry saved by voice, kept 2 hours (this phone): fix its category in that time → it learns
+const WORDS = 'money:voice-words';
+const KEEP = 2 * 3600e3;
+type Said = Record<string, { w: string[]; rest: string[]; cat: string | null; at: number }>;
+function readWords(): Said {
+  let m: Said = {};
+  try { m = JSON.parse(localStorage.getItem(WORDS) ?? '{}'); } catch { /* ignore */ }
+  const now = Date.now();
+  for (const k of Object.keys(m)) if (now - m[k].at > KEEP) delete m[k];
+  return m;
+}
+const writeWords = (m: Said) => { try { localStorage.setItem(WORDS, JSON.stringify(m)); } catch { /* ignore */ } };
+function rememberWords(id: string, words: string[], note: string, cat: string | null) {
+  const rest = [...new Set(norm(note).split(/[^\p{L}]+/u).filter(x => x.length >= 3))].slice(0, 2);
+  if (!words.length && !rest.length) return;
+  writeWords({ ...readWords(), [id]: { w: words, rest, cat, at: Date.now() } });
+}
+/** You changed the category of an entry you'd said a moment ago → learn its words for that category. */
+export function learnFromFix(id: string, newCat: string | null): boolean {
+  const m = readWords();
+  const e = m[id];
+  if (!e || !newCat || e.cat === newCat) return false;
+  // words that matched a category by its own name ("delivery") stay with it; then the other words of the phrase are what you meant
+  const known = loadLearned();
+  const fromName = e.cat !== null && !e.w.some(w => known[w]);
+  const words = fromName ? e.rest : e.w;
+  if (!words.length) return false;
+  learn(words, newCat);
+  delete m[id];
+  writeWords(m);
+  return true;
 }
 
 // ---------------------------------------------------------------- context
@@ -122,6 +156,7 @@ function saveTx(c: Extract<Cmd, { kind: 'tx' }>): Done | null {
   }
   put('transactions', tx);
   mark(tx.id);
+  if (type !== 'transfer') rememberWords(tx.id, p.words, p.note, tx.category_id);
   const what = type === 'transfer' ? `${st.accounts[account]?.name} → ${st.accounts[to!]?.name}` : `${catName(tx.category_id, st.categories, false)} · ${st.accounts[account]?.name}`;
   const rep = c.repeat ? ` · ${c.repeat === 'monthly' ? 'every month' : c.repeat === 'weekly' ? 'every week' : 'every year'}` : '';
   return {
