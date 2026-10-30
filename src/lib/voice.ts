@@ -6,7 +6,7 @@
  *  - entries:     "netflix 12,49 κάθε μήνα", "καφές 3, supermarket 20 και τσιγάρα 5,5"
  */
 import { fromISO, round2, toISO } from './format';
-import { NUMWORDS, MONTHS, clean, norm, parseNumber, parseQuick, sameWord, type ParseCtx, type Parsed } from './quickparse';
+import { NUMWORDS, MONTHS, clean, norm, parseNumber, parseQuick, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
 
 export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[]; hasShift?: (jobId: string, date: string) => boolean }
@@ -17,7 +17,7 @@ export type Cmd =
   | { kind: 'pnl'; strategy: Strategy; date: string; value: number | null }
   | { kind: 'payout'; job: Job; date: string; amount: number | null; bonus: number | null };
 
-const words = (text: string) => text.split(/\s+/).filter(Boolean).map(raw => ({ raw, n: clean(raw) }));
+const words = (text: string) => text.split(/\s+/).filter(Boolean).map(raw => ({ raw, n: clean(stripPunct(raw)) }));   // raw keeps commas for splitting
 
 // how you call each job ("πρωινή" → the day-rate job, "απογευματινή / βράδυ" → the hourly one)
 export const DAY_ALIASES = ['πρωινη', 'πρωινο', 'πρωι', 'morning'];
@@ -134,7 +134,14 @@ function splitEntries(text: string, ctx: VoiceCtx): string[] {
     }
     out.push(body);
   }
-  return out.filter(s => s.trim());
+  // a piece with no amount ("χθες, καφές 3", "καφές 3, χθες") belongs to its neighbour, not a new entry
+  const res: string[] = [];
+  for (const s of out.filter(x => x.trim())) {
+    if (res.length && parseQuick(s, ctx).amount === null) res[res.length - 1] += ' ' + s;
+    else res.push(s);
+  }
+  if (res.length > 1 && parseQuick(res[0], ctx).amount === null) res.splice(0, 2, res[0] + ' ' + res[1]);
+  return res;
 }
 
 export function interpret(text: string, ctx: VoiceCtx): Cmd[] {

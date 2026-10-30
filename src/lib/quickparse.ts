@@ -68,6 +68,9 @@ export function sameWord(a: string, b: string) {
 
 interface Tok { raw: string; n: string; used: boolean }
 
+/** Dictation adds punctuation ("χθες.", "3,", "«καφές»"): drop it around a word, keep it inside numbers ("12,50", "15/10"). */
+export const stripPunct = (raw: string) => raw.replace(/^[«"'“‘(\[]+/, '').replace(/[.,;;:!?…»"'”’)\]]+$/, '');
+
 export function parseNumber(t: string): number | null {
   const s = t.replace(/€|ευρω|eur/g, '');
   if (!/^\d+([.,]\d+)*$/.test(s)) return null;
@@ -78,6 +81,7 @@ export function parseNumber(t: string): number | null {
 
 export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   const toks: Tok[] = text.replace(/(\d)\s*€/g, '$1 €').replace(/(\d)([^\d\s.,/€-])/g, '$1 $2').split(/\s+/).filter(Boolean)
+    .map(stripPunct).filter(Boolean)
     .map(raw => ({ raw, n: clean(raw), used: false })).filter(t => t.n || t.raw === '€');
   const out: Parsed = { type: null, amount: null, accountId: null, toAccountId: null, categoryId: null, date: null, note: '', words: [] };
   const nt = (i: number) => toks[i]?.n ?? '';
@@ -103,22 +107,38 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   for (let i = 0; i < toks.length && !out.date; i++) {
     const w = nt(i);
     if (toks[i].used) continue;
-    const take = (d: string, n = 1) => { out.date = d; for (let k = 0; k < n; k++) toks[i + k].used = true; };
+    const take = (d: string, n = 1) => {
+      out.date = d;
+      for (let k = 0; k < n; k++) toks[i + k].used = true;
+      if (/^(στισ|στην|στη|την|τη|on)$/.test(nt(i - 1)) && !toks[i - 1].used) toks[i - 1].used = true;   // "στις 15/10", "την Τρίτη"
+    };
     if (w === 'σημερα' || w === 'today') take(today);
     else if (w === 'χθεσ' || w === 'yesterday') take(addDays(today, -1));
     else if (w === 'προχθεσ' || w === 'προχτεσ') take(addDays(today, -2));
     else if (w === 'αυριο' || w === 'tomorrow') take(addDays(today, 1));
+    else if (w === 'μεθαυριο') take(addDays(today, 2));
     else if ((w === 'πριν' || w === 'before') && /^\d+$/.test(nt(i + 1)) && /^(μερ|ημερ|day)/.test(nt(i + 2))) take(addDays(today, -Number(nt(i + 1))), 3);
     else if (/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(w)) {
       const [d, m, y] = w.split('/').map(Number);
       take(toISO(new Date(y ? (y < 100 ? 2000 + y : y) : T.getFullYear(), m - 1, d)));
     } else {
       const day = DAYS.find(([names]) => names.some(n => sameWord(w, n)));
-      if (day) { let d = today; for (let k = 0; k < 7 && fromISO(d).getDay() !== day[1]; k++) d = addDays(d, -1); take(d); continue; }
-      // "15 οκτωβρίου" / "στις 15"
+      if (day) {
+        // "Τρίτη" = the latest one (today counts); "περασμένη Τρίτη" = before today; "επόμενη Τρίτη" = after today
+        const before = nt(i - 1);
+        const past = /^(προηγουμεν\p{L}*|περασμεν\p{L}*|last)$/u.test(before), next = /^(επομεν\p{L}*|ερχομεν\p{L}*|next)$/u.test(before);
+        const step = next ? 1 : -1;
+        let d = next || past ? addDays(today, step) : today;
+        for (let k = 0; k < 7 && fromISO(d).getDay() !== day[1]; k++) d = addDays(d, step);
+        if (past || next) toks[i - 1].used = true;
+        take(d); continue;
+      }
+      // "15 οκτωβρίου", "1η Νοεμβρίου", "15 του μήνα", "στις 15"
       if (/^\d{1,2}$/.test(w)) {
-        const mon = MONTHS.find(([names]) => names.some(n => nt(i + 1).startsWith(n)));
-        if (mon) { take(toISO(new Date(T.getFullYear(), mon[1], Number(w))), 2); continue; }
+        const ord = /^(η|ησ|ο|ου|α|st|nd|rd|th)$/.test(nt(i + 1)) ? 1 : 0;   // "1η" is split into "1 η"
+        const mon = MONTHS.find(([names]) => names.some(n => nt(i + 1 + ord).startsWith(n)));
+        if (mon) { take(toISO(new Date(T.getFullYear(), mon[1], Number(w))), 2 + ord); continue; }
+        if (nt(i + 1 + ord) === 'του' && /^μην/.test(nt(i + 2 + ord))) { take(toISO(new Date(T.getFullYear(), T.getMonth(), Number(w))), 3 + ord); continue; }
         if (nt(i - 1) === 'στισ' || nt(i - 1) === 'on') {
           const n = Number(w);
           let d = new Date(T.getFullYear(), T.getMonth(), n);
