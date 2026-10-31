@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeftRight, Minus, Plus, Trash2 } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, Toggle, toast, ease } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, put, remove, restore } from '../lib/store';
+import { useStore, put, remove, restore, getState, setPrefs } from '../lib/store';
 import { useBalances, useAccounts } from '../lib/calc';
 import { ICON_NAMES, COLORS } from '../lib/icons';
 import { money, num, round2, uuid } from '../lib/format';
@@ -38,14 +38,21 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
   const [limit, setLimit] = useState(show(acc?.credit_limit));
   const [goal, setGoal] = useState(show(acc?.goal));
   const [archived, setArchived] = useState(acc?.archived ?? false);
+  const wasTrading = useStore(s => !!acc && (s.prefs.tradingAccounts ?? []).includes(acc.id));
+  const [trading, setTrading] = useState(wasTrading);
   const [confirmDel, setConfirmDel] = useState(false);
 
   const save = () => {
     if (!name.trim()) return toast('Give the account a name');
     const target = parseNum(balance);
     const opening = acc ? round2(acc.opening_balance + (target - current)) : target;
+    const id = acc?.id ?? uuid();
+    if (trading !== wasTrading) {
+      const list = (getState().prefs.tradingAccounts ?? []).filter(x => x !== id);
+      setPrefs({ tradingAccounts: trading ? [...list, id] : list });
+    }
     put('accounts', {
-      id: acc?.id ?? uuid(), owner_id: acc?.owner_id ?? '', name: name.trim(), kind, icon, color, opening_balance: opening,
+      id, owner_id: acc?.owner_id ?? '', name: name.trim(), kind, icon, color, opening_balance: opening,
       credit_limit: kind === 'credit' && limit ? parseNum(limit) : null, goal: kind === 'savings' && goal ? parseNum(goal) : null,
       archived, sort: acc?.sort ?? Math.max(0, ...accounts.map(a => a.sort)) + 1,
     });
@@ -111,6 +118,11 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
           {ICON_NAMES.map(n => <button key={n} className={n === icon ? 'on' : ''} onClick={() => setIcon(n)} aria-label={n}><Icon name={n} size={20} /></button>)}
         </div>
       </div>
+      {kind !== 'credit' && (
+        <div className="list" style={{ marginBottom: 14 }}>
+          <div className="list-row"><span className="grow">Trading capital<div className="tiny muted">Money in a broker or prop account: shown apart, and not counted as your cash until you move it out</div></span><Toggle on={trading} onChange={setTrading} /></div>
+        </div>
+      )}
       {acc && (
         <div className="list" style={{ marginBottom: 14 }}>
           <div className="list-row"><span className="grow">Archived<div className="tiny muted">Hidden from lists and totals, history kept</div></span><Toggle on={archived} onChange={setArchived} /></div>

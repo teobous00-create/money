@@ -30,6 +30,7 @@ export interface UiState {
   listenNow?: boolean;          // start the top mic right away (app-icon shortcut)
   shiftDay?: string | null;   // open this day's shift (shortcut, voice)
   payJob?: string | null;     // open "got paid" for this job (voice)
+  levels?: boolean;           // the level card
 }
 
 const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview', 'tracker'];

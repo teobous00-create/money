@@ -15,8 +15,13 @@ export function AccountsScreen() {
   const me = useStore(s => s.user?.id);
   const [showArchive, setShowArchive] = useState(false);
 
-  const regular = accounts.filter(a => !a.archived && a.kind !== 'savings');
-  const savings = accounts.filter(a => !a.archived && a.kind === 'savings');
+  const tradingIds = useStore(s => s.prefs.tradingAccounts);
+  const isTrading = (a: Account) => (tradingIds ?? []).includes(a.id);
+  // Accounts · Trading capital · Savings · Debts (credit cards)
+  const regular = accounts.filter(a => !a.archived && a.kind === 'regular' && !isTrading(a));
+  const trading = accounts.filter(a => !a.archived && isTrading(a));
+  const savings = accounts.filter(a => !a.archived && a.kind === 'savings' && !isTrading(a));
+  const debts = accounts.filter(a => !a.archived && a.kind === 'credit');
   const archived = accounts.filter(a => a.archived);
   const sum = (l: Account[]) => round2(l.reduce((s, a) => s + (bal.get(a.id) ?? 0), 0));
 
@@ -69,10 +74,22 @@ export function AccountsScreen() {
                 <div className="list">{regular.map((a, i) => <Row key={a.id} a={a} i={i} />)}</div>
               </div>
             )}
+            {trading.length > 0 && (
+              <div className="section">
+                <div className="section-head"><span className="section-title">Trading capital</span><Money value={sum(trading)} className="bold" /></div>
+                <div className="list">{trading.map((a, i) => <Row key={a.id} a={a} i={i + regular.length} />)}</div>
+              </div>
+            )}
             {savings.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Savings</span><Money value={sum(savings)} className="bold" /></div>
-                <div className="list">{savings.map((a, i) => <Row key={a.id} a={a} i={i + regular.length} />)}</div>
+                <div className="list">{savings.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length} />)}</div>
+              </div>
+            )}
+            {debts.length > 0 && (
+              <div className="section">
+                <div className="section-head"><span className="section-title">Debts</span><Money value={sum(debts)} className="bold" colorize /></div>
+                <div className="list">{debts.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length + savings.length} />)}</div>
               </div>
             )}
             {archived.length > 0 && (

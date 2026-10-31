@@ -30,6 +30,7 @@ import { FilterSheet } from './sheets/Filter';
 import { PeriodSheet } from './sheets/PeriodPicker';
 import { RecurringSheet } from './sheets/Recurring';
 import { HiddenSheet } from './sheets/Hidden';
+import { LevelBadge, LevelSheet, LevelWatch } from './components/Level';
 
 const MODE_SHORT: Record<PeriodMode, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year', all: 'All' };
 
@@ -127,6 +128,7 @@ function TopBar() {
   const failed = useStore(s => s.failed);
   const tab = useUi(u => u.tab);
   const name = (user && profiles[user.id]?.display_name) || user?.email || 'Me';
+  const ai = useStore(s => !!s.prefs.analytics);   // the level is only on your account
   const right: Record<UiState['tab'], ReactNode> = {
     accounts: <button className="iconbtn" aria-label="Add account" onClick={() => setUi({ account: {} })}><Plus size={24} /></button>,
     categories: <button className="iconbtn" aria-label="New category" onClick={() => setUi({ category: {} })}><Pencil size={20} /></button>,
@@ -136,10 +138,13 @@ function TopBar() {
     tracker: <span />,
   };
   return (
-    <div className="topbar">
-      <button className="iconbtn" aria-label="Settings" onClick={() => setUi({ settings: true })}>
-        <div className="avatar">{name.slice(0, 1).toUpperCase()}{(pending > 0 || failed > 0) && <span className="sync-dot" style={failed ? { background: 'var(--expense)' } : undefined} />}</div>
-      </button>
+    <div className="topbar" style={ai ? { gridTemplateColumns: '84px 1fr 84px' } : undefined}>
+      <div className="row" style={{ gap: 2 }}>
+        <button className="iconbtn" aria-label="Settings" onClick={() => setUi({ settings: true })}>
+          <div className="avatar">{name.slice(0, 1).toUpperCase()}{(pending > 0 || failed > 0) && <span className="sync-dot" style={failed ? { background: 'var(--expense)' } : undefined} />}</div>
+        </button>
+        {ai && <LevelBadge />}
+      </div>
       <button className="total-btn" onClick={() => setUi({ filter: true })}>
         <span className="total-label">{count} {count === 1 ? 'account' : 'accounts'} <ChevronDown size={14} /></span>
         <Money value={total} className={`total-value ${total < 0 ? 'neg' : ''}`} />
@@ -256,6 +261,8 @@ function Sheets() {
       <RecurringSheet />
       {importerEver && <Suspense fallback={null}><ImportSheet /></Suspense>}
       <HiddenSheet />
+      <LevelSheet />
+      <LevelWatch />
     </>
   );
 }

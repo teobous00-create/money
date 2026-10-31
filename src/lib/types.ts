@@ -153,6 +153,8 @@ export interface Prefs {
   reviews?: Record<string, Review>; // 'YYYY-MM' → monthly review written by the AI
   aiUsage?: { day: string; count: number }; // written by the server only
   goals?: Record<string, number>;   // goal categories: id → target € (0 = no target); still expenses, with progress
+  tradingAccounts?: string[];      // account ids that hold trading capital (not counted as your cash until withdrawn)
+  lastLevel?: number;              // the level last celebrated
   homeSeeded?: number;              // household budgets taken from the Excel (version)
   learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
 }
