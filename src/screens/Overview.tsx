@@ -167,8 +167,6 @@ export function OverviewScreen() {
         ))}
       </div>
 
-      {period.mode === 'month' && <BudgetsCard anchor={period.anchor} />}
-
       <div className="section">
         <div className="list">
           {ranked.length === 0 && <div className="list-row muted small">No {type === 'expense' ? 'expenses' : 'income'} in this period.</div>}
@@ -205,6 +203,8 @@ export function OverviewScreen() {
           )}
         </div>
       </div>
+
+      {period.mode === 'month' && <BudgetsCard anchor={period.anchor} />}
     </div>
   );
 }
