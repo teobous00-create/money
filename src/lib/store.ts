@@ -93,9 +93,11 @@ async function saveQueue() {
 async function saveNow() {
   if (!state.user) return;
   const { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, jobs, shifts, payouts, strategies, pnl } = state;
-  await idbSet(cacheKey(), { accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending, jobs, shifts, payouts, strategies, pnl });
+  await idbSet(cacheKey(), { v: CACHE_V, accounts, categories, transactions, recurring, profiles, members, lastSync, prefs, prefsPending, jobs, shifts, payouts, strategies, pnl });
   await idbSet(queueKey(), { queue, failedOps });
 }
+/** Bump to make every phone reload everything from the server once (a full pull; your unsent changes are kept). */
+const CACHE_V = 2;
 // leaving the app (switching away, locking the phone): write everything now
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'hidden' || (saveTimer === undefined && idleSave === undefined)) return;
@@ -128,7 +130,7 @@ async function loadCache() {
   if (c) {
     setState({
       accounts: c.accounts ?? {}, categories: c.categories ?? {}, transactions: c.transactions ?? {},
-      recurring: c.recurring ?? {}, profiles: c.profiles ?? {}, members: c.members ?? [], lastSync: c.lastSync ?? null,
+      recurring: c.recurring ?? {}, profiles: c.profiles ?? {}, members: c.members ?? [], lastSync: c.v === CACHE_V ? c.lastSync ?? null : null,
       prefs: c.prefs ?? (REMOTE ? {} : { analytics: true }),
       jobs: c.jobs ?? {}, shifts: c.shifts ?? {}, payouts: c.payouts ?? {}, strategies: c.strategies ?? {}, pnl: c.pnl ?? {},
     });
@@ -173,7 +175,9 @@ export async function boot() {
 const LAST_USER = 'money:last-user';
 type AppUser = { id: string; email: string | null };
 
+let sessionReady = false;   // set once the sign-in is confirmed; nothing talks to the server before that
 async function onSession(session: Session | null) {
+  sessionReady = !!session;
   if (!session) {
     try { localStorage.removeItem(LAST_USER); } catch { /* ignore */ }
     queue = []; failedOps = [];
@@ -341,6 +345,12 @@ function isNetworkError(e: { message?: string; code?: string }) {
   return !navigator.onLine || /fetch|network|Failed to|timeout|Load failed/i.test(e.message ?? '') || e.code === '';
 }
 
+/** Reload everything from the server (unsent changes stay and are sent first). */
+export function resyncAll(): Promise<void> {
+  setState({ lastSync: null });
+  return sync();
+}
+
 export function discardFailed() {
   failedOps = [];
   setState({ failed: 0 });
@@ -349,7 +359,7 @@ export function discardFailed() {
 
 let syncing: Promise<void> | null = null;
 export function sync(): Promise<void> {
-  if (!REMOTE || !state.user || !navigator.onLine) return Promise.resolve();
+  if (!REMOTE || !state.user || !navigator.onLine || !sessionReady) return Promise.resolve();
   if (syncing) return syncing;
   syncing = (async () => {
     setState({ syncing: true });
@@ -395,6 +405,8 @@ async function pull() {
     fetchAll('accounts', since), fetchAll('categories', since), fetchAll('transactions', since),
     fetchAll('recurring', since), supabase!.from('profiles').select('id,email,display_name'),
   ]);
+  // an empty answer to a full pull while this phone has entries means the request wasn't really signed in: don't wipe anything
+  if (full && !acc.length && !cat.length && !tx.length && Object.keys(state.transactions).length > 0) { console.warn('empty full pull ignored'); return; }
   const pendingIds = new Set(queue.map(o => o.table + ':' + o.row.id));
   let maxTs = state.lastSync ?? '';
   const merge = <T extends { id: string; updated_at?: string }>(table: Table, current: Rec<T>, rows: Record<string, unknown>[]) => {

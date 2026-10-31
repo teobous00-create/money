@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic } from 'lucide-react';
+import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic, RefreshCw } from 'lucide-react';
 import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
 import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs } from '../lib/store';
+import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs, resyncAll } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
 import { todayISO } from '../lib/format';
 
@@ -105,6 +105,7 @@ function Body() {
       </div>
 
       <div className="section list">
+        {REMOTE && <button className="list-row" onClick={() => { toast('Reloading everything from the server…'); void resyncAll().then(() => toast('Up to date')); }}><RefreshCw size={21} /><span className="grow">Reload everything from the server<div className="tiny muted">If something looks missing or wrong on this phone</div></span></button>}
         {REMOTE && <button className="list-row" onClick={() => void signOut()}><LogOut size={21} /><span className="grow">Sign out</span></button>}
         <button className="list-row" style={{ color: 'var(--expense)' }} onClick={() => setConfirmWipe(v => !v)}><Trash2 size={21} /><span className="grow">Delete all my data</span></button>
       </div>
