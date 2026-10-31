@@ -13,7 +13,6 @@ import { DAY_ALIASES, EVE_ALIASES } from './voice';
 import { writeShift } from './tracker';
 import { relativeDay } from './format';
 import { isPending } from './txTime';
-import { goalIdsNow, isGoalTx } from './goals';
 import { learnFromFix, voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
 import type { Tx } from './types';
@@ -249,9 +248,8 @@ export function tryLocalAsk(text: string): boolean {
   const ids = cat ? new Set([cat.id, ...Object.values(s.categories).filter(c => c.parent_id === cat.id).map(c => c.id)]) : null;
   const range = per ?? (p.date ? { from: p.date, to: p.date, label: p.date === today ? 'today' : p.date === addDays(today, -1) ? 'yesterday' : shortDate(p.date) }
     : { from: toISO(new Date(fromISO(today).getFullYear(), fromISO(today).getMonth(), 1)), to: today, label: 'this month' });
-  const goals = goalIdsNow();
   const list = mine.filter(t => t.type === type && t.date >= range.from && t.date <= range.to && !isPending(t, today)
-    && (ids ? (t.category_id && ids.has(t.category_id)) : !isGoalTx(t, goals)) && (!p.accountId || t.account_id === p.accountId));   // "πόσα ξόδεψα" leaves goal money out
+    && (!ids || (t.category_id && ids.has(t.category_id))) && (!p.accountId || t.account_id === p.accountId));
   const total = list.reduce((x, t) => x + t.amount, 0);
   const what = cat ? catName(cat.id, s.categories, false) : type === 'income' ? 'Income' : 'Spent';
   const acc = p.accountId ? ` · ${s.accounts[p.accountId]?.name}` : '';

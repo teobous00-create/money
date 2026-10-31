@@ -8,7 +8,6 @@ import { setUi } from '../lib/ui';
 import { BudgetLine } from './Budget';
 import { IconBox } from './ui';
 import type { Category } from '../lib/types';
-import { goalIds } from '../lib/goals';
 
 /** What the household lives on: each category's share is shown against it. */
 const BASE = 2500;
@@ -35,15 +34,13 @@ const ym = (d: string) => d.slice(0, 7);
 export function HouseholdCard({ anchor }: { anchor: string }) {
   const cats = useStore(s => s.categories);
   const budgets = useStore(s => s.prefs.budgets);
-  const goals = useStore(s => s.prefs.goals);
   const txs = useTxs();
   const tv = useTimesVersion();
   const data = useMemo(() => {
     const live = alive(cats);
     const root = live.find(isHome);
     if (!root) return null;
-    const gl = goalIds(goals, cats);
-    const subs = live.filter(c => c.parent_id === root.id && !c.archived && !gl.has(c.id));   // goals are savings, not household spending
+    const subs = live.filter(c => c.parent_id === root.id && !c.archived);
     const ids = new Set([root.id, ...subs.map(s => s.id)]);
     const a = fromISO(anchor);
     const from = toISO(new Date(a.getFullYear(), a.getMonth(), 1)), to = toISO(new Date(a.getFullYear(), a.getMonth() + 1, 0));
@@ -70,7 +67,7 @@ export function HouseholdCard({ anchor }: { anchor: string }) {
     const budgetTotal = round2(rows.reduce((s, r) => s + (r.budget ?? 0), 0));
     const avgTotal = months.length ? round2(rows.reduce((s, r) => s + (r.avg ?? 0), 0)) : null;
     return { root, subs, rows, total, budgetTotal, avgTotal, months: months.length, label: monthFmt.format(a) };
-  }, [cats, budgets, goals, txs, anchor, tv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cats, budgets, txs, anchor, tv]); // eslint-disable-line react-hooks/exhaustive-deps
   // once: the Excel's budgets become your budgets (only where none is set; Delivery 200 → 150)
   const seeded = useStore(s => s.prefs.homeSeeded ?? 0);
   useEffect(() => {

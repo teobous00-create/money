@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { isPending, useTimesVersion } from './txTime';
-import { isGoalTx, useGoalIds } from './goals';
 import { useStore } from './store';
 import { useTxs, useSelection, useSharedRoots } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
@@ -140,14 +139,13 @@ export function useCategoryCompare(anchor: string) {
 export function useSavings(anchor: string) {
   const txs = useTxs();
   const me = useStore(s => s.user?.id ?? '');
-  const goals = useGoalIds();
   return useMemo(() => {
     const today = todayISO();
     const [a, b] = [monthStart(anchor), monthEnd(anchor)];
     const [pa, pb] = prev3(anchor);
     let inc = 0, exp = 0, pInc = 0, pExp = 0;
     for (const t of txs) {
-      if (t.owner_id !== me || t.type === 'transfer' || t.date > today || isGoalTx(t, goals)) continue;   // goal money is saved, not spent
+      if (t.owner_id !== me || t.type === 'transfer' || t.date > today) continue;
       const v = t.type === 'income' ? t.amount : -t.amount;
       if (t.date >= a && t.date <= b) { if (v > 0) inc += v; else exp -= v; }
       else if (t.date >= pa && t.date <= pb) { if (v > 0) pInc += v; else pExp -= v; }
@@ -156,7 +154,7 @@ export function useSavings(anchor: string) {
       income: round2(inc), expense: round2(exp), saved: round2(inc - exp),
       avgSaved: round2((pInc - pExp) / 3), avgIncome: round2(pInc / 3),
     };
-  }, [txs, me, anchor, goals]);
+  }, [txs, me, anchor]);
 }
 
 // ---------------------------------------------------------------- work

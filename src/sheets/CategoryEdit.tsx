@@ -88,7 +88,7 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
             <label className="grow" style={{ margin: 0 }}>Goal</label>
             <Toggle on={isGoal} onChange={setIsGoal} />
           </div>
-          <span className="tiny muted" style={{ paddingLeft: 4 }}>Money put in here is saved toward a goal, not spent: it stays out of expenses{isSub ? '' : ' (its subcategories too)'}.</span>
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Shows how far you are toward the target and when it's reached{isSub ? '' : '; its subcategories can each have their own'}. Still counts as an expense.</span>
           {isGoal && <input className="input num" style={{ marginTop: 8 }} inputMode="decimal" placeholder="Target € (optional)" value={goal} onChange={e => setGoalText(e.target.value)} />}
         </div>
       )}
@@ -96,7 +96,7 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         <div className="field">
           <label>Goal target</label>
           <input className="input num" inputMode="decimal" placeholder="No target" value={goal} onChange={e => { setGoalText(e.target.value); setIsGoal(true); }} />
-          <span className="tiny muted" style={{ paddingLeft: 4 }}>Part of a goal folder: never counts as spending. A target shows its progress and when it's done.</span>
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Part of a goal folder. A target shows its progress and when it's done.</span>
         </div>
       )}
       {type === 'expense' && !isGoal && !parentIsGoal && (

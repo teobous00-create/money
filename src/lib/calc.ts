@@ -5,7 +5,6 @@ import type { Account, Category, Recurring, Tx } from './types';
 import { round2, todayISO, addDays } from './format';
 import { nextOccurrence } from './store';
 import { isPending, useTimesVersion } from './txTime';
-import { goalIds } from './goals';
 
 export const alive = <T extends { deleted_at?: string | null }>(rec: Record<string, T>) =>
   Object.values(rec).filter(r => !r.deleted_at);
@@ -126,14 +125,13 @@ export function topCategoryId(catId: string | null, cats: Record<string, Categor
   return c?.parent_id ?? catId;
 }
 
-export function periodStats(txs: Tx[], period: Period, sel: Set<string>, cats: Record<string, Category>, goals: Set<string> = new Set()): PeriodStats {
+export function periodStats(txs: Tx[], period: Period, sel: Set<string>, cats: Record<string, Category>): PeriodStats {
   const [a, b0] = range(period);
   const today = todayISO();
   const b = b0 > today ? today : b0; // planned transactions don't count yet
   const res: PeriodStats = { txs: [], all: [], expense: 0, income: 0, byCat: new Map(), bySub: new Map(), byDay: new Map() };
   for (const t of txs) {
     if (t.date < a || t.date > b || isPending(t, today)) continue;
-    if (t.type === 'expense' && t.category_id && goals.has(t.category_id)) continue;   // put aside for a goal, not spent
     const touches = sel.has(t.account_id) || (t.to_account_id != null && sel.has(t.to_account_id));
     if (!touches) continue;
     res.all.push(t);
@@ -163,8 +161,7 @@ export function usePeriodStats(override?: Period) {
   const p = override ?? period;
   const today = todayISO();
   const v = useTimesVersion();
-  const goalPrefs = useStore(s => s.prefs.goals);
-  return useMemo(() => periodStats(txs, p, sel, cats, goalIds(goalPrefs, cats)), [txs, p, sel, cats, today, v, goalPrefs]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => periodStats(txs, p, sel, cats), [txs, p, sel, cats, today, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function catName(id: string | null, cats: Record<string, Category>, withParent = true): string {

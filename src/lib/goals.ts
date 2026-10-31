@@ -6,7 +6,7 @@ import { isPending, useTimesVersion } from './txTime';
 import type { Category, Tx } from './types';
 
 /**
- * Goal categories: what goes in them is money put aside, not spent.
+ * Goal categories: entries in them still count as expenses; the goal adds a target, progress and the day it was reached.
  * prefs.goals = category id → target € (0 = a goal without a target, e.g. a "Στόχοι" folder).
  * A goal's subcategories are goals too. Entries count from everyone who shares the category.
  */
