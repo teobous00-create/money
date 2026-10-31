@@ -113,19 +113,19 @@ function LevelBody({ st }: { st: LevelState }) {
           </div>
         ))}
       </div>
-      <div className="tiny faint" style={{ margin: '6px 4px 0' }}>Expenses (without goals) and passive income: average of the last 3 full months. Cash: today's balances minus card debt, without trading capital.</div>
+      <div className="tiny faint" style={{ margin: '6px 4px 0' }}>Expenses (without goals): average of the last 3 full months. Passive: the last 90 days ÷ 3. Cash: today's balances minus card debt, without trading capital.</div>
 
       {/* the year */}
       {hist.length > 1 && (
         <div className="card" style={{ padding: '12px 14px 8px', marginTop: 12 }}>
-          <div className="bold small" style={{ marginBottom: 10 }}>Your level, month by month</div>
+          <div className="bold small" style={{ marginBottom: 10 }}>The level each month closed at</div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 110 }}>
             {hist.map((h, i) => (
               <div key={h.month} style={{ flex: 1, display: 'grid', justifyItems: 'center', gap: 4, height: '100%', alignContent: 'end' }}>
                 <span className="tiny num bold" style={{ color: i === hist.length - 1 ? 'var(--accent)' : 'var(--ink-2)' }}>{h.level}</span>
                 <motion.div initial={{ height: 0 }} animate={{ height: `${((h.level + 0.35) / (TOP + 0.35)) * 76}px` }} transition={{ duration: 0.7, ease, delay: i * 0.04 }}
                   style={{ width: '100%', maxWidth: 22, borderRadius: 6, background: i === hist.length - 1 ? 'var(--accent)' : 'var(--surface-3)' }} />
-                <span className="tiny muted">{monthShort.format(new Date(h.month))}</span>
+                <span className="tiny muted">{i === hist.length - 1 ? 'Now' : monthShort.format(new Date(h.month))}</span>
               </div>
             ))}
           </div>

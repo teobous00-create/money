@@ -62,6 +62,7 @@ const nowHM = () => { const d = new Date(); return `${String(d.getHours()).padSt
 export function isPending(t: Tx, today = todayISO()): boolean {
   if (t.date > today) return true;
   if (t.date < today) return false;
+  if (today !== todayISO()) return false;   // a past day (month ends for levels): its entries all happened
   const tm = timeOf(t);
   return !!tm && nowHM() < tm;
 }

@@ -10,7 +10,7 @@ import type { Account } from './types';
  * rules AND every level below it. A rule = a measure, ≥ or ≤, and a value in €, in "× a month of
  * expenses", or in % (coverage).
  *   cash      cash after card debt, today (trading capital not counted)
- *   passive   P&L per month, average of the last 3 full months
+ *   passive   P&L per month: the last 90 days ÷ 3
  *   expenses  your expenses per month, same 3 months, without goals and transfers
  *   trading   trading capital today       savings   savings accounts today
  *   networth  every account today          coverage  passive ÷ expenses, in %
@@ -80,7 +80,8 @@ export function measuresAt(s: State, day: string): Measures {
   const firstAny = txs.reduce((m, t) => (t.owner_id === me && t.date < m ? t.date : m), day);
   const months = [1, 2, 3].map(k => monthsBack(day, k)).filter(m => lastDayOf(m) >= firstAny).length || 1;   // a new app has fewer than 3
   const expenses = round2(spent / months);
-  const passive = round2(alive(s.pnl).filter(p => p.date >= from && p.date <= to).reduce((x, p) => x + p.pnl, 0) / 3);
+  const p90 = addDays(day, -89);   // passive: the last 90 days, so a good or bad stretch shows at once
+  const passive = round2(alive(s.pnl).filter(p => p.date >= p90 && p.date <= day).reduce((x, p) => x + p.pnl, 0) / 3);
   return { cash, passive, expenses, trading: tradingCap, savings, networth: round2(cash + tradingCap), coverage: expenses > 0 ? round2((passive / expenses) * 100) : 0 };
 }
 
