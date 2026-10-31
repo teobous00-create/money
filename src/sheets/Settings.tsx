@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic, RefreshCw } from 'lucide-react';
 import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
@@ -6,6 +6,7 @@ import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs, resyncAll } from '../lib/store';
+import { deletedBatches, restoreBatch } from '../lib/recover';
 import { REMOTE } from '../lib/supabase';
 import { todayISO } from '../lib/format';
 
@@ -104,6 +105,8 @@ function Body() {
         )}
       </div>
 
+      <RecentlyDeleted />
+
       <div className="section list">
         {REMOTE && <button className="list-row" onClick={() => { toast('Reloading everything from the server…'); void resyncAll().then(() => toast('Up to date')); }}><RefreshCw size={21} /><span className="grow">Reload everything from the server<div className="tiny muted">If something looks missing or wrong on this phone</div></span></button>}
         {REMOTE && <button className="list-row" onClick={() => void signOut()}><LogOut size={21} /><span className="grow">Sign out</span></button>}
@@ -136,6 +139,36 @@ function AboutMe() {
         <span className="tiny muted">Sent with every chat and monthly review. Only you see it.</span>
         {dirty && <button className="small bold" style={{ color: 'var(--accent)' }} onClick={() => { setPrefs({ aboutMe: text.trim() }); toast('Saved'); }}>Save</button>}
       </div>
+    </div>
+  );
+}
+
+const whenFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** Big deletions of your own data in the last 30 days (a re-import that replaced everything, a deleted account…), with a way back. */
+function RecentlyDeleted() {
+  const txs = useStore(s => s.transactions);
+  const accs = useStore(s => s.accounts);
+  const list = useMemo(() => deletedBatches(), [txs, accs]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!list.length) return null;
+  return (
+    <div className="section">
+      <div className="section-head"><span className="section-title">Recently deleted</span></div>
+      <div className="list">
+        {list.slice(0, 6).map(b => (
+          <div key={b.at} className="list-row">
+            <span className="grow">
+              <span style={{ fontWeight: 600 }}>{b.tx} {b.tx === 1 ? 'entry' : 'entries'}{b.recurring ? ` · ${b.recurring} repeating` : ''}{b.accounts ? ` · ${b.accounts} account${b.accounts > 1 ? 's' : ''}` : ''}</span>
+              <div className="tiny muted">{whenFmt.format(new Date(b.at))}{b.names.length ? ` · ${b.names.join(', ')}` : ''}</div>
+            </span>
+            <button className="chip" style={{ height: 34 }} onClick={() => {
+              const r = restoreBatch(b.at);
+              toast(r.restored ? `Restored ${r.restored}${r.skipped ? ` · ${r.skipped} were already there` : ''}` : `Nothing missing · ${r.skipped} already there`);
+            }}>Restore</button>
+          </div>
+        ))}
+      </div>
+      <div className="tiny muted" style={{ padding: '6px 6px 0' }}>Brings back only what's missing: entries that are already there again (e.g. from a re-import) are skipped.</div>
     </div>
   );
 }
