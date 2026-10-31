@@ -8,7 +8,7 @@ import { parseNum } from '../sheets/AccountEdit';
 import { ease, toast } from './ui';
 
 const UNITS: Record<Unit, string> = { eur: '€', x: '× exp.', pct: '%' };   // × exp. = times a month of expenses
-const unitsFor = (m: Metric): Unit[] => (m === 'coverage' ? ['pct'] : m === 'expenses' ? ['eur'] : ['x', 'eur']);
+const unitsFor = (m: Metric): Unit[] => (m === 'coverage' ? ['pct'] : m === 'expenses' ? ['eur'] : m === 'investments' ? ['eur', 'x'] : ['x', 'eur']);
 const show = (v: number) => String(v).replace('.', ',');
 
 /** Your ladder: names, a line about each, and the rules (all must hold; every level also needs the ones below). */

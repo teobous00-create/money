@@ -155,6 +155,7 @@ export interface Prefs {
   aiUsage?: { day: string; count: number }; // written by the server only
   goals?: Record<string, number>;   // goal categories: id → target € (0 = no target); still expenses, with progress
   tradingAccounts?: string[];      // account ids that hold trading capital (not counted as your cash until withdrawn)
+  investmentAccounts?: string[];   // account ids that hold investments (not cash either; their own group and level measure)
   lastLevel?: number;              // the level last celebrated
   levelDefs?: LevelDef[];          // your own ladder of levels (empty = the defaults)
   homeSeeded?: number;              // household budgets taken from the Excel (version)

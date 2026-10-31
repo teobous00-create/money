@@ -113,7 +113,7 @@ function LevelBody({ st }: { st: LevelState }) {
           </div>
         ))}
       </div>
-      <div className="tiny faint" style={{ margin: '6px 4px 0' }}>Expenses (without goals): average of the last 3 full months. Passive: the last 90 days ÷ 3. Cash: today's balances minus card debt, without trading capital.</div>
+      <div className="tiny faint" style={{ margin: '6px 4px 0' }}>Expenses (without goals): average of the last 3 full months. Passive: the last 90 days ÷ 3. Cash: today's balances minus card debt, without trading capital and investments.</div>
 
       {/* the year */}
       {hist.length > 1 && (

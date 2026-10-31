@@ -9,20 +9,20 @@ import type { Account } from './types';
  * Levels are a ladder you define (prefs.levelDefs; these are the defaults). Each level needs ALL its
  * rules AND every level below it. A rule = a measure, ≥ or ≤, and a value in €, in "× a month of
  * expenses", or in % (coverage).
- *   cash      cash after card debt, today (trading capital not counted)
+ *   cash      cash after card debt, today (trading capital and investments not counted)
  *   passive   P&L per month: the last 90 days ÷ 3
  *   expenses  your expenses per month, same 3 months, without goals and transfers
- *   trading   trading capital today       savings   savings accounts today
+ *   trading   trading capital today       savings   savings accounts today   investments  investment accounts today
  *   networth  every account today          coverage  passive ÷ expenses, in %
  */
-export type Metric = 'cash' | 'passive' | 'expenses' | 'trading' | 'savings' | 'networth' | 'coverage';
+export type Metric = 'cash' | 'passive' | 'expenses' | 'trading' | 'savings' | 'investments' | 'networth' | 'coverage';
 export type Unit = 'eur' | 'x' | 'pct';
 export interface Rule { metric: Metric; op: '>=' | '<='; value: number; unit: Unit }
 export interface LevelDef { id: string; name: string; rule: string; rules: Rule[] }
 
 export const METRICS: Record<Metric, string> = {
   cash: 'Cash after card debt', passive: 'Passive income / month', expenses: 'Expenses / month',
-  trading: 'Trading capital', savings: 'Savings', networth: 'Net worth', coverage: 'Passive covers',
+  trading: 'Trading capital', savings: 'Savings', investments: 'Investments', networth: 'Net worth', coverage: 'Passive covers',
 };
 
 const r = (metric: Metric, value: number, unit: Unit = 'x', op: Rule['op'] = '>='): Rule => ({ metric, op, value, unit });
@@ -39,7 +39,7 @@ export const DEFAULT_LEVELS: LevelDef[] = [
 export const levelDefs = (s: Pick<State, 'prefs'>): LevelDef[] => (s.prefs.levelDefs?.length ? s.prefs.levelDefs : DEFAULT_LEVELS);
 
 export interface Need { label: string; have: number; need: number; met: boolean; op: Rule['op']; pct: boolean }
-export interface Measures { cash: number; passive: number; expenses: number; trading: number; savings: number; networth: number; coverage: number }
+export interface Measures { cash: number; passive: number; expenses: number; trading: number; savings: number; investments: number; networth: number; coverage: number }
 export interface LevelState extends Measures {
   level: number;
   defs: LevelDef[];
@@ -64,13 +64,15 @@ const holds = (def: LevelDef, m: Measures) => def.rules.every(x => needOf(x, m)?
 export function measuresAt(s: State, day: string): Measures {
   const me = s.user?.id;
   const trading = new Set(s.prefs.tradingAccounts ?? []);
+  const invest = new Set((s.prefs.investmentAccounts ?? []).filter(id => !trading.has(id)));
   const all: Account[] = alive(s.accounts).filter(a => a.owner_id === me);
   const txs = alive(s.transactions);
   const bal = computeBalances(all, txs, day);
   const sum = (l: Account[]) => round2(l.reduce((x, a) => x + (bal.get(a.id) ?? 0), 0));
-  const cash = sum(all.filter(a => !trading.has(a.id)));   // credit cards are negative while you owe
+  const cash = sum(all.filter(a => !trading.has(a.id) && !invest.has(a.id)));   // credit cards are negative while you owe
   const tradingCap = sum(all.filter(a => trading.has(a.id)));
-  const savings = sum(all.filter(a => a.kind === 'savings' && !trading.has(a.id)));
+  const investments = sum(all.filter(a => invest.has(a.id)));
+  const savings = sum(all.filter(a => a.kind === 'savings' && !trading.has(a.id) && !invest.has(a.id)));
 
   // the 3 full months before `day`'s month (the current one isn't over)
   const to = addDays(monthStart(day), -1), from = monthsBack(day, 3);
@@ -82,7 +84,7 @@ export function measuresAt(s: State, day: string): Measures {
   const expenses = round2(spent / months);
   const p90 = addDays(day, -89);   // passive: the last 90 days, so a good or bad stretch shows at once
   const passive = round2(alive(s.pnl).filter(p => p.date >= p90 && p.date <= day).reduce((x, p) => x + p.pnl, 0) / 3);
-  return { cash, passive, expenses, trading: tradingCap, savings, networth: round2(cash + tradingCap), coverage: expenses > 0 ? round2((passive / expenses) * 100) : 0 };
+  return { cash, passive, expenses, trading: tradingCap, savings, investments, networth: round2(cash + tradingCap + investments), coverage: expenses > 0 ? round2((passive / expenses) * 100) : 0 };
 }
 
 export function levelAt(s: State, day: string): LevelState {
@@ -99,7 +101,7 @@ export function levelAt(s: State, day: string): LevelState {
 export function useLevel(): LevelState | null {
   const s = useStore(x => x);
   return useMemo(() => (s.user && s.prefs.analytics ? levelAt(s, todayISO()) : null),
-    [s.accounts, s.transactions, s.pnl, s.prefs.tradingAccounts, s.prefs.goals, s.prefs.levelDefs, s.prefs.analytics, s.categories, s.user]); // eslint-disable-line react-hooks/exhaustive-deps
+    [s.accounts, s.transactions, s.pnl, s.prefs.tradingAccounts, s.prefs.investmentAccounts, s.prefs.goals, s.prefs.levelDefs, s.prefs.analytics, s.categories, s.user]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** The level at the end of each of the last 12 months, and today. */
@@ -117,5 +119,5 @@ export function useLevelHistory(): Array<{ month: string; level: number }> {
     }
     out.push({ month: monthStart(today), level: levelAt(s, today).level });
     return out;
-  }, [s.accounts, s.transactions, s.pnl, s.prefs.tradingAccounts, s.prefs.goals, s.prefs.levelDefs, s.categories, s.user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.accounts, s.transactions, s.pnl, s.prefs.tradingAccounts, s.prefs.investmentAccounts, s.prefs.goals, s.prefs.levelDefs, s.categories, s.user]); // eslint-disable-line react-hooks/exhaustive-deps
 }

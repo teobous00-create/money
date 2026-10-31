@@ -38,8 +38,9 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
   const [limit, setLimit] = useState(show(acc?.credit_limit));
   const [goal, setGoal] = useState(show(acc?.goal));
   const [archived, setArchived] = useState(acc?.archived ?? false);
-  const wasTrading = useStore(s => !!acc && (s.prefs.tradingAccounts ?? []).includes(acc.id));
-  const [trading, setTrading] = useState(wasTrading);
+  type Holds = 'cash' | 'trading' | 'invest';   // what the money is, for the groups and the levels
+  const wasHolds = useStore((s): Holds => (!acc ? 'cash' : (s.prefs.tradingAccounts ?? []).includes(acc.id) ? 'trading' : (s.prefs.investmentAccounts ?? []).includes(acc.id) ? 'invest' : 'cash'));
+  const [holds, setHolds] = useState<Holds>(wasHolds);
   const [confirmDel, setConfirmDel] = useState(false);
 
   const save = () => {
@@ -47,9 +48,11 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
     const target = parseNum(balance);
     const opening = acc ? round2(acc.opening_balance + (target - current)) : target;
     const id = acc?.id ?? uuid();
-    if (trading !== wasTrading) {
-      const list = (getState().prefs.tradingAccounts ?? []).filter(x => x !== id);
-      setPrefs({ tradingAccounts: trading ? [...list, id] : list });
+    const h = kind === 'credit' ? 'cash' : holds;
+    if (h !== wasHolds) {
+      const p = getState().prefs;
+      const t = (p.tradingAccounts ?? []).filter(x => x !== id), inv = (p.investmentAccounts ?? []).filter(x => x !== id);
+      setPrefs({ tradingAccounts: h === 'trading' ? [...t, id] : t, investmentAccounts: h === 'invest' ? [...inv, id] : inv });
     }
     put('accounts', {
       id, owner_id: acc?.owner_id ?? '', name: name.trim(), kind, icon, color, opening_balance: opening,
@@ -119,8 +122,10 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
         </div>
       </div>
       {kind !== 'credit' && (
-        <div className="list" style={{ marginBottom: 14 }}>
-          <div className="list-row"><span className="grow">Trading capital<div className="tiny muted">Money in a broker or prop account: shown apart, and not counted as your cash until you move it out</div></span><Toggle on={trading} onChange={setTrading} /></div>
+        <div className="field">
+          <label>Holds</label>
+          <Segmented value={holds} onChange={setHolds} options={[{ value: 'cash', label: 'Cash' }, { value: 'trading', label: 'Trading' }, { value: 'invest', label: 'Investments' }]} />
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Trading capital and investments get their own group and don't count as your cash in the levels.</span>
         </div>
       )}
       {acc && (

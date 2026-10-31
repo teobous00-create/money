@@ -22,12 +22,14 @@ function Body({ close }: { close: () => void }) {
   const [sel, setSel] = useState<Set<string>>(() => new Set(current));
   const toggle = (id: string) => { haptic(5); setSel(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
   const trading = new Set(useStore(s => s.prefs.tradingAccounts) ?? []);
+  const invest = new Set((useStore(s => s.prefs.investmentAccounts) ?? []).filter(id => !trading.has(id)));
   const mine = accounts.filter(a => a.owner_id === me);
   // same groups as the Accounts tab
   const groups: Array<[string, Account[]]> = [
-    ['Accounts', mine.filter(a => a.kind === 'regular' && !trading.has(a.id))],
+    ['Accounts', mine.filter(a => a.kind === 'regular' && !trading.has(a.id) && !invest.has(a.id))],
     ['Trading capital', mine.filter(a => trading.has(a.id))],
-    ['Savings', mine.filter(a => a.kind === 'savings' && !trading.has(a.id))],
+    ['Savings', mine.filter(a => a.kind === 'savings' && !trading.has(a.id) && !invest.has(a.id))],
+    ['Investments', mine.filter(a => a.kind !== 'credit' && invest.has(a.id))],
     ['Debts', mine.filter(a => a.kind === 'credit' && !trading.has(a.id))],
   ];
   return (

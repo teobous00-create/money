@@ -16,11 +16,14 @@ export function AccountsScreen() {
   const [showArchive, setShowArchive] = useState(false);
 
   const tradingIds = useStore(s => s.prefs.tradingAccounts);
+  const investIds = useStore(s => s.prefs.investmentAccounts);
   const isTrading = (a: Account) => (tradingIds ?? []).includes(a.id);
-  // Accounts · Trading capital · Savings · Debts (credit cards)
-  const regular = accounts.filter(a => !a.archived && a.kind === 'regular' && !isTrading(a));
+  const isInvest = (a: Account) => !isTrading(a) && (investIds ?? []).includes(a.id);
+  // Accounts · Trading capital · Savings · Investments · Debts (credit cards)
+  const regular = accounts.filter(a => !a.archived && a.kind === 'regular' && !isTrading(a) && !isInvest(a));
   const trading = accounts.filter(a => !a.archived && isTrading(a));
-  const savings = accounts.filter(a => !a.archived && a.kind === 'savings' && !isTrading(a));
+  const savings = accounts.filter(a => !a.archived && a.kind === 'savings' && !isTrading(a) && !isInvest(a));
+  const investments = accounts.filter(a => !a.archived && a.kind !== 'credit' && isInvest(a));
   const debts = accounts.filter(a => !a.archived && a.kind === 'credit');
   const archived = accounts.filter(a => a.archived);
   const sum = (l: Account[]) => round2(l.reduce((s, a) => s + (bal.get(a.id) ?? 0), 0));
@@ -84,6 +87,12 @@ export function AccountsScreen() {
               <div className="section">
                 <div className="section-head"><span className="section-title">Savings</span><Money value={sum(savings)} className="bold" /></div>
                 <div className="list">{savings.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length} />)}</div>
+              </div>
+            )}
+            {investments.length > 0 && (
+              <div className="section">
+                <div className="section-head"><span className="section-title">Investments</span><Money value={sum(investments)} className="bold" /></div>
+                <div className="list">{investments.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length + savings.length} />)}</div>
               </div>
             )}
             {debts.length > 0 && (
