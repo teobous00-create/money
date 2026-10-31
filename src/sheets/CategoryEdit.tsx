@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, Eye, EyeOff, Menu, Merge, Plus, UserPlus, Users, X } from 'lucide-react';
-import { Sheet, Segmented, IconBox, Icon, toast } from '../components/ui';
+import { Sheet, Segmented, IconBox, Icon, Toggle, toast } from '../components/ui';
+import { setGoal } from '../lib/goals';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, getState, put, putMany, shareCategory, unshareCategory, categoryPeople, saveCategoryOrder, setBudget } from '../lib/store';
 import { parseNum } from './AccountEdit';
@@ -34,6 +35,10 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
   const [touchedIcon, setTouchedIcon] = useState(!!cat);
   const savedBudget = useStore(s => (cat ? s.prefs.budgets?.[cat.id] : undefined));
   const [budget, setBudgetText] = useState(savedBudget ? String(savedBudget).replace('.', ',') : '');
+  const savedGoal = useStore(s => (cat ? s.prefs.goals?.[cat.id] : undefined));
+  const parentIsGoal = useStore(s => !!(parentId ?? cat?.parent_id) && s.prefs.goals?.[(parentId ?? cat?.parent_id)!] !== undefined);
+  const [isGoal, setIsGoal] = useState(savedGoal !== undefined);
+  const [goal, setGoalText] = useState(savedGoal ? String(savedGoal).replace('.', ',') : '');
   const isSub = !!parentRec;
   const sharedRoots = useSharedRoots();
   const jointBudget = sharedRoots.has(parentRec?.id ?? cat?.id ?? '');
@@ -46,8 +51,10 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
     if (!name.trim()) return toast('Give it a name');
     const id = cat?.id ?? uuid();
     if (type === 'expense') {
-      const b = budget.trim() ? parseNum(budget) : null;
+      const b = isGoal ? null : budget.trim() ? parseNum(budget) : null;
       if ((b ?? null) !== (savedBudget ?? null)) setBudget(id, b);
+      const g = isGoal ? (goal.trim() ? parseNum(goal) ?? 0 : 0) : null;
+      if ((g ?? null) !== (savedGoal ?? null)) setGoal(id, g);
     }
     put('categories', {
       id, owner_id: cat?.owner_id ?? '', type, name: name.trim(), parent_id: parentRec?.id ?? null,
@@ -75,7 +82,24 @@ function Form({ cat, type: initialType, parentId, close }: { cat?: Category; typ
         {isSub && <div className="small muted" style={{ marginTop: 8 }}>in {parentRec!.name}</div>}
       </div>
       <div className="field"><label>Name</label><input className="input" value={name} onChange={e => onName(e.target.value)} autoFocus={!cat} /></div>
-      {type === 'expense' && (
+      {type === 'expense' && !parentIsGoal && (
+        <div className="field">
+          <div className="row" style={{ alignItems: 'center' }}>
+            <label className="grow" style={{ margin: 0 }}>Goal</label>
+            <Toggle on={isGoal} onChange={setIsGoal} />
+          </div>
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Money put in here is saved toward a goal, not spent: it stays out of expenses{isSub ? '' : ' (its subcategories too)'}.</span>
+          {isGoal && <input className="input num" style={{ marginTop: 8 }} inputMode="decimal" placeholder="Target € (optional)" value={goal} onChange={e => setGoalText(e.target.value)} />}
+        </div>
+      )}
+      {type === 'expense' && parentIsGoal && (
+        <div className="field">
+          <label>Goal target</label>
+          <input className="input num" inputMode="decimal" placeholder="No target" value={goal} onChange={e => { setGoalText(e.target.value); setIsGoal(true); }} />
+          <span className="tiny muted" style={{ paddingLeft: 4 }}>Part of a goal folder: never counts as spending. A target shows its progress and when it's done.</span>
+        </div>
+      )}
+      {type === 'expense' && !isGoal && !parentIsGoal && (
         <div className="field">
           <label>Monthly budget</label>
           <input className="input num" inputMode="decimal" placeholder="No budget" value={budget} onChange={e => setBudgetText(e.target.value)} />

@@ -1,12 +1,14 @@
 // Supabase Edge Function "ai": the app's only door to Claude.
 // - Signed-in users whose settings have analytics = true (Teo): 60 calls a day.
 // - People who share a category with such a user (his girlfriend): 20 calls a day, for the voice commands.
-// - Anyone else is refused. Model and answer length are fixed here, not by the app.
+// - Anyone else is refused. Models and answer length are fixed here, not by the app.
+// - Questions from Teo (the app sends tier "ask") go to Opus; commands and everything else to Sonnet.
 // - The Anthropic key lives in the secret ANTHROPIC_API_KEY and never reaches the phone.
 //
 // Deploy: Supabase dashboard → Edge Functions → Deploy a new function → Via Editor → name "ai" → paste this file.
 
-const MODEL = 'claude-sonnet-5-5';
+const MODEL = 'claude-sonnet-5-5';       // commands, short asks, his girlfriend's voice entries
+const MODEL_ASK = 'claude-opus-5-5';     // Teo's questions
 const DAILY_LIMIT = 60;
 const PARTNER_LIMIT = 20;
 const MAX_TOKENS = 4000;
@@ -63,17 +65,18 @@ export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<
   if (used >= limit) return json(429, { error: 'limit', remaining: 0 });
 
   // what the app asks
-  let body: { system?: unknown; messages?: unknown; tools?: unknown };
+  let body: { system?: unknown; messages?: unknown; tools?: unknown; tier?: unknown };
   try { body = await req.json(); } catch { return json(400, { error: 'body' }); }
   const messages = Array.isArray(body.messages) ? body.messages.slice(-40) : null;
   if (!messages || !messages.length) return json(400, { error: 'messages' });
   if (JSON.stringify(body).length > 200_000) return json(413, { error: 'too_big' });
   const tools = Array.isArray(body.tools) ? body.tools.slice(0, 5) : undefined;
+  const model = body.tier === 'ask' && prefs.analytics === true ? MODEL_ASK : MODEL;
 
   const res = await f('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': anthropic, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: body.system, messages, ...(tools ? { tools } : {}) }),
+    body: JSON.stringify({ model, max_tokens: MAX_TOKENS, system: body.system, messages, ...(tools ? { tools } : {}) }),
   });
   const out = await res.json().catch(() => ({})) as { content?: unknown; stop_reason?: string; usage?: unknown; error?: { message?: string } };
   if (!res.ok) return json(502, { error: 'claude', status: res.status, message: out.error?.message ?? '' });
@@ -84,7 +87,7 @@ export async function handle(req: Request, env: Env, f: Fetch = fetch): Promise<
     body: JSON.stringify({ user_id: user.id, prefs: { ...prefs, aiUsage: { day, count: used + 1 } } }),
   }).catch(() => {});
 
-  return json(200, { content: out.content, stop_reason: out.stop_reason, usage: out.usage, remaining: limit - used - 1 });
+  return json(200, { content: out.content, stop_reason: out.stop_reason, usage: out.usage, model, remaining: limit - used - 1 });
 }
 
 /** Shares at least one category (either way round) with a user who has analytics on. */

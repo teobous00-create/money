@@ -6,6 +6,7 @@ import { useTips, useSavings, useWorkStats, prev3, tipsCategoryIds } from '../li
 import { Sheet, ease } from '../components/ui';
 import { fromISO, money, num } from '../lib/format';
 import { HouseholdCard } from '../components/Household';
+import { GoalsCard } from '../components/Goals';
 
 const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'long' });
 const shortM = new Intl.DateTimeFormat('en-GB', { month: 'short' });
@@ -19,6 +20,7 @@ export function AnalyticsView() {
   return (
     <div>
       <div className="small muted" style={{ margin: '0 4px 10px' }}>{month} compared with the 3 months before ({range})</div>
+      <GoalsCard />
       <TipsCard anchor={anchor} month={month} />
       <WorkCard anchor={anchor} month={month} />
       <SavingsCard anchor={anchor} month={month} />

@@ -8,6 +8,7 @@ import { supabase, REMOTE } from './supabase';
 import { alive, computeBalances, catName } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
+import { isQuestion } from './voice';
 import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf } from './tracker';
 import { chatDetail } from './aiFacts';
 import { CHANGES_TOOL, resolveChanges, type Proposal } from './aiActions';
@@ -39,7 +40,8 @@ async function resetUsage() {
   await supabase.from('user_prefs').update({ prefs: { ...prefs, aiUsage: { day: todayISO(), count: 0 } } }).eq('user_id', st.user.id);
 }
 
-async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unknown }, retry = true): Promise<ApiReply> {
+type Tier = 'ask' | 'act';   // the server answers questions with Opus, everything else with Sonnet
+async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unknown; tier?: Tier }, retry = true): Promise<ApiReply> {
   try {
     const r = await callOnce(body);
     if (isTeo()) { lastRemaining = null; if (r.remaining != null && r.remaining <= 20) void resetUsage().catch(() => {}); }
@@ -50,7 +52,7 @@ async function callAI(body: { system: unknown; messages: ApiMsg[]; tools?: unkno
   }
 }
 
-async function callOnce(body: { system: unknown; messages: ApiMsg[]; tools?: unknown }): Promise<ApiReply> {
+async function callOnce(body: { system: unknown; messages: ApiMsg[]; tools?: unknown; tier?: Tier }): Promise<ApiReply> {
   const mock = (window as unknown as { __aiMock?: Mock }).__aiMock;
   if (mock) { const r = await mock(body); if (typeof r.remaining === 'number') lastRemaining = r.remaining; return r; }
   if (!REMOTE || !supabase) throw new AiError('not_setup');
@@ -397,13 +399,13 @@ const textOf = (r: ApiReply) => r.content.filter((x): x is Extract<Block, { type
 const aboutMe = () => (getState().prefs.aboutMe ?? '').trim() || '(empty)';
 
 /** Asks; if the answer hits the length limit, asks for the rest (twice at most) and joins it. */
-async function complete(system: unknown, msgs: ApiMsg[], tools?: unknown): Promise<ApiReply> {
-  let r = await callAI({ system, messages: msgs, tools });
+async function complete(system: unknown, msgs: ApiMsg[], tools?: unknown, tier: Tier = 'act'): Promise<ApiReply> {
+  let r = await callAI({ system, messages: msgs, tools, tier });
   if (r.stop_reason !== 'max_tokens' || !textOf(r).trim()) return r;
   let text = textOf(r);
   for (let i = 0; i < 2 && r.stop_reason === 'max_tokens'; i++) {
     const more = [...msgs, { role: 'assistant' as const, content: text }, { role: 'user' as const, content: CONTINUE }];
-    r = await callAI({ system, messages: more, tools });
+    r = await callAI({ system, messages: more, tools, tier });
     text += textOf(r);
   }
   return { ...r, content: [{ type: 'text', text }, ...r.content.filter(x => x.type !== 'text')] };
@@ -417,6 +419,7 @@ const memo = (r: QueryResult) => `${r.label} ${r.from}–${r.to}: total ${r.tota
 
 /** One turn: question in, answer (and any numbers it looked up) out. */
 export async function askClaude(history: ChatItem[], question: string, lite = false): Promise<ChatItem> {
+  const tier: Tier = isQuestion(question) ? 'ask' : 'act';   // "πόσα / γιατί / τι …" → Opus; "σβήσε / άλλαξε …" → Sonnet
   const system = [
     { type: 'text', text: lite ? LITE_RULES : CHAT_RULES },
     ...(lite ? [] : [{ type: 'text', text: 'ABOUT ME\n' + aboutMe() }]),
@@ -437,7 +440,7 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   let proposal: Proposal | null = null;
   const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL];
   for (let step = 0; step < MAX_STEPS; step++) {
-    const r = await complete(system, msgs, tools);
+    const r = await complete(system, msgs, tools, tier);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
     if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: clean(r.content) });
@@ -459,7 +462,7 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   // out of lookups: answer with what it has instead of giving up
   const last = msgs[msgs.length - 1];
   if (Array.isArray(last.content)) last.content = [...last.content, { type: 'text', text: OUT_OF_STEPS } as Block];
-  const r = await complete(system, msgs, tools);
+  const r = await complete(system, msgs, tools, tier);
   const text = textOf(r).trim();
   if (text) return { role: 'assistant', text, results, proposal: proposal ?? undefined, at: new Date().toISOString() };
   return { role: 'assistant', text: 'I couldn’t finish that one — try asking it more simply.', results, error: true, at: new Date().toISOString() };

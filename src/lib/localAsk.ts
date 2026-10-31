@@ -13,6 +13,7 @@ import { alive, catName, computeBalances, defaultSelection, ruleDates } from './
 import { addDays, fromISO, money, num, round2, shortDate, toISO, todayISO } from './format';
 import { like, norm, parseQuick, sameWord } from './quickparse';
 import { isPending } from './txTime';
+import { goalIdsNow, isGoalTx } from './goals';
 import { voiceCtxNow } from './voiceRun';
 import { DAY_ALIASES, EVE_ALIASES, findStrategy } from './voice';
 import { monthBonus, payPeriods, periodLabel, shiftParts } from './tracker';
@@ -170,7 +171,8 @@ function budgetLeft(ws: string[], text: string): boolean {
 
 function myExpenses(from: string, to: string): Tx[] {
   const s = getState(), me = s.user?.id;
-  return alive(s.transactions).filter(t => t.owner_id === me && t.type === 'expense' && t.date >= from && t.date <= to && !isPending(t));
+  const goals = goalIdsNow();
+  return alive(s.transactions).filter(t => t.owner_id === me && t.type === 'expense' && t.date >= from && t.date <= to && !isPending(t) && !isGoalTx(t, goals));
 }
 function compare(ws: string[], text: string): boolean {
   if (!has(ws, /^(σχεση|συγκρι\p{L}*|vs|compare\p{L}*)$/u)) return false;

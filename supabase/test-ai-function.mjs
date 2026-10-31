@@ -32,6 +32,12 @@ ok(r.status === 200 && j.content[0].text === 'Γεια' && j.remaining === 59, '
 ok(world.sent.model === 'claude-sonnet-5-5' && world.sent.max_tokens === 4000, 'model and length fixed by the server, not the app');
 ok(world.sentHeaders['x-api-key'] === 'sk-ant-test', 'uses the secret key');
 ok(world.patched.prefs.aiUsage.count === 1 && world.patched.prefs.analytics === true, 'counts the call, keeps other settings');
+w = world(); r = await handle(req({ ...msg, tier: 'ask' }), env, w.f); j = await r.json();
+ok(world.sent.model === 'claude-opus-5-5' && j.model === 'claude-opus-5-5', "Teo's question (tier ask) goes to Opus");
+w = world(); r = await handle(req({ ...msg, tier: 'act' }), env, w.f);
+ok(world.sent.model === 'claude-sonnet-5-5', 'a command stays on Sonnet');
+w = world({ user: 'her', prefs: {}, shares: [['her', 'teo']] }); r = await handle(req({ ...msg, tier: 'ask' }), env, w.f);
+ok(world.sent.model === 'claude-sonnet-5-5', "her questions stay on Sonnet");
 w = world({ prefs: { analytics: true, aiUsage: { day: new Date().toISOString().slice(0, 10), count: 60 } } }); r = await handle(req(msg), env, w.f);
 ok(r.status === 429 && !w.calls.some(c => c.url.startsWith('https://api.anthropic.com')), '61st call today refused before reaching Claude');
 w = world({ prefs: { analytics: true, aiUsage: { day: '2000-01-01', count: 60 } } }); r = await handle(req(msg), env, w.f);
