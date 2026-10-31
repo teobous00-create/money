@@ -65,7 +65,7 @@ export function measuresAt(s: State, day: string): Measures {
   const me = s.user?.id;
   const trading = new Set(s.prefs.tradingAccounts ?? []);
   const invest = new Set((s.prefs.investmentAccounts ?? []).filter(id => !trading.has(id)));
-  const all: Account[] = alive(s.accounts).filter(a => a.owner_id === me);
+  const all: Account[] = alive(s.accounts).filter(a => a.owner_id === me && !a.archived);
   const txs = alive(s.transactions);
   const bal = computeBalances(all, txs, day);
   const sum = (l: Account[]) => round2(l.reduce((x, a) => x + (bal.get(a.id) ?? 0), 0));
