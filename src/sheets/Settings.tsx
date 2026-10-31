@@ -5,7 +5,8 @@ import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
 import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
 import { useUi, setUi } from '../lib/ui';
-import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs, resyncAll } from '../lib/store';
+import { useStore, signOut, sync, wipeMyData, discardFailed, setPrefs, resyncAll, retryFailed, failedReasons, getState as getStoreState } from '../lib/store';
+const getFailedCount = () => getStoreState().failed;
 import { deletedBatches, restoreBatch } from '../lib/recover';
 import { REMOTE } from '../lib/supabase';
 import { todayISO } from '../lib/format';
@@ -63,11 +64,12 @@ function Body() {
       </div>
 
       <div className="list">
-        <button className="list-row" onClick={() => (failed ? discardFailed() : void sync())}>
+        <button className="list-row" onClick={() => (failed ? void retryFailed().then(() => toast(getFailedCount() ? 'Still rejected — see why below' : 'Sent')) : void sync())}>
           <StatusIcon size={22} style={{ color: failed ? 'var(--expense)' : pending || !online ? 'var(--warn)' : 'var(--accent)' }} />
-          <span className="grow">{status}{failed > 0 && <div className="tiny muted">Tap to dismiss</div>}</span>
+          <span className="grow">{status}{failed > 0 && <div className="tiny muted">Tap to send them again · they stay on this phone until they're saved</div>}</span>
           {REMOTE && !failed && <span className="small" style={{ color: 'var(--accent)', fontWeight: 600 }}>Sync now</span>}
         </button>
+        {failed > 0 && <FailedDetails />}
       </div>
 
       <div className="section">
@@ -169,6 +171,20 @@ function RecentlyDeleted() {
         ))}
       </div>
       <div className="tiny muted" style={{ padding: '6px 6px 0' }}>Brings back only what's missing: entries that are already there again (e.g. from a re-import) are skipped.</div>
+    </div>
+  );
+}
+
+/** Why the server said no, and — only after a second tap — throwing those changes away. */
+function FailedDetails() {
+  const [sure, setSure] = useState(false);
+  return (
+    <div className="list-row" style={{ display: 'block' }}>
+      {failedReasons().map(r => <div key={r} className="tiny muted" style={{ wordBreak: 'break-word' }}>{r}</div>)}
+      <button className="tiny bold" style={{ marginTop: 6, color: 'var(--expense)' }}
+        onClick={() => { if (!sure) { setSure(true); return; } discardFailed(); setSure(false); toast('Thrown away'); }}>
+        {sure ? 'Tap again to throw them away for good' : 'Throw these changes away…'}
+      </button>
     </div>
   );
 }

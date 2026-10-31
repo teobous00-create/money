@@ -33,7 +33,7 @@ export interface State {
   accountFilter: string[] | null; // null = default selection
 }
 
-interface Op { table: Table; row: Record<string, unknown> }
+interface Op { table: Table; row: Record<string, unknown>; reason?: string }
 
 let state: State = {
   phase: 'loading',
@@ -320,9 +320,17 @@ async function flush(): Promise<void> {
             const { error } = await supabase!.from(table).upsert(batch, { onConflict: 'id' });
             if (error) {
               if (isNetworkError(error)) { failedThisRound = true; break; }
-              // rejected by the database (permissions / validation): park these so the queue can't get stuck
+              // rejected by the database (permissions / validation). One bad row rejects the whole batch,
+              // so send them one by one and park only the ones that really fail (with the reason), never the rest.
               console.warn('sync rejected', table, error);
-              failedOps.push(...batch.map(row => ({ table, row })));
+              for (const row of batch) {
+                const one = batch.length === 1 ? { error } : await supabase!.from(table).upsert([row], { onConflict: 'id' });
+                if (one.error) {
+                  if (isNetworkError(one.error)) { failedThisRound = true; break; }
+                  failedOps.push({ table, row, reason: one.error.message });
+                }
+              }
+              if (failedThisRound) break;
             }
           }
           if (failedThisRound) break;
@@ -350,6 +358,16 @@ export function resyncAll(): Promise<void> {
   setState({ lastSync: null });
   return sync();
 }
+
+/** Send the rejected changes again (after fixing what was wrong, or just to try). */
+export function retryFailed(): Promise<void> {
+  queue = [...failedOps.map(({ table, row }) => ({ table, row })), ...queue];
+  failedOps = [];
+  setState({ pending: queue.length, failed: 0 });
+  scheduleSave();
+  return flush();
+}
+export const failedReasons = () => [...new Set(failedOps.map(o => `${o.table}: ${o.reason ?? 'rejected'}`))].slice(0, 3);
 
 export function discardFailed() {
   failedOps = [];
@@ -407,7 +425,8 @@ async function pull() {
   ]);
   // an empty answer to a full pull while this phone has entries means the request wasn't really signed in: don't wipe anything
   if (full && !acc.length && !cat.length && !tx.length && Object.keys(state.transactions).length > 0) { console.warn('empty full pull ignored'); return; }
-  const pendingIds = new Set(queue.map(o => o.table + ':' + o.row.id));
+  // rows not on the server yet — waiting, or rejected — stay on the phone even through a full reload
+  const pendingIds = new Set([...queue, ...failedOps].map(o => o.table + ':' + o.row.id));
   let maxTs = state.lastSync ?? '';
   const merge = <T extends { id: string; updated_at?: string }>(table: Table, current: Rec<T>, rows: Record<string, unknown>[]) => {
     const next: Rec<T> = full ? {} : { ...current };
