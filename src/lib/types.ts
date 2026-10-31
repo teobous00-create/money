@@ -1,3 +1,4 @@
+import type { LevelDef } from './levels';
 export type TxType = 'expense' | 'income' | 'transfer';
 export type CatType = 'expense' | 'income';
 export type AccountKind = 'regular' | 'credit' | 'savings';
@@ -155,6 +156,7 @@ export interface Prefs {
   goals?: Record<string, number>;   // goal categories: id → target € (0 = no target); still expenses, with progress
   tradingAccounts?: string[];      // account ids that hold trading capital (not counted as your cash until withdrawn)
   lastLevel?: number;              // the level last celebrated
+  levelDefs?: LevelDef[];          // your own ladder of levels (empty = the defaults)
   homeSeeded?: number;              // household budgets taken from the Excel (version)
   learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
 }

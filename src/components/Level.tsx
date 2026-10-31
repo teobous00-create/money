@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Lock, Sparkles } from 'lucide-react';
-import { LEVELS, TOP, useLevel, useLevelHistory, type LevelState } from '../lib/levels';
+import { Check, Lock, Pencil, Sparkles } from 'lucide-react';
+import { useLevel, useLevelHistory, type LevelState } from '../lib/levels';
+import { LevelEditor } from './LevelEditor';
 import { getState, setPrefs, useStore } from '../lib/store';
 import { setUi, useUi } from '../lib/ui';
 import { money } from '../lib/format';
 import { Sheet, ease, toast } from './ui';
 
 const monthShort = new Intl.DateTimeFormat('en-GB', { month: 'short' });
-const progressOf = (st: LevelState) => (st.next.length ? Math.min(1, ...st.next.map(n => (n.need > 0 ? Math.max(0, n.have) / n.need : 1))) : 1);
+const progressOf = (st: LevelState) => (st.next.length ? Math.min(1, ...st.next.map(n => n.met ? 1 : n.op === '<=' ? Math.max(0, Math.min(1, n.need / Math.max(n.have, 0.01))) : n.need > 0 ? Math.max(0, n.have) / n.need : 1)) : 1);
+const fmt = (n: { pct: boolean }, v: number) => (n.pct ? `${Math.round(v)}%` : money(v));
 
 /** Next to your avatar: the level and a thin bar toward the next one. Tap → everything about it. */
 export function LevelBadge() {
@@ -29,16 +31,24 @@ export function LevelBadge() {
 export function LevelSheet() {
   const open = useUi(u => !!u.levels);
   const st = useLevel();
-  const close = () => setUi({ levels: false });
+  const [editing, setEditing] = useState(false);
+  const close = () => { setUi({ levels: false }); setEditing(false); };
+  const pencil = (
+    <button className="iconbtn" aria-label={editing ? 'Done editing' : 'Edit levels'} onClick={() => setEditing(e => !e)}
+      style={{ color: editing ? 'var(--accent)' : undefined }}>
+      <Pencil size={19} />
+    </button>
+  );
   return (
-    <Sheet open={open && !!st} onClose={close} title="Level" full>
-      {st && <LevelBody st={st} />}
+    <Sheet open={open && !!st} onClose={close} title={editing ? 'Edit levels' : 'Level'} full right={pencil}>
+      {st && (editing ? <LevelEditor defs={st.defs} done={() => setEditing(false)} /> : <LevelBody st={st} />)}
     </Sheet>
   );
 }
 
 function LevelBody({ st }: { st: LevelState }) {
   const hist = useLevelHistory();
+  const LEVELS = st.defs, TOP = st.defs.length - 1;
   const L = LEVELS[st.level];
   return (
     <div className="sheet-body">
@@ -61,18 +71,18 @@ function LevelBody({ st }: { st: LevelState }) {
           </div>
           <div className="tiny muted" style={{ marginBottom: 8 }}>{LEVELS[st.level + 1].rule}</div>
           {st.next.map((n, i) => {
-            const v = n.need > 0 ? Math.min(1, Math.max(0, n.have) / n.need) : 1;
+            const v = n.op === '<=' ? (n.met ? 1 : Math.max(0, Math.min(1, n.need / Math.max(n.have, 0.01)))) : n.need > 0 ? Math.min(1, Math.max(0, n.have) / n.need) : 1;
             return (
               <div key={n.label} style={{ marginTop: i ? 10 : 0 }}>
                 <div className="row tiny num" style={{ fontWeight: 600 }}>
                   <span className="grow muted">{n.label}</span>
-                  <span>{money(n.have)} / {money(n.need)}</span>
+                  <span>{fmt(n, n.have)} {n.op === '<=' ? '≤' : '/'} {fmt(n, n.need)}</span>
                 </div>
                 <div style={{ height: 10, borderRadius: 6, background: 'var(--surface-3)', overflow: 'hidden', marginTop: 5 }}>
                   <motion.div style={{ height: '100%', borderRadius: 6, background: n.met ? 'var(--income)' : 'var(--accent)' }}
                     initial={{ width: 0 }} animate={{ width: `${v * 100}%` }} transition={{ duration: 1, ease, delay: 0.15 + i * 0.1 }} />
                 </div>
-                <div className="tiny muted num" style={{ marginTop: 3 }}>{n.met ? 'Done' : `${money(n.need - Math.max(0, n.have))} to go`}</div>
+                <div className="tiny muted num" style={{ marginTop: 3 }}>{n.met ? 'Done' : n.op === '<=' ? `${fmt(n, n.have - n.need)} over` : `${fmt(n, n.need - Math.max(0, n.have))} to go`}</div>
               </div>
             );
           })}
@@ -124,10 +134,10 @@ function LevelBody({ st }: { st: LevelState }) {
 
       {/* the ladder */}
       <div className="list" style={{ marginTop: 12 }}>
-        {[...LEVELS].reverse().map(l => {
+        {LEVELS.map((d, n) => ({ ...d, n })).reverse().map(l => {
           const here = l.n === st.level, reached = l.n <= st.level;
           return (
-            <div key={l.n} className="list-row" style={{ gap: 12, background: here ? 'var(--accent-soft)' : undefined }}>
+            <div key={l.id} className="list-row" style={{ gap: 12, background: here ? 'var(--accent-soft)' : undefined }}>
               <span className="num bold" style={{ width: 26, height: 26, borderRadius: 13, display: 'grid', placeItems: 'center', flex: 'none',
                 background: reached ? 'var(--accent)' : 'var(--surface-3)', color: reached ? 'var(--bg)' : 'var(--ink-2)', fontSize: 13 }}>{l.n}</span>
               <div className="grow" style={{ minWidth: 0 }}>
@@ -156,7 +166,7 @@ export function LevelWatch() {
     const last = getState().prefs.lastLevel;
     if (last === undefined) { setPrefs({ lastLevel: st.level }); return; }   // first time: no fanfare for where you already are
     if (st.level > last) { setShow(st.level); setPrefs({ lastLevel: st.level }); }
-    else if (st.level < last) { toast(`Level ${st.level} for now · ${LEVELS[st.level].name}`); setPrefs({ lastLevel: st.level }); }
+    else if (st.level < last) { toast(`Level ${st.level} for now · ${st.defs[st.level].name}`); setPrefs({ lastLevel: st.level }); }
   }, [st?.level, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <AnimatePresence>
@@ -176,8 +186,8 @@ export function LevelWatch() {
             <div className="small" style={{ letterSpacing: '.2em', fontWeight: 700, opacity: 0.8 }}>LEVEL UP</div>
             <motion.div className="num" initial={{ rotate: -12 }} animate={{ rotate: 0 }} transition={{ type: 'spring', stiffness: 200, damping: 8, delay: 0.2 }}
               style={{ fontSize: 112, fontWeight: 850, lineHeight: 1, margin: '6px 0' }}>{show}</motion.div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{LEVELS[show].name}</div>
-            <div className="small" style={{ opacity: 0.8, marginTop: 4, maxWidth: 260 }}>{LEVELS[show].rule}</div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{st?.defs[show]?.name}</div>
+            <div className="small" style={{ opacity: 0.8, marginTop: 4, maxWidth: 260 }}>{st?.defs[show]?.rule}</div>
             <div className="tiny" style={{ opacity: 0.55, marginTop: 22 }}>Tap to continue</div>
           </motion.div>
         </motion.div>
