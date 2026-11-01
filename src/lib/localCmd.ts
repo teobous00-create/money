@@ -8,7 +8,7 @@
 import { getState, put, remove, restore } from './store';
 import { alive, catName, computeBalances } from './calc';
 import { addDays, fromISO, money, shortDate, toISO, todayISO } from './format';
-import { MONTHS, like, norm, parseQuick, sameWord } from './quickparse';
+import { MONTHS, like, norm, numberAt, parseQuick, sameWord } from './quickparse';
 import { DAY_ALIASES, EVE_ALIASES } from './voice';
 import { writeShift } from './tracker';
 import { relativeDay } from './format';
@@ -17,7 +17,7 @@ import { learnFromFix, voiceCtxNow } from './voiceRun';
 import { toast } from '../components/ui';
 import type { Tx } from './types';
 
-export const toks = (text: string) => norm(text).split(/[^\p{L}\p{N},.]+/u).map(w => w.replace(/^[.,]+|[.,]+$/g, '')).filter(Boolean);
+export const toks = (text: string) => norm(text).split(/[^\p{L}\p{N},./]+/u).map(w => w.replace(/^[.,/]+|[.,/]+$/g, '')).filter(Boolean);   // keeps "25/3" whole
 export const LEAD = new Set(['ε', 'λοιπον', 'καλα', 'οκ', 'ok', 'ρε', 'και', 'πεσ', 'μου']);
 // words that say nothing on their own
 export const FILLER = new Set(['το', 'τα', 'τον', 'την', 'τη', 'του', 'τησ', 'των', 'μου', 'μασ', 'αυτο', 'αυτον', 'αυτη', 'αυτην', 'εκεινο', 'ενα', 'μια', 'για', 'σε', 'στο', 'στη', 'στην', 'στον', 'στα',
@@ -165,10 +165,14 @@ export function tryLocalEdit(text: string): boolean {
 
 const ASK = new Set(['ποσα', 'ποσο', 'ποσεσ', 'ποσουσ']);
 const SPENT = /^(ξοδεψ\p{L}*|εδωσ\p{L}*|πληρωσ\p{L}*|χαλασ\p{L}*|spent)$/u;
-const EARNED = /^(μπηκαν|μπηκε|εβγαλ\p{L}*|κερδισ\p{L}*|πηρα|εσοδα|earned)$/u;
+const EARNED = /^(μπηκαν|μπηκε|εβγαλ\p{L}*|κερδισ\p{L}*|πηρα|εσοδα|πληρωθ\p{L}*|earned)$/u;
 const BAL = /^(εχω|μενουν|εμειναν|υπολοιπο|balance)$/;
 const FULL_MONTHS = [/^(ιανουαρ|jan)/, /^(φεβρουαρ|feb)/, /^(μαρτ|mar)/, /^(απριλ|apr)/, /^(μαιο|μαιου|may)/, /^(ιουνι|jun)/, /^(ιουλι|jul)/, /^(αυγουστ|aug)/, /^(σεπτεμβρ|sep)/, /^(οκτωβρ|oct)/, /^(νοεμβρ|nov)/, /^(δεκεμβρ|dec)/];
 const PAST = /^(προηγουμεν\p{L}*|περασμεν\p{L}*|last)$/u;
+const NEXT = /^(επομεν\p{L}*|ερχομεν\p{L}*|αλλη|αλλο|αλλον|next)$/u;   // "την άλλη βδομάδα", "τον άλλο μήνα"
+const YEAR = /^(19|20)\d{2}$/;
+const DAYNUM = /^(\d{1,2})(η|ησ|ο|ου|st|nd|rd|th)?$/;
+const ORD = /^(η|ησ|ο|ου|st|nd|rd|th)$/;
 
 export interface Range { from: string; to: string; label: string; kind?: 'week' | 'month' | 'year' }
 /** "αυτή την εβδομάδα", "τον προηγούμενο μήνα", "φέτος", "τον Οκτώβριο" — `future` lets a month name / this month run to its end */
@@ -177,37 +181,73 @@ export function period(ws: string[], used: Set<number>, future = false): Range |
   const mark = (...ix: number[]) => ix.forEach(i => used.add(i));
   for (let i = 0; i < ws.length; i++) {
     const w = ws[i], past = PAST.test(ws[i - 1] ?? '');
-    // "τις τελευταίες 3 μέρες"
-    if (/^(τελευται\p{L}*|last)$/u.test(w) && /^\d{1,3}$/.test(ws[i + 1] ?? '') && /^(μερεσ|ημερεσ|days)$/.test(ws[i + 2] ?? '')) {
-      const n = Math.max(1, Number(ws[i + 1]));
-      mark(i, i + 1, i + 2);
-      return { from: addDays(today, -(n - 1)), to: today, label: `last ${n} days` };
+    // "τις τελευταίες 3 / τρεις μέρες", "τις τελευταίες 2 εβδομάδες"
+    if (/^(τελευται\p{L}*|last)$/u.test(w)) {
+      const n = numberAt(ws, i + 1);
+      const unit = n ? ws[i + 1 + n.len] ?? '' : '';
+      const days = n && Number.isInteger(n.v) && n.v >= 1 ? (/^(μερεσ|ημερεσ|μερα|ημερα|days?)$/.test(unit) ? n.v : /^(εβδομαδεσ|βδομαδεσ|εβδομαδα|βδομαδα|weeks?)$/.test(unit) ? n.v * 7 : 0) : 0;
+      if (days) {
+        mark(i, ...Array.from({ length: n!.len + 1 }, (_, k) => i + 1 + k));
+        return { from: addDays(today, -(days - 1)), to: today, label: `last ${days} days` };
+      }
+    }
+    // one day: "25/3", "25/3/2025", "25η Μαρτίου", "25 Μαρτίου 2025"
+    const dm = w.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+    if (dm) {
+      mark(i);
+      return oneDay(Number(dm[1]), Number(dm[2]) - 1, dm[3] ? (dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3])) : null);
     }
     const pi = past ? [i - 1] : [];
+    const next = NEXT.test(ws[i - 1] ?? '');
     if (/^(εβδομαδα|βδομαδα|week)$/.test(w)) {
       const mon = addDays(today, -((T.getDay() + 6) % 7));
+      if (next) { mark(i, i - 1); return { from: addDays(mon, 7), to: addDays(mon, 13), label: 'next week', kind: 'week' }; }
       mark(i, ...pi);
       return past ? { from: addDays(mon, -7), to: addDays(mon, -1), label: 'last week', kind: 'week' } : { from: mon, to: future ? addDays(mon, 6) : today, label: 'this week', kind: 'week' };
     }
     if (/^(μηνα|μηνασ|month)$/.test(w)) {
       mark(i, ...pi);
       if (past) { const a = new Date(T.getFullYear(), T.getMonth() - 1, 1); return { from: toISO(a), to: toISO(new Date(T.getFullYear(), T.getMonth(), 0)), label: 'last month', kind: 'month' }; }
-      if (/^(επομεν\p{L}*|next)$/u.test(ws[i - 1] ?? '')) { mark(i - 1); return { from: toISO(new Date(T.getFullYear(), T.getMonth() + 1, 1)), to: toISO(new Date(T.getFullYear(), T.getMonth() + 2, 0)), label: 'next month', kind: 'month' }; }
+      if (next) { mark(i - 1); return { from: toISO(new Date(T.getFullYear(), T.getMonth() + 1, 1)), to: toISO(new Date(T.getFullYear(), T.getMonth() + 2, 0)), label: 'next month', kind: 'month' }; }
       return { from: toISO(new Date(T.getFullYear(), T.getMonth(), 1)), to: future ? toISO(new Date(T.getFullYear(), T.getMonth() + 1, 0)) : today, label: 'this month', kind: 'month' };
     }
     if (/^(φετοσ|χρονο|χρονια|year)$/.test(w)) { mark(i, ...pi); return { from: `${T.getFullYear()}-01-01`, to: today, label: String(T.getFullYear()), kind: 'year' }; }
+    if (w === 'περσι') { mark(i); const y = T.getFullYear() - 1; return { from: `${y}-01-01`, to: `${y}-12-31`, label: String(y), kind: 'year' }; }
     const m = FULL_MONTHS.findIndex(re => re.test(w));
     const mon = m >= 0 ? MONTHS[m] : undefined;
     if (mon) {
       mark(i);
-      let y = T.getFullYear();
-      if (!future && mon[1] > T.getMonth()) y--;
-      if (future && mon[1] < T.getMonth()) y++;
+      // a year after it: "Μάρτιο 2025", "Μαρτίου του 2025"
+      const yi = YEAR.test(ws[i + 1] ?? '') ? i + 1 : ws[i + 1] === 'του' && YEAR.test(ws[i + 2] ?? '') ? i + 2 : -1;
+      const year = yi >= 0 ? Number(ws[yi]) : null;
+      if (yi >= 0) mark(yi, ...(yi === i + 2 ? [i + 1] : []));
+      // a day before it: "25η Μαρτίου", "25 η Μαρτίου", "25 Μαρτίου"
+      const d1 = ws[i - 1]?.match(DAYNUM), d2 = ORD.test(ws[i - 1] ?? '') ? ws[i - 2]?.match(/^\d{1,2}$/) : null;
+      if (d1 || d2) {
+        mark(d1 ? i - 1 : i - 2, ...(d1 ? [] : [i - 1]));
+        return oneDay(Number((d1 ?? d2)![1] ?? (d1 ?? d2)![0]), mon[1], year);
+      }
+      let y = year ?? T.getFullYear();
+      if (year == null && !future && mon[1] > T.getMonth()) y--;
+      if (year == null && future && mon[1] < T.getMonth()) y++;
       const a = new Date(y, mon[1], 1), b = new Date(y, mon[1] + 1, 0);
-      return { from: toISO(a), to: future || toISO(b) < today ? toISO(b) : today, label: new Intl.DateTimeFormat('en-GB', { month: 'long' }).format(a), kind: 'month' };
+      return { from: toISO(a), to: future || toISO(b) < today ? toISO(b) : today, label: new Intl.DateTimeFormat('en-GB', { month: 'long', ...(y !== T.getFullYear() ? { year: 'numeric' } : {}) }).format(a), kind: 'month' };
+    }
+    // a year alone: "το 2025"
+    if (YEAR.test(w)) {
+      mark(i);
+      const y = Number(w);
+      return { from: `${y}-01-01`, to: y === T.getFullYear() && !future ? today : `${y}-12-31`, label: w, kind: 'year' };
     }
   }
   return null;
+
+  function oneDay(d: number, m: number, y: number | null): Range {
+    let x = new Date(y ?? T.getFullYear(), m, d);
+    if (y == null && !future && toISO(x) > today) x = new Date(T.getFullYear() - 1, m, d);   // "25 Δεκεμβρίου" asked in November → last year's
+    const iso = toISO(x);
+    return { from: iso, to: iso, label: iso === today ? 'today' : iso === addDays(today, -1) ? 'yesterday' : shortDate(iso) + (x.getFullYear() !== T.getFullYear() ? ` ${x.getFullYear()}` : '') };
+  }
 }
 
 export function tryLocalAsk(text: string): boolean {
@@ -244,7 +284,7 @@ export function tryLocalAsk(text: string): boolean {
   }
 
   const cat = p.categoryId ? s.categories[p.categoryId] : null;
-  const type = earned >= 0 ? 'income' : spent >= 0 ? 'expense' : cat?.type ?? 'expense';
+  const type = earned >= 0 ? 'income' : spent >= 0 ? 'expense' : cat?.type ?? (p.type === 'income' ? 'income' : 'expense');
   const ids = cat ? new Set([cat.id, ...Object.values(s.categories).filter(c => c.parent_id === cat.id).map(c => c.id)]) : null;
   const range = per ?? (p.date ? { from: p.date, to: p.date, label: p.date === today ? 'today' : p.date === addDays(today, -1) ? 'yesterday' : shortDate(p.date) }
     : { from: toISO(new Date(fromISO(today).getFullYear(), fromISO(today).getMonth(), 1)), to: today, label: 'this month' });

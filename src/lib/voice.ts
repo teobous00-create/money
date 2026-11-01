@@ -5,7 +5,7 @@
  *  - a payment:   "πληρώθηκα από την απογευματινή 320", "πρωινή μισθός 500 bonus 206"
  *  - entries:     "netflix 12,49 κάθε μήνα", "καφές 3, supermarket 20 και τσιγάρα 5,5"
  */
-import { fromISO, round2, toISO } from './format';
+import { addDays, fromISO, round2, toISO } from './format';
 import { NUMWORDS, MONTHS, clean, lev1, norm, parseNumber, parseQuick, phon, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
 
@@ -43,6 +43,7 @@ export function findStrategy(ws: string[], strategies: Strategy[]): { s: Strateg
  * Words dictation keeps getting wrong, fixed before anything reads the phrase:
  *  - "αλλαγή" (exactly that word) → "συναλλαγή"   ("άλλαξε" etc. stay)
  *  - "τι" anywhere but the first word → "tips"   (you never start with "tips"; a first "Τι" is a question)
+ *  - "πόνους" → "μπόνους"
  */
 export function fixDictation(text: string): string {
   let first = true;
@@ -53,12 +54,13 @@ export function fixDictation(text: string): string {
     const at = first;
     first = false;
     if (n === 'αλλαγη') return m[1] + 'συναλλαγή' + m[3];
+    if (n === 'πονουσ') return m[1] + 'μπόνους' + m[3];   // you never say "πόνους" to the app
     if (n === 'τι' && !at) return m[1] + 'tips' + m[3];
     return part;
   }).join('');
 }
 
-export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[]; hasShift?: (jobId: string, date: string) => boolean }
+export interface VoiceCtx extends ParseCtx { jobs: Job[]; strategies: Strategy[]; hasShift?: (jobId: string, date: string) => boolean; hour?: number }
 
 export type Cmd =
   | { kind: 'tx'; p: Parsed; repeat: Freq | null; until: string | null }
@@ -74,7 +76,7 @@ export const EVE_ALIASES = ['απογευματινη', 'απογευματιν�
 const PAY_WORDS = ['πληρωθηκα', 'πληρωθηκε', 'πληρωμη', 'μισθοσ', 'μισθο', 'μισθου', 'salary', 'payday', 'πληρωσαν'];
 const SHIFT_WORDS = ['βαρδια', 'βαρδιεσ', 'δουλεψα', 'shift', 'worked'];
 const HOURS = /^(ωρα|ωρεσ|ωρων|h|hours?|ωρ)$/;
-const TIPS = /^(tips?|φιλοδωρ\p{L}*|τιπσ)$/u;
+const TIPS = /^(tips?|φιλοδωρ\p{L}*|τιπσ|τιψ|τιπ)$/u;
 const BONUS = /^(bonus|μπονουσ|μπονου|επαφεσ|επαφη|επαφων|contacts?)$/;   // contacts count as the morning bonus
 const BASE = /^(μεροκαματο|βασικο|day)$/;
 const SALARY = /^(μισθοσ|μισθο|μισθου|salary)$/;
@@ -225,7 +227,9 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
   const onlyOf = (kind: Job['kind']) => { const of = ctx.jobs.filter(j => j.kind === kind); return of.length === 1 ? of[0] : null; };
   const workLabel = nums.some(n => n.label === 'bonus' || n.label === 'hours' || n.label === 'base');
   const eve = onlyOf('hourly');
-  const tipsToShift = nums.some(n => n.label === 'tips') && !!eve && !!ctx.hasShift?.(eve.id, date());
+  // the evening shift said between 00:00 and 05:00 with no day named is last night's
+  const shiftDate = (job: Job) => parseQuick(text, ctx).date ?? (job.kind === 'hourly' && (ctx.hour ?? new Date().getHours()) < 5 ? addDays(ctx.today, -1) : ctx.today);
+  const tipsToShift = nums.some(n => n.label === 'tips') && !!eve && !!ctx.hasShift?.(eve.id, shiftDate(eve));
   const shiftish = (ref && (has(ws, SHIFT_WORDS) || labelledNum || !parseQuick(text, ctx).categoryId))
     || (has(ws, SHIFT_WORDS) && labelledNum) || workLabel || tipsToShift;
   if (shiftish) {
@@ -234,7 +238,7 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
     if (job) {
       const hours = nums.find(n => n.label === 'hours')?.v ?? (job.kind === 'hourly' ? nums.find(n => n.label === null)?.v ?? null : null);
       return [{
-        kind: 'shift', job, date: date(), hours,
+        kind: 'shift', job, date: shiftDate(job), hours,
         tips: nums.find(n => n.label === 'tips')?.v ?? null,
         bonus: nums.find(n => n.label === 'bonus')?.v ?? null,
         base: nums.find(n => n.label === 'base')?.v ?? null,

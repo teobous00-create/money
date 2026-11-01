@@ -220,8 +220,24 @@ function savePayout(c: Extract<Cmd, { kind: 'payout' }>): Done | null {
 }
 
 /** Saves what's complete; returns the first command that still needs you (for the caller to open its form). */
+/** The account you used most for this category in the last 90 days (the newest one on a tie). */
+export function usualAccount(categoryId: string, type: TxType): string | null {
+  const st = getState(), me = st.user?.id, since = addDays(todayISO(), -90);
+  const ok = (id: string) => { const a = st.accounts[id]; return !!a && !a.deleted_at && !a.archived && a.owner_id === me; };
+  const by = new Map<string, { n: number; last: string }>();
+  for (const t of Object.values(st.transactions)) {
+    if (t.deleted_at || t.owner_id !== me || t.type !== type || t.category_id !== categoryId || t.date < since || t.date > todayISO() || !ok(t.account_id)) continue;
+    const v = by.get(t.account_id) ?? { n: 0, last: '' };
+    v.n++; if (t.date > v.last) v.last = t.date;
+    by.set(t.account_id, v);
+  }
+  return [...by.entries()].sort((a, b) => b[1].n - a[1].n || b[1].last.localeCompare(a[1].last))[0]?.[0] ?? null;
+}
+
 export function runVoice(cmds: Cmd[], auto = voiceAutoSave()): Cmd | null {
   if (!cmds.length) return null;
+  // no account said → where you usually pay for that category
+  for (const c of cmds) if (c.kind === 'tx' && !c.p.accountId && c.p.categoryId && c.p.type !== 'transfer') c.p.accountId = usualAccount(c.p.categoryId, c.p.type ?? 'expense');
   if (!auto) return cmds[0];
   const done: Done[] = [];
   let open: Cmd | null = null;

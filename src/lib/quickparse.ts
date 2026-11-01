@@ -41,8 +41,22 @@ export const NUMWORDS: Record<string, number> = {
   μηδεν: 0, δυο: 2, τρια: 3, τρεισ: 3, τεσσερα: 4, τεσσερισ: 4, πεντε: 5, εξι: 6, επτα: 7, εφτα: 7, οκτω: 8, οχτω: 8,
   εννια: 9, εννεα: 9, δεκα: 10, εντεκα: 11, δωδεκα: 12, δεκατρια: 13, δεκατεσσερα: 14, δεκαπεντε: 15, δεκαεξι: 16, δεκαεπτα: 17, δεκαεφτα: 17,
   δεκαοκτω: 18, δεκαοχτω: 18, δεκαεννια: 19, δεκαεννεα: 19, εικοσι: 20, τριαντα: 30, σαραντα: 40, πενηντα: 50, εξηντα: 60, εβδομηντα: 70,
-  ογδοντα: 80, ενενηντα: 90, εκατο: 100, εκατον: 100, διακοσια: 200, τριακοσια: 300, τετρακοσια: 400, πεντακοσια: 500, χιλια: 1000, μισο: 0.5, μιση: 0.5,
+  ογδοντα: 80, ενενηντα: 90, εκατο: 100, εκατον: 100, διακοσια: 200, τριακοσια: 300, τετρακοσια: 400, πεντακοσια: 500,
+  εξακοσια: 600, επτακοσια: 700, εφτακοσια: 700, οκτακοσια: 800, οχτακοσια: 800, εννιακοσια: 900, εννεακοσια: 900, χιλια: 1000, μισο: 0.5, μιση: 0.5,
+  // "δυόμισι", "τρεισήμισι" … (dictation writes them as one word)
+  ...Object.fromEntries(([['εναμισ', 1.5], ['δυομισ', 2.5], ['τριαμισ', 3.5], ['τρεισημισ', 3.5], ['τεσσεραμισ', 4.5], ['τεσσερισημισ', 4.5], ['πεντεμισ', 5.5],
+    ['εξιμισ', 6.5], ['εφταμισ', 7.5], ['επταμισ', 7.5], ['οχτωμισ', 8.5], ['οκτωμισ', 8.5], ['εννιαμισ', 9.5], ['δεκαμισ', 10.5]] as Array<[string, number]>)
+    .flatMap(([w, v]) => [[w + 'ι', v], [w + 'η', v]])),
 };
+/** a number written with digits or words at toks[i] ("3", "τρεις", "είκοσι πέντε"; "μία/ένα" count too here): its value and how many words it took */
+export function numberAt(words: string[], i: number): { v: number; len: number } | null {
+  const w = words[i] ?? '';
+  if (/^\d+$/.test(w)) return { v: Number(w), len: 1 };
+  if (/^(μια|μιαν|ενα|εναν)$/.test(w)) return { v: 1, len: 1 };
+  let v = 0, len = 0;
+  while (NUMWORDS[words[i + len] ?? ''] !== undefined) v += NUMWORDS[words[i + len++]];
+  return len ? { v, len } : null;
+}
 export const MONTHS: Array<[string[], number]> = [
   [['ιαν', 'jan'], 0], [['φεβ', 'feb'], 1], [['μαρ', 'mar'], 2], [['απρ', 'apr'], 3], [['μαι', 'may'], 4], [['ιουν', 'jun'], 5],
   [['ιουλ', 'jul'], 6], [['αυγ', 'aug'], 7], [['σεπ', 'sep'], 8], [['οκτ', 'oct'], 9], [['νοε', 'nov'], 10], [['δεκ', 'dec'], 11],
@@ -146,6 +160,12 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   // ---- date
   const today = ctx.today;
   const T = fromISO(today);
+  const agoAt = (j: number): { days: number; len: number } | null => {
+    const n = numberAt(toks.map(t => (t.used ? '' : t.n)), j);
+    if (!n || !Number.isInteger(n.v)) return null;
+    const unit = nt(j + n.len);
+    return /^(μερ|ημερ|day)/.test(unit) ? { days: n.v, len: n.len + 1 } : /^(εβδομαδ|βδομαδ|week)/.test(unit) ? { days: n.v * 7, len: n.len + 1 } : null;
+  };
   for (let i = 0; i < toks.length && !out.date; i++) {
     const w = nt(i);
     if (toks[i].used) continue;
@@ -164,7 +184,12 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
     else if (/^προχθεσιν/.test(w)) take(addDays(today, -2));
     else if (/^σημεριν/.test(w)) take(today);
     else if (/^αυριαν/.test(w)) take(addDays(today, 1));
-    else if ((w === 'πριν' || w === 'before') && /^\d+$/.test(nt(i + 1)) && /^(μερ|ημερ|day)/.test(nt(i + 2))) take(addDays(today, -Number(nt(i + 1))), 3);
+    // "πριν 3 μέρες", "πριν από τρεις μέρες", "πριν μία εβδομάδα", "3 μέρες πριν"
+    else if ((w === 'πριν' || w === 'before') && agoAt(i + (nt(i + 1) === 'απο' ? 2 : 1))) {
+      const j = i + (nt(i + 1) === 'απο' ? 2 : 1), a = agoAt(j)!;
+      take(addDays(today, -a.days), j - i + a.len);
+    }
+    else if (agoAt(i) && /^(πριν|ago)$/.test(nt(i + agoAt(i)!.len))) { const a = agoAt(i)!; take(addDays(today, -a.days), a.len + 1); }
     else if (/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(w)) {
       const [d, m, y] = w.split('/').map(Number);
       take(toISO(new Date(y ? (y < 100 ? 2000 + y : y) : T.getFullYear(), m - 1, d)));

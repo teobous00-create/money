@@ -55,12 +55,21 @@ function work(ws: string[]): boolean {
 
   // what they owe me
   if (has(ws, /^(χρωσταει|χρωστανε|χρωστουν|χρωστα|οφειλ\p{L}*|περιμενω|owe\p{L}*)$/u)) {
+    // "χωρίς το μπόνους" / "μόνο τον μισθό": the morning salary alone; tips are never in what's owed (paid every day)
+    const without = has(ws, /^(χωρισ|without)$/u);
+    const salaryOnly = (without && has(ws, /^(μπονουσ|μπονου|bonus|επαφ\p{L}*)$/u)) || (has(ws, /^(μονο|only)$/) && has(ws, /^(μισθ\p{L}*|βασικ\p{L}*|salary)$/u));
+    const noTips = without && has(ws, /^(tips?|τιπσ|τιψ|τιπ|φιλοδωρ\p{L}*)$/u);
     const out = jobsNamed(ws).map(job => {
       const { list } = payPeriods(job, shiftsOf(job), getState().payouts, getState().transactions);
+      if (salaryOnly && job.kind === 'daily') {
+        const owed = list.map(p => ({ p, v: round2(p.base - p.paidBase) })).filter(x => x.v > 0.004).reverse();
+        const sum = round2(owed.reduce((x, o) => x + o.v, 0));
+        return `${job.name} salary: ${money(sum)}${owed.length ? ` (${owed.map(o => `${periodLabel(o.p)} ${money(o.v)}`).join(', ')})` : ''} · without bonus`;
+      }
       const owed = list.filter(p => p.owed > 0.004).reverse();
       const pending = list.find(p => p.current)?.pendingBonus ?? 0;
       const sum = round2(owed.reduce((x, p) => x + p.owed, 0));
-      return `${job.name}: ${money(sum)}${owed.length ? ` (${owed.map(p => `${periodLabel(p)} ${money(p.owed)}`).join(', ')})` : ''}${pending ? ` + bonus ${money(pending)} at month end` : ''}`;
+      return `${job.name}: ${money(sum)}${owed.length ? ` (${owed.map(p => `${periodLabel(p)} ${money(p.owed)}`).join(', ')})` : ''}${pending ? ` + bonus ${money(pending)} at month end` : ''}${noTips && job.kind === 'hourly' ? ' · without tips' : ''}`;
     });
     return say(out.join(' · '));
   }
@@ -100,8 +109,9 @@ function work(ws: string[]): boolean {
   if (has(ws, /^(ωρ\p{L}*|hours?|βαρδι\p{L}*|shifts?|δουλεψα|δουλεψ\p{L}*|μεροκαματα)$/u)) {
     const used = new Set<number>();
     const r = rangeOf(ws, used, future);
+    const ahead = future || r.from > T;   // "την επόμενη βδομάδα" counts the planned shifts
     const lines = jobsNamed(ws).map(job => {
-      const sh = shiftsOf(job).filter(s => s.date >= r.from && s.date <= r.to && (future || s.date <= T));
+      const sh = shiftsOf(job).filter(s => s.date >= r.from && s.date <= r.to && (ahead || s.date <= T));
       const hours = round2(sh.reduce((x, s) => x + (s.hours ?? 0), 0));
       return sh.length ? `${job.name}: ${sh.length} ${job.kind === 'daily' ? 'days' : 'shifts'}${hours ? ` · ${num(hours)}h` : ''}` : `${job.name}: none`;
     });
