@@ -37,25 +37,41 @@ const EXPENSE = ['εδωσα', 'πληρωσα', 'ξοδεψα', 'αγορασα
 const TRANSFER = ['μεταφορα', 'μεταφερα', 'μετεφερα', 'transfer', 'αναληψη', 'καταθεση'];
 const FILLER = ['πηρα', 'got', 'paid', 'πληρωμη'];
 
-export const NUMWORDS: Record<string, number> = {
+const BASE_NUMS: Record<string, number> = {
   μηδεν: 0, δυο: 2, τρια: 3, τρεισ: 3, τεσσερα: 4, τεσσερισ: 4, πεντε: 5, εξι: 6, επτα: 7, εφτα: 7, οκτω: 8, οχτω: 8,
-  εννια: 9, εννεα: 9, δεκα: 10, εντεκα: 11, δωδεκα: 12, δεκατρια: 13, δεκατεσσερα: 14, δεκαπεντε: 15, δεκαεξι: 16, δεκαεπτα: 17, δεκαεφτα: 17,
+  εννια: 9, εννεα: 9, δεκα: 10, εντεκα: 11, δωδεκα: 12, δεκατρια: 13, δεκατρεισ: 13, δεκατεσσερα: 14, δεκατεσσερισ: 14, δεκαπεντε: 15, δεκαεξι: 16, δεκαεπτα: 17, δεκαεφτα: 17,
   δεκαοκτω: 18, δεκαοχτω: 18, δεκαεννια: 19, δεκαεννεα: 19, εικοσι: 20, τριαντα: 30, σαραντα: 40, πενηντα: 50, εξηντα: 60, εβδομηντα: 70,
   ογδοντα: 80, ενενηντα: 90, εκατο: 100, εκατον: 100, διακοσια: 200, τριακοσια: 300, τετρακοσια: 400, πεντακοσια: 500,
-  εξακοσια: 600, επτακοσια: 700, εφτακοσια: 700, οκτακοσια: 800, οχτακοσια: 800, εννιακοσια: 900, εννεακοσια: 900, χιλια: 1000, μισο: 0.5, μιση: 0.5,
-  // "δυόμισι", "τρεισήμισι" … (dictation writes them as one word)
-  ...Object.fromEntries(([['εναμισ', 1.5], ['δυομισ', 2.5], ['τριαμισ', 3.5], ['τρεισημισ', 3.5], ['τεσσεραμισ', 4.5], ['τεσσερισημισ', 4.5], ['πεντεμισ', 5.5],
-    ['εξιμισ', 6.5], ['εφταμισ', 7.5], ['επταμισ', 7.5], ['οχτωμισ', 8.5], ['οκτωμισ', 8.5], ['εννιαμισ', 9.5], ['δεκαμισ', 10.5]] as Array<[string, number]>)
-    .flatMap(([w, v]) => [[w + 'ι', v], [w + 'η', v]])),
+  εξακοσια: 600, επτακοσια: 700, εφτακοσια: 700, οκτακοσια: 800, οχτακοσια: 800, εννιακοσια: 900, εννεακοσια: 900, χιλια: 1000,
 };
+export const NUMWORDS: Record<string, number> = {
+  ...BASE_NUMS, μισο: 0.5, μιση: 0.5, μισι: 0.5, εναμισι: 1.5, εναμιση: 1.5,
+  // "δυόμισι", "τρεισήμισι", "δωδεκάμισι", "δεκαπεντέμισι" … (dictation writes them as one word): any number up to 99 + "μισι"
+  ...Object.fromEntries(Object.entries(BASE_NUMS).filter(([, v]) => v >= 2 && v < 100)
+    .flatMap(([w, v]) => [...new Set([w, w.endsWith('σ') ? w + 'η' : w])].flatMap(x => [[x + 'μισι', v + 0.5], [x + 'μιση', v + 0.5]]))),
+};
+/**
+ * Number words from ws[i] on: "είκοσι πέντε" = 25, "εκατόν είκοσι" = 120. A bigger tens word after a smaller number
+ * starts the cents, the way prices are said: "δώδεκα πενήντα" = 12,50, "τρία σαράντα πέντε" = 3,45.
+ * `ok(k)` can skip words already taken.
+ */
+export function wordsNumber(ws: string[], i: number, ok: (k: number) => boolean = () => true): { v: number; len: number } | null {
+  let v = 0, cents = 0, inCents = false, last = Infinity, len = 0;
+  for (let k = i; k < ws.length && ok(k) && NUMWORDS[ws[k]] !== undefined; k++) {
+    const x = NUMWORDS[ws[k]];
+    if (!inCents && len > 0 && Number.isInteger(x) && x >= 10 && x <= 90 && x > last && v % 1 === 0) inCents = true;
+    else if (inCents && (x >= last || cents + x >= 100)) break;
+    if (inCents) cents += x; else v += x;
+    last = x; len++;
+  }
+  return len ? { v: Math.round((v + cents / 100) * 100) / 100, len } : null;
+}
 /** a number written with digits or words at toks[i] ("3", "τρεις", "είκοσι πέντε"; "μία/ένα" count too here): its value and how many words it took */
 export function numberAt(words: string[], i: number): { v: number; len: number } | null {
   const w = words[i] ?? '';
   if (/^\d+$/.test(w)) return { v: Number(w), len: 1 };
   if (/^(μια|μιαν|ενα|εναν)$/.test(w)) return { v: 1, len: 1 };
-  let v = 0, len = 0;
-  while (NUMWORDS[words[i + len] ?? ''] !== undefined) v += NUMWORDS[words[i + len++]];
-  return len ? { v, len } : null;
+  return wordsNumber(words, i);
 }
 export const MONTHS: Array<[string[], number]> = [
   [['ιαν', 'jan'], 0], [['φεβ', 'feb'], 1], [['μαρ', 'mar'], 2], [['απρ', 'apr'], 3], [['μαι', 'may'], 4], [['ιουν', 'jun'], 5],
@@ -226,11 +242,13 @@ export function parseQuick(text: string, ctx: ParseCtx): Parsed {
   for (let i = 0; i < toks.length; i++) {
     if (toks[i].used) continue;
     const v = parseNumber(toks[i].n);
+    // "12μισι" / "12 μισή" → 12,5
+    if (v !== null && /^(μισι|μιση|μισο)$/.test(nt(i + 1)) && !toks[i + 1].used && Number.isInteger(v)) { toks[i + 1].used = true; toks[i + 1].n = ''; nums.push({ i, v: v + 0.5, dec: true }); continue; }
     if (v !== null) { nums.push({ i, v, dec: /[.,]/.test(toks[i].n) }); continue; }
     // number words: "είκοσι πέντε", "εκατόν είκοσι"
     if (NUMWORDS[toks[i].n] !== undefined) {
-      let total = 0, j = i;
-      while (j < toks.length && NUMWORDS[toks[j].n] !== undefined && !toks[j].used) { total += NUMWORDS[toks[j].n]; j++; }
+      const r = wordsNumber(toks.map(t => t.n), i, k => !toks[k].used)!;
+      const total = r.v, j = i + r.len;
       nums.push({ i, v: total, dec: total % 1 !== 0 });
       for (let k = i + 1; k < j; k++) toks[k].used = true, toks[k].n = '';
       i = j - 1;

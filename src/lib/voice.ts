@@ -6,7 +6,7 @@
  *  - entries:     "netflix 12,49 κάθε μήνα", "καφές 3, supermarket 20 και τσιγάρα 5,5"
  */
 import { addDays, fromISO, round2, toISO } from './format';
-import { NUMWORDS, MONTHS, clean, lev1, norm, parseNumber, parseQuick, phon, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
+import { NUMWORDS, MONTHS, wordsNumber, clean, lev1, norm, parseNumber, parseQuick, phon, sameWord, stripPunct, type ParseCtx, type Parsed } from './quickparse';
 import type { Freq, Job, Strategy } from './types';
 
 /**
@@ -102,13 +102,13 @@ function labelled(ws: Array<{ n: string }>) {
     let v = parseNumber(ws[i].n.replace(/^[+-]/, ''));
     let end = i;
     if (v === null && NUMWORDS[ws[i].n] !== undefined) {
-      v = 0;
-      while (end < ws.length && NUMWORDS[ws[end].n] !== undefined) v += NUMWORDS[ws[end++].n];
-      end--;
+      const r = wordsNumber(ws.map(w => w.n), i)!;
+      v = r.v; end = i + r.len - 1;
     }
     if (v === null) continue;
     // "6 και μισή", "12 και 50" (cents)
     if (ws[end + 1]?.n === 'και' && (ws[end + 2]?.n === 'μιση' || ws[end + 2]?.n === 'μισο')) { v += 0.5; end += 2; }
+    else if (/^(μισι|μιση|μισο)$/.test(ws[end + 1]?.n ?? '') && Number.isInteger(v)) { v += 0.5; end += 1; }   // "7 μισή ώρες", "12μισι"
     else if (ws[end + 1]?.n === 'και' && /^\d{2}$/.test(ws[end + 2]?.n ?? '') && Number.isInteger(v)) { v += Number(ws[end + 2].n) / 100; end += 2; }
     const sign = ws[i].n.startsWith('-') || NEG.test(ws[i - 1]?.n ?? '') ? -1 : 1;
     nums.push({ i, end, v: round2(v), sign });
