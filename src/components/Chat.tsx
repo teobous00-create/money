@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useDragControls } from 'motion/react';
-import { ArrowUp, Mic, RotateCcw, ChevronDown } from 'lucide-react';
-import { askClaude, aiErrorText, aiRemaining, loadChat, saveChat, type ChatItem, type QueryResult } from '../lib/ai';
+import { ArrowUp, Mic, ChevronDown, MessagesSquare, SquarePen, Trash2, NotebookPen } from 'lucide-react';
+import { askClaude, aiErrorText, aiRemaining, deleteConvo, getConvo, loadConvos, newConvo, saveConvo, saveNote, startingConvo, type ChatItem, type Convo, type NoteCard, type QueryResult } from '../lib/ai';
 import { useListen } from './QuickEntry';
-import { setUi, useUi } from '../lib/ui';
+import { getUi, setUi, useUi } from '../lib/ui';
 import { useStore } from '../lib/store';
-import { haptic, money, num, shortDate } from '../lib/format';
+import { addDays, haptic, money, num, shortDate, toISO, todayISO } from '../lib/format';
 import { ease, toast, Sheet } from './ui';
 import { applyProposal, type Proposal } from '../lib/aiActions';
 
 const IDEAS = ['Τι να κόψω αυτόν τον μήνα;', 'Πόσα έδωσα σε delivery φέτος;', 'Ποια βάρδια μου αποδίδει περισσότερο;', 'Πώς πάει το trading σε σχέση με τη δουλειά;'];
 
-/** Ask Claude about your money. Comes down from the top; drag it back up (or press back) to close. */
+/** Lumen: ask about your money. Comes down from the top; drag it back up (or press back) to close. */
 export function ChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const drag = useDragControls();
   // the phone's back button closes it
@@ -36,57 +36,85 @@ export function ChatPanel({ open, onClose }: { open: boolean; onClose: () => voi
 }
 
 function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: React.PointerEvent) => void }) {
-  const [items, setItems] = useState<ChatItem[]>(loadChat);
+  // the conversation asked for (from the mic window), else the last one if it's recent, else a new one
+  const [convo, setConvoState] = useState<Convo>(() => { const id = getUi().convo; const c = id ? getConvo(id) : null; return c ?? startingConvo(); });
+  const cur = useRef(convo);
+  const setConvo = (c: Convo) => { cur.current = c; setConvoState(c); };
+  useEffect(() => { if (getUi().convo) setUi({ convo: null }); }, []);
+  const items = convo.items;
+  const [showList, setShowList] = useState(false);
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);   // the conversation waiting for an answer
   const list = useRef<HTMLDivElement>(null);
-  useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' }); }, [items.length, busy]);
+  useEffect(() => { if (!showList) list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' }); }, [items.length, busy, showList, convo.id]);
 
+  /** saves the conversation; shows it only if it's still the one on screen */
+  const commit = (c: Convo, next: ChatItem[]) => { const saved = saveConvo({ ...c, items: next }); if (cur.current.id === c.id) setConvo(saved); return saved; };
   const send = async (q: string) => {
     const question = q.trim();
     if (!question || busy) return;
     haptic(8);
+    setShowList(false);
+    const c = cur.current;
+    const before = c.items;
     const mine: ChatItem = { role: 'user', text: question, at: new Date().toISOString() };
-    const next = [...items, mine];
-    setItems(next); saveChat(next); setText(''); setBusy(true);
+    const withQ = commit(c, [...before, mine]);
+    setText(''); setBusy(c.id);
     let reply: ChatItem;
-    try { reply = await askClaude(items, question); }
+    try { reply = await askClaude(before, question); }
     catch (e) { reply = { role: 'assistant', text: aiErrorText(e), error: true, at: new Date().toISOString() }; }
-    const done = [...next, reply];
-    setItems(done); saveChat(done); setBusy(false);
+    const latest = getConvo(withQ.id) ?? withQ;
+    commit(latest, [...latest.items, reply]);
+    setBusy(null);
   };
+  const update = (i: number, patch: Partial<ChatItem>) => commit(cur.current, cur.current.items.map((x, k) => (k === i ? { ...x, ...patch } : x)));
   const { listening, heard, start, supported } = useListen(t => void send(t));
   useEffect(() => { if (listening) setText(heard); }, [heard, listening]);
   const left = aiRemaining();
+  const stop = (e: React.PointerEvent) => e.stopPropagation();
 
   return (
     <>
       <div className="chat-head" onPointerDown={startDrag}>
-        <span className="chat-title">Ask</span>
-        <span className="tiny muted">{left != null ? `${left} left today` : 'about your money'}</span>
+        <button className="iconbtn" aria-label="Conversations" onPointerDown={stop} onClick={() => { haptic(4); setShowList(v => !v); }}
+          style={{ color: showList ? 'var(--accent)' : undefined, marginLeft: -12 }}><MessagesSquare size={21} /></button>
+        <span className="chat-title">Lumen</span>
+        <span className="tiny muted">{left != null ? `${left} left today` : ''}</span>
         <span className="grow" />
-        {items.length > 0 && (
-          <button className="iconbtn" aria-label="New chat" onPointerDown={e => e.stopPropagation()} onClick={() => { setItems([]); saveChat([]); }}><RotateCcw size={19} /></button>
+        {(items.length > 0 || showList) && (
+          <button className="iconbtn" aria-label="New conversation" onPointerDown={stop} onClick={() => { haptic(4); setConvo(newConvo()); setShowList(false); }}><SquarePen size={19} /></button>
         )}
-        <button className="iconbtn" aria-label="Close" onPointerDown={e => e.stopPropagation()} onClick={onClose}><ChevronDown size={22} style={{ transform: 'rotate(180deg)' }} /></button>
+        <button className="iconbtn" aria-label="Close" onPointerDown={stop} onClick={onClose}><ChevronDown size={22} style={{ transform: 'rotate(180deg)' }} /></button>
       </div>
-      <div className="chat-list" ref={list}>
-        {items.length === 0 && (
-          <div className="chat-empty">
-            <div className="small muted" style={{ marginBottom: 12 }}>Ask anything about your money — it sees your totals, budgets, work and trading, and looks up exact numbers when it needs them.</div>
-            {IDEAS.map(q => <button key={q} className="chip" style={{ margin: '0 6px 8px 0' }} onClick={() => void send(q)}>{q}</button>)}
-          </div>
+      <AnimatePresence mode="wait" initial={false}>
+        {showList ? (
+          <motion.div key="list" className="chat-list" initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.2, ease }}>
+            <ConvoList current={convo.id} onOpen={c => { haptic(4); setConvo(c); setShowList(false); }} onDeleted={id => { if (id === cur.current.id) setConvo(newConvo()); }} />
+          </motion.div>
+        ) : (
+          <motion.div key={'c' + convo.id} className="chat-list" ref={list} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.2, ease }}>
+            {items.length === 0 && (
+              <div className="chat-empty">
+                <div className="small muted" style={{ marginBottom: 12 }}>Lumen sees your totals, budgets, goals, levels, work and trading, looks up exact numbers when it needs them, and can work out when you'll get where you're going.</div>
+                {IDEAS.map(q => <button key={q} className="chip" style={{ margin: '0 6px 8px 0' }} onClick={() => void send(q)}>{q}</button>)}
+              </div>
+            )}
+            {items.map((m, i) => (
+              <Bubble key={i} m={m}
+                onProposal={status => m.proposal && update(i, { proposal: { ...m.proposal, status } })}
+                onNote={status => m.note && update(i, { note: { ...m.note, status } })} />
+            ))}
+            {busy === convo.id && <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
+          </motion.div>
         )}
-        {items.map((m, i) => <Bubble key={i} m={m} onProposal={status => { const next = items.map((x, k) => (k === i && x.proposal ? { ...x, proposal: { ...x.proposal, status } } : x)); setItems(next); saveChat(next); }} />)}
-        {busy && <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
-      </div>
+      </AnimatePresence>
       <div className="chat-input">
-        <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : 'Ρώτα κάτι…'} onChange={e => setText(e.target.value)}
+        <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : 'Ρώτα τον Lumen…'} onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') void send(text); }} enterKeyHint="send" />
         {text.trim() && !listening
-          ? <button className="quick-btn go" aria-label="Send" onClick={() => void send(text)} disabled={busy}><ArrowUp size={19} /></button>
+          ? <button className="quick-btn go" aria-label="Send" onClick={() => void send(text)} disabled={!!busy}><ArrowUp size={19} /></button>
           : supported && (
-            <button className={`quick-btn mic ${listening ? 'on' : ''}`} aria-label={listening ? 'Stop' : 'Speak'} onClick={start} disabled={busy}>
+            <button className={`quick-btn mic ${listening ? 'on' : ''}`} aria-label={listening ? 'Stop' : 'Speak'} onClick={() => { setShowList(false); start(); }} disabled={!!busy}>
               {listening && <motion.span className="quick-pulse" initial={{ scale: 1, opacity: 0.5 }} animate={{ scale: 1.9, opacity: 0 }} transition={{ duration: 1.1, repeat: Infinity }} />}
               <Mic size={19} />
             </button>
@@ -97,46 +125,78 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
   );
 }
 
-/** A question from the top mic: answered in a small window, kept in the chat history. */
+const timeFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+const dayFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+function when(iso: string) {
+  const d = new Date(iso), today = todayISO(), day = toISO(d);
+  if (day === today) return timeFmt.format(d);
+  if (day === addDays(today, -1)) return 'Yesterday';
+  return dayFmt.format(d);
+}
+
+/** Your conversations, newest first. Tap to continue one; swipe left to delete. */
+function ConvoList({ current, onOpen, onDeleted }: { current: string; onOpen: (c: Convo) => void; onDeleted: (id: string) => void }) {
+  const [list, setList] = useState<Convo[]>(loadConvos);
+  if (!list.length) return <div className="chat-empty small muted">No conversations yet.</div>;
+  return (
+    <div className="convos">
+      <AnimatePresence initial={false}>
+        {list.map(c => (
+          <motion.div key={c.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.22, ease }} className="convo-wrap">
+            <div className="convo-del"><Trash2 size={18} /></div>
+            <motion.button className={`convo ${c.id === current ? 'on' : ''}`} drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.6, right: 0 }} dragDirectionLock dragSnapToOrigin
+              onDragEnd={(_, i) => { if (i.offset.x < -110) { haptic(10); deleteConvo(c.id); setList(l => l.filter(x => x.id !== c.id)); onDeleted(c.id); } }}
+              onClick={() => onOpen(c)}>
+              <span className="grow ellipsis" style={{ fontWeight: 600, textAlign: 'left' }}>{c.title || 'Untitled'}</span>
+              <span className="tiny muted" style={{ flex: 'none' }}>{when(c.updated)}</span>
+            </motion.button>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      <div className="tiny faint" style={{ textAlign: 'center', marginTop: 12 }}>Swipe left to delete · the last 30 stay on this phone</div>
+    </div>
+  );
+}
+
+/** A question from the top mic: answered in a small window, kept as its own conversation. */
 export function AskSheet() {
   const ask = useUi(u => u.ask);
   const lite = !useStore(st => !!st.prefs.analytics);   // her account: one command or question, no chat
   const [q, setQ] = useState<string | null>(null);
   const [reply, setReply] = useState<ChatItem | null>(null);
-  const [at, setAt] = useState(-1);   // where the reply sits in the chat history
+  const [cid, setCid] = useState<string | null>(null);
   useEffect(() => {
     if (!ask) return;
     let alive = true;
     setQ(ask); setReply(null);
-    const before = lite ? [] : loadChat();
     const mine: ChatItem = { role: 'user', text: ask, at: new Date().toISOString() };
-    if (!lite) saveChat([...before, mine]);
+    const c = lite ? null : saveConvo({ ...newConvo(), items: [mine] });
+    setCid(c?.id ?? null);
     (async () => {
       let r: ChatItem;
-      try { r = await askClaude(before, ask, lite, true); }   // from the top mic: Sonnet
+      try { r = await askClaude([], ask, lite, true); }   // from the top mic: Sonnet
       catch (e) { r = { role: 'assistant', text: aiErrorText(e), error: true, at: new Date().toISOString() }; }
-      if (lite) { if (alive) setReply(r); return; }
-      const now = loadChat();
-      saveChat([...now, r]);   // kept even if the window was closed meanwhile
-      if (alive) { setReply(r); setAt(now.length); }
+      if (c) saveConvo({ ...(getConvo(c.id) ?? c), items: [mine, r] });   // kept even if the window was closed meanwhile
+      if (alive) setReply(r);
     })();
     return () => { alive = false; };
-  }, [ask]);
+  }, [ask]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => setUi({ ask: null });
-  const onProposal = (status: Proposal['status']) => {
-    setReply(r => (r?.proposal ? { ...r, proposal: { ...r.proposal, status } } : r));
-    if (lite) return;
-    const all = loadChat();
-    if (all[at]?.proposal) { all[at] = { ...all[at], proposal: { ...all[at].proposal!, status } }; saveChat(all); }
+  const patch = (p: Partial<ChatItem>) => {
+    setReply(r => (r ? { ...r, ...p } : r));
+    const c = cid ? getConvo(cid) : null;
+    if (c) saveConvo({ ...c, items: c.items.map((x, k) => (k === 1 ? { ...x, ...p } : x)) });
   };
   return (
-    <Sheet open={!!ask} onClose={close} title={lite ? 'Voice' : 'Ask'}>
+    <Sheet open={!!ask} onClose={close} title="Lumen">
       <div className="sheet-body">
-      <div className="ask-q small muted">“{q}”</div>
-      <div className="ask-a">
-        {reply ? <Bubble m={reply} onProposal={onProposal} /> : <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
-      </div>
-      {!lite && <button className="btn secondary" style={{ width: '100%', marginTop: 12 }} disabled={!reply} onClick={() => setUi({ ask: null, chat: true })}>Continue in chat</button>}
+        <div className="ask-q small muted">“{q}”</div>
+        <div className="ask-a">
+          {reply
+            ? <Bubble m={reply} onProposal={status => reply.proposal && patch({ proposal: { ...reply.proposal, status } })} onNote={status => reply.note && patch({ note: { ...reply.note, status } })} />
+            : <div className="bubble ai"><span className="dots"><i /><i /><i /></span></div>}
+        </div>
+        {!lite && <button className="btn secondary" style={{ width: '100%', marginTop: 12 }} disabled={!reply} onClick={() => setUi({ ask: null, chat: true, convo: cid })}>Continue in chat</button>}
       </div>
     </Sheet>
   );
@@ -154,14 +214,33 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-function Bubble({ m, onProposal }: { m: ChatItem; onProposal: (s: Proposal['status']) => void }) {
+function Bubble({ m, onProposal, onNote }: { m: ChatItem; onProposal: (s: Proposal['status']) => void; onNote: (s: NoteCard['status']) => void }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}
       className={`bubble ${m.role === 'user' ? 'me' : 'ai'} ${m.error ? 'err' : ''}`}>
       {m.results?.filter(r => r.count > 0).map((r, i) => <ResultCard key={i} r={r} />)}
       <Rich text={m.text} />
       {m.proposal && <ProposalCard p={m.proposal} onStatus={onProposal} />}
+      {m.note && <NoteCardView n={m.note} onStatus={onNote} />}
     </motion.div>
+  );
+}
+
+/** A note Lumen suggests keeping in mind; saved only with a tap. */
+function NoteCardView({ n, onStatus }: { n: NoteCard; onStatus: (s: NoteCard['status']) => void }) {
+  return (
+    <div className={`pcard ${n.status === 'pending' ? '' : 'applied'}`}>
+      <div className="row tiny bold muted" style={{ gap: 6, marginBottom: 4 }}><NotebookPen size={14} />Note to keep in mind</div>
+      <div className="small">{n.text}</div>
+      {n.status === 'pending' ? (
+        <div className="row" style={{ gap: 8, marginTop: 10 }}>
+          <button className="btn" style={{ height: 40, flex: 1 }} onClick={() => { haptic(10); saveNote(n.text); onStatus('saved'); toast('Note saved · Settings › Lumen notes'); }}>Save</button>
+          <button className="btn secondary" style={{ height: 40, flex: 1 }} onClick={() => onStatus('dismissed')}>No</button>
+        </div>
+      ) : (
+        <div className="tiny bold" style={{ marginTop: 8, color: n.status === 'saved' ? 'var(--income)' : 'var(--ink-3)' }}>{n.status === 'saved' ? '✓ Saved' : 'Not saved'}</div>
+      )}
+    </div>
   );
 }
 

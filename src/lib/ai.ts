@@ -3,7 +3,7 @@
  * The phone builds a summary (never every transaction); when Claude needs a specific number it asks the
  * phone to compute it (query tool), so the figures always come from your data.
  */
-import { getState, type State } from './store';
+import { getState, setPrefs, type State } from './store';
 import { supabase, REMOTE } from './supabase';
 import { alive, computeBalances, catName } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO } from './format';
@@ -83,13 +83,13 @@ async function callOnce(body: { system: unknown; messages: ApiMsg[]; tools?: unk
 
 export function aiErrorText(e: unknown): string {
   const code = e instanceof AiError ? e.code : 'other';
-  if (code === 'not_setup') return 'The AI isn’t set up yet (Edge Function + key in Supabase).';
+  if (code === 'not_setup') return 'Lumen isn’t set up yet (Edge Function + key in Supabase).';
   if (code === 'no_function') return 'Supabase has no Edge Function named “ai” yet — deploy it (step 2).';
   if (code === 'no_key') return 'The “ai” function is there, but the key is missing: add ANTHROPIC_API_KEY in Edge Function Secrets (step 3).';
   if (code === 'jwt') return 'The “ai” function refused the login: turn OFF “Verify JWT” in its settings, then try again.';
   if (code === 'unreachable') return 'Can’t reach the “ai” function — it may not be deployed, or the pasted code has an error. Deploy it again (step 2).';
   if (code === 'limit') return 'You’ve used today’s AI messages. It resets tomorrow.';
-  if (code === 'not_allowed') return 'The AI isn’t on for this account.';
+  if (code === 'not_allowed') return 'Lumen isn’t on for this account.';
   if (code === 'offline') return 'No connection right now.';
   if (code === 'claude') return `Claude couldn’t answer: ${(e as AiError).message || 'try again'}`;
   return `Something went wrong${(e as Error)?.message ? ` (${(e as Error).message})` : ''} — try again.`;
@@ -363,7 +363,7 @@ export function runTrading(q: TradingInput, s: State = getState(), today = today
 
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips), query_trading (daily P&L per strategy) and project (what-if: when goals close and levels come) — and ABOUT ME (his own description of his goals and situation; it may be empty).
+const CHAT_RULES = `You are Lumen, the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips), query_trading (daily P&L per strategy) and project (what-if: when goals close and levels come) — ABOUT ME (his own description of his goals and situation; it may be empty) and NOTES (things he asked you to keep in mind, dated).
 
 Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
 
@@ -392,13 +392,18 @@ Changes
 - Nothing is saved until he taps Apply on the card. After proposing, say in one line what the card contains and that he needs to tap Apply. Never say it is done.
 - If the tool reports problems, fix them (another call) or ask him one short question.
 
+Notes
+- Read NOTES before explaining any change in his numbers: they say what changed in his life or in how he files things.
+- When he tells you something lasting that should change future answers (a category now means something else, a month was unusual and why, a plan, a decision), or asks you to remember something, call save_note with one short sentence in his words and language. He saves it with a tap.
+- Never save figures that are already in DATA, and never save the same thing twice.
+
 Context
 - Shared categories (with his girlfriend): his totals are only his part. For questions about joint spending use who "partner" or "both" in the tool.
 - Future-dated (planned) entries do not count until their date.
 - The current month is not over: compare by pace, not by totals.`;
 
 /** Her account: the top mic only — commands, and one short answer to a question. No conversation. */
-export const LITE_RULES = `You are the voice assistant inside a shared budgeting app. The user speaks one command or one question into the microphone. You see her finances through DATA (a summary the app computes) and query_transactions (every transaction). There is no conversation: answer this one message and stop.
+export const LITE_RULES = `You are Lumen, the voice assistant inside a shared budgeting app. The user speaks one command or one question into the microphone. You see her finances through DATA (a summary the app computes) and query_transactions (every transaction). There is no conversation: answer this one message and stop.
 
 Language: answer in the language she used (usually Greek). Keep category names, account names and notes exactly as they are.
 
@@ -419,11 +424,62 @@ Context
 - She can only change her own entries, not her partner's.
 - Future-dated (planned) entries do not count until their date. The current month is not over.`;
 
-export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; proposal?: Proposal; error?: boolean; at: string }
+export interface NoteCard { text: string; status: 'pending' | 'saved' | 'dismissed' }
+export interface ChatItem { role: 'user' | 'assistant'; text: string; results?: QueryResult[]; proposal?: Proposal; note?: NoteCard; error?: boolean; at: string }
 
-const CHAT_KEY = 'money:chat';
-export function loadChat(): ChatItem[] { try { return JSON.parse(localStorage.getItem(CHAT_KEY) ?? '[]'); } catch { return []; } }
-export function saveChat(items: ChatItem[]) { try { localStorage.setItem(CHAT_KEY, JSON.stringify(items.slice(-60))); } catch { /* full */ } }
+// ---------------------------------------------------------------- conversations (on this phone only)
+
+export interface Convo { id: string; title: string; items: ChatItem[]; updated: string }
+const CONVOS_KEY = 'money:convos';
+const KEEP = 30;
+const FRESH_MS = 3 * 3600e3;   // the chat reopens the last conversation if it was used in the last 3 hours
+
+export function loadConvos(): Convo[] {
+  try {
+    const raw = localStorage.getItem(CONVOS_KEY);
+    if (raw) return JSON.parse(raw);
+    // the single chat from before becomes the first conversation
+    const old = JSON.parse(localStorage.getItem('money:chat') ?? '[]') as ChatItem[];
+    const list = old.length ? [{ id: 'c' + Date.now(), title: titleOf(old), items: old, updated: old[old.length - 1].at }] : [];
+    localStorage.setItem(CONVOS_KEY, JSON.stringify(list));
+    localStorage.removeItem('money:chat');
+    return list;
+  } catch { return []; }
+}
+const writeConvos = (list: Convo[]) => { try { localStorage.setItem(CONVOS_KEY, JSON.stringify(list.slice(0, KEEP))); } catch { /* full */ } };
+export const titleOf = (items: ChatItem[]) => { const q = items.find(i => i.role === 'user')?.text.trim() ?? ''; return q.length > 60 ? q.slice(0, 57).trimEnd() + '…' : q; };
+export const newConvo = (): Convo => ({ id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: '', items: [], updated: new Date().toISOString() });
+/** Saves a conversation (an empty one isn't kept), newest first. */
+export function saveConvo(c: Convo): Convo {
+  const items = c.items.slice(-60);
+  const next = { ...c, items, title: c.title || titleOf(items), updated: items.length ? items[items.length - 1].at : c.updated };
+  const rest = loadConvos().filter(x => x.id !== c.id);
+  writeConvos(items.length ? [next, ...rest].sort((a, b) => b.updated.localeCompare(a.updated)) : rest);
+  return next;
+}
+export function deleteConvo(id: string) { writeConvos(loadConvos().filter(x => x.id !== id)); }
+export const getConvo = (id: string) => loadConvos().find(x => x.id === id) ?? null;
+/** The conversation the chat opens with: the last one if it's recent, else a new one. */
+export function startingConvo(): Convo {
+  const last = loadConvos()[0];
+  return last && Date.now() - new Date(last.updated).getTime() < FRESH_MS ? last : newConvo();
+}
+
+// ---------------------------------------------------------------- notes (synced with your settings)
+
+export const NOTE_TOOL = {
+  name: 'save_note',
+  description: 'Suggest a note for him to keep: one short sentence about something lasting that should change future answers (a category now means something else, why a month was unusual, a plan or decision), or something he asked you to remember. The app shows it as a card; it is saved only when he taps Save. Use his language and words.',
+  input_schema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+};
+export function saveNote(text: string) {
+  const notes = getState().prefs.notes ?? [];
+  setPrefs({ notes: [...notes, { id: 'n' + Date.now().toString(36), text: text.trim(), date: todayISO() }] });
+}
+const notesText = () => {
+  const n = getState().prefs.notes ?? [];
+  return n.length ? n.map(x => `- ${x.date}: ${x.text}`).join('\n') : '(none)';
+};
 
 const CONTINUE = 'Continue exactly where you stopped. Do not repeat anything.';
 const textOf = (r: ApiReply) => r.content.filter((x): x is Extract<Block, { type: 'text' }> => x.type === 'text').map(x => x.text).join('');
@@ -454,13 +510,14 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   const tier: Tier = !fromMic && isQuestion(question) ? 'ask' : 'act';
   const system = [
     { type: 'text', text: lite ? LITE_RULES : CHAT_RULES },
-    ...(lite ? [] : [{ type: 'text', text: 'ABOUT ME\n' + aboutMe() }]),
+    ...(lite ? [] : [{ type: 'text', text: 'ABOUT ME\n' + aboutMe() + '\n\nNOTES\n' + notesText() }]),
     { type: 'text', text: 'DATA\n' + buildSnapshot(), cache_control: { type: 'ephemeral' } },
   ];
   const past: ApiMsg[] = (lite ? [] : history).filter(h => !h.error).slice(-16).map(h => ({
     role: h.role,
     content: (h.text || '…') + (h.role === 'assistant' && h.results?.length ? `\n[Looked up: ${h.results.map(memo).join(' | ')}]` : '')
-      + (h.proposal ? `\n[Card: ${h.proposal.items.map(i => i.label).join(' | ')} — ${h.proposal.status === 'applied' ? 'he applied it' : h.proposal.status === 'pending' ? 'not applied yet' : 'not applied'}]` : ''),
+      + (h.proposal ? `\n[Card: ${h.proposal.items.map(i => i.label).join(' | ')} — ${h.proposal.status === 'applied' ? 'he applied it' : h.proposal.status === 'pending' ? 'not applied yet' : 'not applied'}]` : '')
+      + (h.note ? `\n[Note card: "${h.note.text}" — ${h.note.status === 'saved' ? 'he saved it' : h.note.status === 'pending' ? 'not saved yet' : 'he dismissed it'}]` : ''),
   }));
   // the API wants turns to alternate, starting with the user
   const msgs: ApiMsg[] = [];
@@ -470,17 +527,23 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   }
   const results: QueryResult[] = [];
   let proposal: Proposal | null = null;
-  const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, PROJECT_TOOL, CHANGES_TOOL];
+  const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, PROJECT_TOOL, CHANGES_TOOL, NOTE_TOOL];
+  let note: NoteCard | null = null;
   for (let step = 0; step < MAX_STEPS; step++) {
     const r = await complete(system, msgs, tools, tier);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
-    if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, at: new Date().toISOString() };
+    if (r.stop_reason !== 'tool_use' || !uses.length) return { role: 'assistant', text: textOf(r).trim(), results, proposal: proposal ?? undefined, note: note ?? undefined, at: new Date().toISOString() };
     msgs.push({ role: 'assistant', content: clean(r.content) });
     msgs.push({
       role: 'user', content: uses.map(u => {
         if (u.name === WORK_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runWork(u.input as WorkInput) };
         if (u.name === TRADING_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runTrading(u.input as TradingInput) };
-        if (u.name === PROJECT_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runProject(u.input as ProjectInput) };
+        if (u.name === NOTE_TOOL.name) {
+          const t = String((u.input as { text?: string }).text ?? '').trim();
+          if (t) note = { text: t, status: 'pending' };
+          return { type: 'tool_result' as const, tool_use_id: u.id, content: JSON.stringify({ card_shown: t, saved: false, note: 'Saved only when he taps Save on the card. Do not say it is saved.' }) };
+        }
+                if (u.name === PROJECT_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runProject(u.input as ProjectInput) };
         if (u.name === CHANGES_TOOL.name) {
           const { proposal: p, errors } = resolveChanges(u.input as { summary?: string; changes?: Record<string, unknown>[] });
           if (p.items.length) proposal = p;   // a corrected call replaces the earlier card
@@ -497,7 +560,7 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   if (Array.isArray(last.content)) last.content = [...last.content, { type: 'text', text: OUT_OF_STEPS } as Block];
   const r = await complete(system, msgs, tools, tier);
   const text = textOf(r).trim();
-  if (text) return { role: 'assistant', text, results, proposal: proposal ?? undefined, at: new Date().toISOString() };
+  if (text) return { role: 'assistant', text, results, proposal: proposal ?? undefined, note: note ?? undefined, at: new Date().toISOString() };
   return { role: 'assistant', text: 'I couldn’t finish that one — try asking it more simply.', results, error: true, at: new Date().toISOString() };
 }
 

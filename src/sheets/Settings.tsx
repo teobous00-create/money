@@ -86,6 +86,7 @@ function Body() {
       </div>
 
       {analytics && <AboutMe />}
+      {analytics && <LumenNotes />}
 
       <div className="section list">
         <button className="list-row" onClick={() => setUi({ recurring: true })}>
@@ -127,18 +128,56 @@ function Body() {
   );
 }
 
-/** "About me": goals and situation, sent to the AI with every chat and review. Synced to your devices. */
+const NO_NOTES: Array<{ id: string; text: string; date: string }> = [];
+/** Notes Lumen keeps in mind (saved from the chat, or written here). Sent with every question; synced. */
+function LumenNotes() {
+  const notes = useStore(s => s.prefs.notes) ?? NO_NOTES;
+  const [draft, setDraft] = useState('');
+  const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
+  const put = (list: typeof notes) => setPrefs({ notes: list });
+  const add = () => { const t = draft.trim(); if (!t) return; put([...notes, { id: 'n' + Date.now().toString(36), text: t, date: todayISO() }]); setDraft(''); };
+  const saveEdit = () => { if (!edit) return; const t = edit.text.trim(); put(t ? notes.map(n => (n.id === edit.id ? { ...n, text: t } : n)) : notes.filter(n => n.id !== edit.id)); setEdit(null); };
+  return (
+    <div className="section">
+      <div className="section-head"><span className="section-title">Lumen notes</span><span className="tiny muted">{notes.length || ''}</span></div>
+      <div className="list">
+        <AnimatePresence initial={false}>
+          {notes.map(n => (
+            <motion.div key={n.id} className="list-row" style={{ alignItems: 'flex-start' }} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.22, ease }}>
+              {edit?.id === n.id ? (
+                <input className="input grow" autoFocus value={edit.text} onChange={e => setEdit({ id: n.id, text: e.target.value })} onBlur={saveEdit} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); }} style={{ height: 40 }} />
+              ) : (
+                <button className="grow" style={{ textAlign: 'left' }} onClick={() => setEdit({ id: n.id, text: n.text })}>
+                  <div className="small">{n.text}</div>
+                  <div className="tiny muted">{n.date}</div>
+                </button>
+              )}
+              <button className="iconbtn" style={{ width: 32, height: 32, flex: 'none' }} aria-label="Delete note" onClick={() => { const before = notes; put(notes.filter(x => x.id !== n.id)); toast('Note deleted', { label: 'Undo', run: () => put(before) }); }}><Trash2 size={17} /></button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        <div className="list-row">
+          <input className="input grow" value={draft} placeholder="Add a note, e.g. «από Νοέμβριο ο καφές είναι προσωπικός»" onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add(); }} style={{ height: 40 }} />
+          {draft.trim() && <button className="small bold" style={{ color: 'var(--accent)', flex: 'none' }} onClick={add}>Add</button>}
+        </div>
+      </div>
+      <div className="tiny muted" style={{ padding: '6px 6px 0' }}>Lumen reads these before every answer. It suggests new ones in the chat; tap a note to edit it.</div>
+    </div>
+  );
+}
+
+/** "About me": goals and situation, sent to Lumen with every chat. Synced to your devices. */
 function AboutMe() {
   const saved = useStore(s => s.prefs.aboutMe ?? '');
   const [text, setText] = useState(saved);
   const dirty = text.trim() !== saved.trim();
   return (
     <div className="section">
-      <div className="section-head"><span className="section-title">About me · for the AI</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
+      <div className="section-head"><span className="section-title">About me · for Lumen</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
       <textarea className="input about" rows={6} value={text} onChange={e => setText(e.target.value)} onBlur={() => dirty && setPrefs({ aboutMe: text.trim() })}
         placeholder={'Goals, debts, plans — e.g. "I want 3.000 € saved by June", "Eurobank loan 2.000 €, 150 €/month"'} />
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-        <span className="tiny muted">Sent with every chat and monthly review. Only you see it.</span>
+        <span className="tiny muted">Sent with every question to Lumen. Only you see it.</span>
         {dirty && <button className="small bold" style={{ color: 'var(--accent)' }} onClick={() => { setPrefs({ aboutMe: text.trim() }); toast('Saved'); }}>Save</button>}
       </div>
     </div>

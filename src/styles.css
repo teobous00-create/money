@@ -379,3 +379,12 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .ask-q { padding: 0 2px 10px; font-style: italic; }
 .ask-a { display: flex; flex-direction: column; max-height: 58vh; overflow-y: auto; }
 .ask-a .bubble { max-width: 100%; }
+/* Lumen: conversations */
+.convos { display: flex; flex-direction: column; gap: 6px; }
+.convo-wrap { position: relative; border-radius: 14px; overflow: hidden; flex: none; }
+.convo-del { position: absolute; inset: 2px; display: flex; align-items: center; justify-content: flex-end; padding-right: 18px; background: var(--expense); color: #fff; border-radius: 14px; }
+.convo { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 54px; padding: 0 14px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink); font-size: 15px; touch-action: pan-y; }
+.convo.on { box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow); }
+.lumen-card { padding: 12px 14px 6px; margin-bottom: 12px; overflow: hidden; }
+.lumen-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); overflow: hidden; }
+.lumen-card .lumen-row:nth-child(2) { border-top: 0; }

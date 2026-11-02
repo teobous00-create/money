@@ -10,6 +10,7 @@ import { setUi, useUi } from '../lib/ui';
 import { range } from '../lib/period';
 import { IconBox, Icon, Money, toast, ease } from '../components/ui';
 import { RecurringBanner } from '../components/RecurringBanner';
+import { LumenAlerts } from '../components/LumenAlerts';
 import { fromISO, haptic, num, relativeDay, round2, todayISO } from '../lib/format';
 import type { Tx } from '../lib/types';
 import { isPending, timeOf, useTimesVersion } from '../lib/txTime';
@@ -84,6 +85,7 @@ export function TransactionsScreen() {
         )}
       </AnimatePresence>
       {!search && <RecurringBanner />}
+      {!search && <LumenAlerts />}
       {!search && <FavoritesBar />}
       {groups.length === 0 && (
         <div className="empty">
