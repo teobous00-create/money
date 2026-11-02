@@ -9,7 +9,8 @@
  * Returns false whenever it isn't sure, and the phrase goes on as before.
  */
 import { getState, setBudget } from './store';
-import { alive, catName, computeBalances, defaultSelection, ruleDates } from './calc';
+import { alive, catName } from './calc';
+import { untilNextPay } from './aiFacts';
 import { addDays, fromISO, money, num, round2, shortDate, toISO, todayISO } from './format';
 import { like, norm, parseQuick, sameWord } from './quickparse';
 import { isPending } from './txTime';
@@ -254,27 +255,9 @@ function trading(ws: string[]): boolean {
 
 function pace(ws: string[]): boolean {
   if (!has(ws, /^(μερα|ημερα|ημερησιωσ|day|daily)$/) || !has(ws, /^(μπορω|ξοδευω|ξοδεψω|εχω|can)$/)) return false;
-  const s = getState(), me = s.user?.id, T = today();
-  // until the next pay period starts (16th or the 1st), when the next pay is owed
-  const semi = alive(s.jobs).some(j => !j.archived && j.pay === 'semimonthly');
-  const d = fromISO(T);
-  const until = semi && d.getDate() < 16 ? toISO(new Date(d.getFullYear(), d.getMonth(), 16)) : toISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
-  const accs = alive(s.accounts).filter(a => a.owner_id === me);
-  const sel = new Set(defaultSelection(accs));
-  const bal = computeBalances(accs, alive(s.transactions), T);
-  let money0 = 0;
-  sel.forEach(id => { money0 += bal.get(id) ?? 0; });
-  // what's already planned before then (entries + repeating ones)
-  const effect = (t: Pick<Tx, 'type' | 'amount' | 'account_id' | 'to_account_id'>) =>
-    t.type === 'expense' ? (sel.has(t.account_id) ? -t.amount : 0) : t.type === 'income' ? (sel.has(t.account_id) ? t.amount : 0)
-      : (t.to_account_id && sel.has(t.to_account_id) ? t.amount : 0) - (sel.has(t.account_id) ? t.amount : 0);
-  let planned = 0;
-  for (const t of alive(s.transactions)) if (t.owner_id === me && isPending(t, T) && t.date < until) planned += effect(t);
-  for (const r of Object.values(s.recurring)) if (r.owner_id === me) for (const _d of ruleDates(r, addDays(T, 1), addDays(until, -1))) planned += effect(r);
-  const left = round2(money0 + planned);
-  const days = Math.round((fromISO(until).getTime() - d.getTime()) / 864e5);
-  if (left <= 0) return say(`Until ${shortDate(until)}: ${money(left)} after what's planned — nothing to spend`);
-  return say(`Until ${shortDate(until)} (${days} days): ${money(left)} after what's planned → ${money(round2(left / days))} a day`);
+  const p = untilNextPay(getState(), today());
+  if (p.left <= 0) return say(`Until ${shortDate(p.until)}: ${money(p.left)} after what's planned — nothing to spend`);
+  return say(`Until ${shortDate(p.until)} (${p.days} days): ${money(p.left)} after what's planned → ${money(p.perDay)} a day`);
 }
 
 // ---------------------------------------------------------------- entry point

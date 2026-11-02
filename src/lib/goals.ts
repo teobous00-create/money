@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useStore, getState, setPrefs } from './store';
+import { useStore, getState, setPrefs, type State } from './store';
 import { alive } from './calc';
 import { round2, todayISO } from './format';
 import { isPending, useTimesVersion } from './txTime';
@@ -33,21 +33,23 @@ export function setGoal(categoryId: string, target: number | null) {
 export interface GoalRow { id: string; name: string; parent: string | null; target: number; saved: number; doneOn: string | null; last: string | null }
 
 /** Each goal with a target: how much is in it (all time) and the day it was reached. */
+export function goalRows(s: Pick<State, 'prefs' | 'categories' | 'transactions'>, today = todayISO()): GoalRow[] {
+  const goals = s.prefs.goals, cats = s.categories;
+  const live = alive(s.transactions).filter(t => t.type === 'expense' && t.category_id && !isPending(t, today));
+  return Object.entries(goals ?? {}).filter(([id, target]) => target > 0 && cats[id] && !cats[id].deleted_at).map(([id, target]) => {
+    const c = cats[id];
+    const inside = new Set([id, ...Object.values(cats).filter(x => x.parent_id === id).map(x => x.id)]);
+    const list = live.filter(t => inside.has(t.category_id!)).sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq);
+    let sum = 0, doneOn: string | null = null;
+    for (const t of list) { sum += t.amount; if (!doneOn && sum >= target - 0.004) doneOn = t.date; }
+    return { id, name: c.name, parent: c.parent_id ? cats[c.parent_id]?.name ?? null : null, target, saved: round2(sum), doneOn, last: list.length ? list[list.length - 1].date : null };
+  }).sort((a, b) => Number(!!a.doneOn) - Number(!!b.doneOn) || b.saved / b.target - a.saved / a.target);
+}
+
 export function useGoals(): GoalRow[] {
-  const goals = useStore(s => s.prefs.goals);
-  const cats = useStore(s => s.categories);
-  const txs = useStore(s => s.transactions);
+  const prefs = useStore(s => s.prefs);
+  const categories = useStore(s => s.categories);
+  const transactions = useStore(s => s.transactions);
   const tv = useTimesVersion();
-  return useMemo(() => {
-    const today = todayISO();
-    const live = alive(txs).filter(t => t.type === 'expense' && t.category_id && !isPending(t, today));
-    return Object.entries(goals ?? {}).filter(([id, target]) => target > 0 && cats[id] && !cats[id].deleted_at).map(([id, target]) => {
-      const c = cats[id];
-      const inside = new Set([id, ...Object.values(cats).filter(x => x.parent_id === id).map(x => x.id)]);
-      const list = live.filter(t => inside.has(t.category_id!)).sort((a, b) => a.date.localeCompare(b.date) || a.seq - b.seq);
-      let sum = 0, doneOn: string | null = null;
-      for (const t of list) { sum += t.amount; if (!doneOn && sum >= target - 0.004) doneOn = t.date; }
-      return { id, name: c.name, parent: c.parent_id ? cats[c.parent_id]?.name ?? null : null, target, saved: round2(sum), doneOn, last: list.length ? list[list.length - 1].date : null };
-    }).sort((a, b) => Number(!!a.doneOn) - Number(!!b.doneOn) || b.saved / b.target - a.saved / a.target);
-  }, [goals, cats, txs, tv]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => goalRows({ prefs, categories, transactions }), [prefs.goals, categories, transactions, tv]); // eslint-disable-line react-hooks/exhaustive-deps
 }

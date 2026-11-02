@@ -10,7 +10,9 @@ import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
 import { isQuestion } from './voice';
 import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf } from './tracker';
-import { chatDetail } from './aiFacts';
+import { chatDetail, plannedAhead, untilNextPay } from './aiFacts';
+import { goalRows } from './goals';
+import { levelAt, levelDefs, METRICS, type Rule } from './levels';
 import { CHANGES_TOOL, resolveChanges, type Proposal } from './aiActions';
 import type { Category, Tx } from './types';
 
@@ -140,6 +142,32 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
       return `${cats[id].name}: partner paid ${theirs} this month`;
     });
     L.push('', `SHARED CATEGORIES (with the partner; the user's totals above are only their own part): ${parts.join(' | ')}`);
+  }
+
+  // goals
+  const goals = goalRows(s, today);
+  if (goals.length) L.push('', 'GOALS (money put into goal categories, all time; these entries also count as expenses): ' + goals.map(g =>
+    `${g.parent ? g.parent + ' › ' : ''}${g.name} ${g.saved}/${g.target}${g.doneOn ? ` (reached ${g.doneOn})` : ` (${r2(g.target - g.saved)} to go, ${Math.round((g.saved / g.target) * 100)}%${g.last ? `, last put in ${g.last}` : ''})`}`).join(' | '));
+
+  // money until the next pay, and what's planned
+  const pay = untilNextPay(s, today);
+  L.push('', `UNTIL NEXT PAY (${pay.until}, ${pay.days} days): everyday accounts now ${pay.now} (${pay.accounts.join(', ')}; savings not counted), planned before then ${pay.planned} → ${pay.left} left = ${pay.perDay}/day. Use this for "can I afford X" questions.`);
+  const ahead = plannedAhead(s, today);
+  if (ahead.length) L.push('', 'PLANNED (next 30 days, not happened yet): ' + ahead.slice(0, 40).map(x => `${x.date} ${x.line}`).join(' | '));
+
+  // levels (his path)
+  if (s.prefs.analytics) {
+    const lv = levelAt(s, today), defs = levelDefs(s);
+    const unit = (x: Rule) => (x.unit === 'x' ? `${x.value}× monthly expenses` : x.unit === 'pct' ? `${x.value}%` : `${x.value} €`);
+    const ruleText = (x: Rule) => `${METRICS[x.metric]} ${x.op === '>=' ? '≥' : '≤'} ${unit(x)}`;
+    L.push('', 'LEVELS (his own ladder toward financial freedom; each level needs its rules and every level below it):');
+    defs.forEach((d, i) => L.push(`  ${i}. ${d.name}${d.rules.length ? `: ${d.rules.map(ruleText).join(' and ')}` : ' (start)'}${i === lv.level ? '  ← HE IS HERE' : ''}`));
+    L.push(`  Measures now: cash after card debt ${lv.cash}, expenses/month (last 3 full months, goals excluded) ${lv.expenses}, passive (trading P&L last 90 days ÷ 3) ${lv.passive}/month, coverage ${lv.coverage}%, trading capital ${lv.trading}, savings ${lv.savings}, investments ${lv.investments}, net worth ${lv.networth}`);
+    if (lv.next.length) L.push(`  Next level (${defs[lv.level + 1].name}) needs: ${lv.next.map(n => `${n.label} ${n.have} of ${n.need}${n.met ? ' ✓' : ` (missing ${r2(Math.abs(n.need - n.have))})`}`).join('; ')}`);
+    if (lv.ready.length) L.push(`  Already met on their own (waiting for the levels below): ${lv.ready.map(n => defs[n].name).join(', ')}`);
+    const hist: string[] = [];
+    for (let k = 6; k >= 1; k--) { const m = addMonths(today, -k); const end = monthEnd(m); hist.push(`${ym(m)} ${defs[levelAt(s, end).level].name}`); }
+    L.push(`  Level at each month end: ${hist.join(', ')}`);
   }
 
   // recurring
@@ -334,7 +362,7 @@ export function runTrading(q: TradingInput, s: State = getState(), today = today
 
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes), three tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips) and query_trading (daily P&L per strategy) — and ABOUT ME (his own description of his goals and situation; it may be empty).
+const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), three tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips) and query_trading (daily P&L per strategy) — and ABOUT ME (his own description of his goals and situation; it may be empty).
 
 Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
 
@@ -352,7 +380,8 @@ Numbers
 Advice (what to cut, how to earn more, is X worth it)
 - Find the drivers: how often × average amount, which subcategories, which days of the week, and what changed against his own 3- and 12-month averages.
 - Rank options by impact in € per month and translate each into hours of his work at his real hourly pay with tips (in DATA).
-- Check against ABOUT ME: say whether he is on track for his goals and how big the gap is.
+- Check against ABOUT ME, GOALS and LEVELS: say whether he is on track and how big the gap is (to a goal, or to the next level).
+- "Can I afford X": answer from UNTIL NEXT PAY and PLANNED, not from balances alone.
 - Be direct when something is a problem. If he is doing fine, say so in one line and stop.
 - Trading: report results and trade-offs from his data (P&L against hours of work, consistency, worst stretches). Do not tell him to buy, sell, or change position size.
 

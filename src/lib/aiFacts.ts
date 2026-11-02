@@ -3,8 +3,9 @@
  * how often × how much, same point of the month vs before, weekdays, one-offs, pace, budgets, work €/h.
  */
 import type { State } from './store';
-import { alive } from './calc';
-import { fromISO, num, round2, toISO } from './format';
+import { alive, catName, computeBalances, defaultSelection, ruleDates } from './calc';
+import { isPending } from './txTime';
+import { addDays, fromISO, num, round2, toISO } from './format';
 import { shiftPay, shiftParts } from './tracker';
 import type { Category, Tx } from './types';
 
@@ -92,4 +93,45 @@ export function chatDetail(s: State, today: string): string {
   const hr = hourlyWithTips(b, cur);
   if (hr) L.push(`HIS HOURLY PAY WITH TIPS (evening job, last 3 months): ${num(hr)} €/h`);
   return L.join('\n');
+}
+
+/**
+ * Money until the next pay (the 16th or the 1st when a job pays twice a month, else the 1st): what's in the
+ * everyday accounts now + what's planned before then (future entries and repeating ones) → per day.
+ */
+export function untilNextPay(s: State, today: string) {
+  const me = s.user?.id;
+  const semi = alive(s.jobs).some(j => !j.archived && j.pay === 'semimonthly');
+  const d = fromISO(today);
+  const until = semi && d.getDate() < 16 ? toISO(new Date(d.getFullYear(), d.getMonth(), 16)) : toISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
+  const accs = alive(s.accounts).filter(a => a.owner_id === me);
+  const sel = new Set(defaultSelection(accs));
+  const bal = computeBalances(accs, alive(s.transactions), today);
+  let now = 0;
+  sel.forEach(id => { now += bal.get(id) ?? 0; });
+  const effect = (t: Pick<Tx, 'type' | 'amount' | 'account_id' | 'to_account_id'>) =>
+    t.type === 'expense' ? (sel.has(t.account_id) ? -t.amount : 0) : t.type === 'income' ? (sel.has(t.account_id) ? t.amount : 0)
+      : (t.to_account_id && sel.has(t.to_account_id) ? t.amount : 0) - (sel.has(t.account_id) ? t.amount : 0);
+  let planned = 0;
+  const items: Array<{ date: string; amount: number; type: string; what: string; account: string }> = [];
+  const item = (date: string, t: Pick<Tx, 'type' | 'amount' | 'account_id' | 'to_account_id' | 'category_id' | 'note'>) => items.push({
+    date, amount: t.amount, type: t.type, account: s.accounts[t.account_id]?.name ?? '',
+    what: t.type === 'transfer' ? `${s.accounts[t.account_id]?.name} → ${s.accounts[t.to_account_id ?? '']?.name}` : `${catName(t.category_id, s.categories)}${t.note ? ` "${t.note}"` : ''}`,
+  });
+  for (const t of alive(s.transactions)) if (t.owner_id === me && isPending(t, today) && t.date < until) { planned += effect(t); item(t.date, t); }
+  for (const r of Object.values(s.recurring)) if (r.owner_id === me) for (const day of ruleDates(r, addDays(today, 1), addDays(until, -1))) { planned += effect(r); item(day, r); }
+  const left = round2(now + planned);
+  const days = Math.max(1, Math.round((fromISO(until).getTime() - d.getTime()) / 864e5));
+  return { until, days, now: round2(now), planned: round2(planned), left, perDay: round2(left / days), items: items.sort((a, b) => a.date.localeCompare(b.date)), accounts: [...sel].map(id => s.accounts[id]?.name ?? '') };
+}
+
+/** Planned entries (future-dated + repeating) for the next `n` days, after the pay window. */
+export function plannedAhead(s: State, today: string, n = 30) {
+  const me = s.user?.id, end = addDays(today, n);
+  const out: Array<{ date: string; line: string }> = [];
+  const line = (t: Pick<Tx, 'type' | 'amount' | 'account_id' | 'to_account_id' | 'category_id' | 'note'>) =>
+    `${t.type === 'income' ? '+' : t.type === 'expense' ? '−' : ''}${t.amount} ${t.type === 'transfer' ? `${s.accounts[t.account_id]?.name} → ${s.accounts[t.to_account_id ?? '']?.name}` : catName(t.category_id, s.categories)}${t.note ? ` "${t.note}"` : ''} (${s.accounts[t.account_id]?.name ?? ''})`;
+  for (const t of alive(s.transactions)) if (t.owner_id === me && isPending(t, today) && t.date <= end) out.push({ date: t.date, line: line(t) });
+  for (const r of Object.values(s.recurring)) if (r.owner_id === me) for (const day of ruleDates(r, addDays(today, 1), end)) out.push({ date: day, line: line(r) + ' [repeating]' });
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
