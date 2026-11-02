@@ -4,7 +4,7 @@
  */
 import type { State } from './store';
 import { alive } from './calc';
-import { addDays, fromISO, num, round2, toISO } from './format';
+import { fromISO, num, round2, toISO } from './format';
 import { shiftPay, shiftParts } from './tracker';
 import type { Category, Tx } from './types';
 
@@ -38,13 +38,6 @@ export function span(b: Base, from: string, to: string) {
     if (t.category_id && b.cats[t.category_id]?.parent_id) add(sub, t.category_id, t.amount);
   }
   return { income: round2(income), expense: round2(expense), top, sub, inc, list };
-}
-
-function weekdayShare(list: Tx[]) {
-  const c = new Array(7).fill(0);
-  for (const t of list) c[fromISO(t.date).getDay()]++;
-  const n = list.length || 1;
-  return c.map((v, i) => ({ d: WD[i], share: v / n })).sort((x, y) => y.share - x.share);
 }
 
 function workMonth(b: Base, jobId: string, from: string, to: string) {
@@ -96,13 +89,6 @@ export function chatDetail(s: State, today: string): string {
   };
   const a3 = avgOver(3), a12 = avgOver(12);
   L.push('MONTHLY AVERAGES BY CATEGORY (full months; 3-month | 12-month): ' + [...a12.entries()].sort((x, y) => y[1] - x[1]).map(([id, v]) => `${cats[id]?.name ?? 'Other'} ${num(round2(a3.get(id) ?? 0))} | ${num(round2(v))}`).join('; '));
-  // weekdays, last 90 days
-  const recent = b.mine.filter(t => t.type === 'expense' && t.date > addDays(today, -90) && t.date <= today);
-  const byCat = new Map<string, Tx[]>();
-  for (const t of recent) { const k = topOf(t.category_id, cats); byCat.set(k, [...(byCat.get(k) ?? []), t]); }
-  const wd = [...byCat.entries()].filter(([, l]) => l.length >= 8).sort((x, y) => y[1].length - x[1].length).slice(0, 6)
-    .map(([id, l]) => `${cats[id]?.name ?? 'Other'} ${weekdayShare(l).slice(0, 3).map(x => `${x.d} ${Math.round(x.share * 100)}%`).join(' ')}`);
-  if (wd.length) L.push(`WHEN HE SPENDS (last 90 days, share of entries by weekday): ${wd.join(' | ')}`);
   const hr = hourlyWithTips(b, cur);
   if (hr) L.push(`HIS HOURLY PAY WITH TIPS (evening job, last 3 months): ${num(hr)} €/h`);
   return L.join('\n');
