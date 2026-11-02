@@ -12,6 +12,7 @@ import { isQuestion } from './voice';
 import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf } from './tracker';
 import { chatDetail, plannedAhead, untilNextPay } from './aiFacts';
 import { goalRows } from './goals';
+import { PROJECT_TOOL, runProject, type ProjectInput } from './aiProject';
 import { levelAt, levelDefs, METRICS, type Rule } from './levels';
 import { CHANGES_TOOL, resolveChanges, type Proposal } from './aiActions';
 import type { Category, Tx } from './types';
@@ -362,7 +363,7 @@ export function runTrading(q: TradingInput, s: State = getState(), today = today
 
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), three tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips) and query_trading (daily P&L per strategy) — and ABOUT ME (his own description of his goals and situation; it may be empty).
+const CHAT_RULES = `You are the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips), query_trading (daily P&L per strategy) and project (what-if: when goals close and levels come) — and ABOUT ME (his own description of his goals and situation; it may be empty).
 
 Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
 
@@ -382,6 +383,7 @@ Advice (what to cut, how to earn more, is X worth it)
 - Rank options by impact in € per month and translate each into hours of his work at his real hourly pay with tips (in DATA).
 - Check against ABOUT ME, GOALS and LEVELS: say whether he is on track and how big the gap is (to a goal, or to the next level).
 - "Can I afford X": answer from UNTIL NEXT PAY and PLANNED, not from balances alone.
+- "When will I reach…", "what if I…", "is it worth…": call project — once for the baseline, once with the change — and compare the dates.
 - Be direct when something is a problem. If he is doing fine, say so in one line and stop.
 - Trading: report results and trade-offs from his data (P&L against hours of work, consistency, worst stretches). Do not tell him to buy, sell, or change position size.
 
@@ -447,8 +449,9 @@ const clean = (content: Block[]) => content.filter(x => x.type !== 'text' || x.t
 const memo = (r: QueryResult) => `${r.label} ${r.from}–${r.to}: total ${r.total}, ${r.count} entries${r.groups.length ? `; by ${r.input.group_by}: ${r.groups.slice(0, 14).map(g => `${g.key} ${g.total}`).join(', ')}` : ''}`;
 
 /** One turn: question in, answer (and any numbers it looked up) out. */
-export async function askClaude(history: ChatItem[], question: string, lite = false): Promise<ChatItem> {
-  const tier: Tier = isQuestion(question) ? 'ask' : 'act';   // "πόσα / γιατί / τι …" → Opus; "σβήσε / άλλαξε …" → Sonnet
+export async function askClaude(history: ChatItem[], question: string, lite = false, fromMic = false): Promise<ChatItem> {
+  // chat questions ("πόσα / γιατί / τι …") → Opus; commands and anything from the top mic → Sonnet
+  const tier: Tier = !fromMic && isQuestion(question) ? 'ask' : 'act';
   const system = [
     { type: 'text', text: lite ? LITE_RULES : CHAT_RULES },
     ...(lite ? [] : [{ type: 'text', text: 'ABOUT ME\n' + aboutMe() }]),
@@ -467,7 +470,7 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
   }
   const results: QueryResult[] = [];
   let proposal: Proposal | null = null;
-  const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, CHANGES_TOOL];
+  const tools = lite ? [QUERY_TOOL, CHANGES_TOOL] : [QUERY_TOOL, WORK_TOOL, TRADING_TOOL, PROJECT_TOOL, CHANGES_TOOL];
   for (let step = 0; step < MAX_STEPS; step++) {
     const r = await complete(system, msgs, tools, tier);
     const uses = r.content.filter((x): x is Extract<Block, { type: 'tool_use' }> => x.type === 'tool_use');
@@ -477,6 +480,7 @@ export async function askClaude(history: ChatItem[], question: string, lite = fa
       role: 'user', content: uses.map(u => {
         if (u.name === WORK_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runWork(u.input as WorkInput) };
         if (u.name === TRADING_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runTrading(u.input as TradingInput) };
+        if (u.name === PROJECT_TOOL.name) return { type: 'tool_result' as const, tool_use_id: u.id, content: runProject(u.input as ProjectInput) };
         if (u.name === CHANGES_TOOL.name) {
           const { proposal: p, errors } = resolveChanges(u.input as { summary?: string; changes?: Record<string, unknown>[] });
           if (p.items.length) proposal = p;   // a corrected call replaces the earlier card

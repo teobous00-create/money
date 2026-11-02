@@ -113,7 +113,7 @@ export function AskSheet() {
     if (!lite) saveChat([...before, mine]);
     (async () => {
       let r: ChatItem;
-      try { r = await askClaude(before, ask, lite); }
+      try { r = await askClaude(before, ask, lite, true); }   // from the top mic: Sonnet
       catch (e) { r = { role: 'assistant', text: aiErrorText(e), error: true, at: new Date().toISOString() }; }
       if (lite) { if (alive) setReply(r); return; }
       const now = loadChat();

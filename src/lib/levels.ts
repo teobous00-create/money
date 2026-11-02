@@ -88,8 +88,11 @@ export function measuresAt(s: State, day: string): Measures {
 }
 
 export function levelAt(s: State, day: string): LevelState {
-  const defs = levelDefs(s);
-  const m = measuresAt(s, day);
+  return levelOf(levelDefs(s), measuresAt(s, day));
+}
+
+/** The level a set of measures gives (used for projections too). */
+export function levelOf(defs: LevelDef[], m: Measures): LevelState {
   const met = defs.map((d, i) => i === 0 || holds(d, m));
   let level = 0;
   while (level < defs.length - 1 && met[level + 1]) level++;
