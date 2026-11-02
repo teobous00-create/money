@@ -379,7 +379,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .ask-q { padding: 0 2px 10px; font-style: italic; }
 .ask-a { display: flex; flex-direction: column; max-height: 58vh; overflow-y: auto; }
 .ask-a .bubble { max-width: 100%; }
-/* Lumen: conversations */
+/* Luna: conversations */
 .convos { display: flex; flex-direction: column; gap: 6px; }
 .convo-wrap { position: relative; border-radius: 14px; overflow: hidden; flex: none; }
 .convo-del { position: absolute; inset: 2px; display: flex; align-items: center; justify-content: flex-end; padding-right: 18px; background: var(--expense); color: #fff; border-radius: 14px; }

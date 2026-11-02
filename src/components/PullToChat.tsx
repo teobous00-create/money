@@ -37,7 +37,7 @@ export function PullHint({ pull, ready }: { pull: number; ready: boolean }) {
     <AnimatePresence>
       {pull > 4 && (
         <motion.div className={`pull-hint ${ready ? 'ready' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: Math.min(1, pull / 40), y: pull * 0.5, scale: 0.85 + Math.min(0.2, pull / 400) }} exit={{ opacity: 0, y: 0 }} transition={{ duration: 0.05 }}>
-          <span className="pull-dot" />{ready ? 'Let go for Lumen' : 'Lumen…'}
+          <span className="pull-dot" />{ready ? 'Let go for Luna' : 'Luna…'}
         </motion.div>
       )}
     </AnimatePresence>

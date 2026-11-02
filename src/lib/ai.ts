@@ -83,13 +83,13 @@ async function callOnce(body: { system: unknown; messages: ApiMsg[]; tools?: unk
 
 export function aiErrorText(e: unknown): string {
   const code = e instanceof AiError ? e.code : 'other';
-  if (code === 'not_setup') return 'Lumen isn’t set up yet (Edge Function + key in Supabase).';
+  if (code === 'not_setup') return 'Luna isn’t set up yet (Edge Function + key in Supabase).';
   if (code === 'no_function') return 'Supabase has no Edge Function named “ai” yet — deploy it (step 2).';
   if (code === 'no_key') return 'The “ai” function is there, but the key is missing: add ANTHROPIC_API_KEY in Edge Function Secrets (step 3).';
   if (code === 'jwt') return 'The “ai” function refused the login: turn OFF “Verify JWT” in its settings, then try again.';
   if (code === 'unreachable') return 'Can’t reach the “ai” function — it may not be deployed, or the pasted code has an error. Deploy it again (step 2).';
   if (code === 'limit') return 'You’ve used today’s AI messages. It resets tomorrow.';
-  if (code === 'not_allowed') return 'Lumen isn’t on for this account.';
+  if (code === 'not_allowed') return 'Luna isn’t on for this account.';
   if (code === 'offline') return 'No connection right now.';
   if (code === 'claude') return `Claude couldn’t answer: ${(e as AiError).message || 'try again'}`;
   return `Something went wrong${(e as Error)?.message ? ` (${(e as Error).message})` : ''} — try again.`;
@@ -363,7 +363,7 @@ export function runTrading(q: TradingInput, s: State = getState(), today = today
 
 // ---------------------------------------------------------------- chat
 
-const CHAT_RULES = `You are Lumen, the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips), query_trading (daily P&L per strategy) and project (what-if: when goals close and levels come) — ABOUT ME (his own description of his goals and situation; it may be empty) and NOTES (things he asked you to keep in mind, dated).
+const CHAT_RULES = `You are Luna, the money assistant inside Teo's personal budgeting app. You see his finances through DATA (a summary the app computes: balances, months, goals, levels, money until next pay, planned entries), tools computed on his phone — query_transactions (every transaction), query_work (every shift: days, hours, pay, tips), query_trading (daily P&L per strategy) and project (what-if: when goals close and levels come) — ABOUT ME (his own description of his goals and situation; it may be empty) and NOTES (things he asked you to keep in mind, dated).
 
 Language: always answer in English, even when he writes in Greek. Keep category names, account names and notes exactly as they are (often Greek).
 
@@ -406,7 +406,7 @@ Context
 - The current month is not over: compare by pace, not by totals.`;
 
 /** Her account: the top mic only — commands, and one short answer to a question. No conversation. */
-export const LITE_RULES = `You are Lumen, the voice assistant inside a shared budgeting app. The user speaks one command or one question into the microphone. You see her finances through DATA (a summary the app computes) and query_transactions (every transaction). There is no conversation: answer this one message and stop.
+export const LITE_RULES = `You are Luna, the voice assistant inside a shared budgeting app. The user speaks one command or one question into the microphone. You see her finances through DATA (a summary the app computes) and query_transactions (every transaction). There is no conversation: answer this one message and stop.
 
 Language: answer in the language she used (usually Greek). Keep category names, account names and notes exactly as they are.
 

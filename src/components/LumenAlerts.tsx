@@ -12,7 +12,7 @@ import { payPeriods, periodLabel } from '../lib/tracker';
 import { ease } from './ui';
 
 /**
- * Lumen's heads-ups, worked out on the phone (no AI): a budget at 80% / over, an entry far above its usual
+ * Luna's heads-ups, worked out on the phone (no AI): a budget at 80% / over, an entry far above its usual
  * size, a goal just reached, a finished pay period still not marked paid 3 days later. Each one can be
  * dismissed; it comes back only for a new event (next month, another entry…).
  */
@@ -89,7 +89,7 @@ export function LumenAlerts() {
     <AnimatePresence initial={false}>
       {shown.length > 0 && (
         <motion.div className="card lumen-card" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease }}>
-          <div className="row tiny bold" style={{ gap: 6, color: 'var(--accent)', marginBottom: 4 }}><Sparkles size={14} />Lumen</div>
+          <div className="row tiny bold" style={{ gap: 6, color: 'var(--accent)', marginBottom: 4 }}><Sparkles size={14} />Luna</div>
           <AnimatePresence initial={false}>
             {shown.map(a => {
               const I = Icon[a.kind];

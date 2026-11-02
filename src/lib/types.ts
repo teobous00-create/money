@@ -151,7 +151,7 @@ export interface Prefs {
   tipsCats?: string[];              // category ids counted as tips (empty/undefined = automatic)
   favorites?: Favorite[];           // one-tap entries on Transactions
   aboutMe?: string;                 // "About me": goals and situation, sent to the AI
-  notes?: Array<{ id: string; text: string; date: string }>;   // things Lumen keeps in mind (saved from the chat or by hand)
+  notes?: Array<{ id: string; text: string; date: string }>;   // things Luna keeps in mind (saved from the chat or by hand)
   reviews?: Record<string, Review>; // 'YYYY-MM' → monthly review written by the AI
   aiUsage?: { day: string; count: number }; // written by the server only
   goals?: Record<string, number>;   // goal categories: id → target € (0 = no target); still expenses, with progress

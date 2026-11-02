@@ -129,7 +129,7 @@ function Body() {
 }
 
 const NO_NOTES: Array<{ id: string; text: string; date: string }> = [];
-/** Notes Lumen keeps in mind (saved from the chat, or written here). Sent with every question; synced. */
+/** Notes Luna keeps in mind (saved from the chat, or written here). Sent with every question; synced. */
 function LumenNotes() {
   const notes = useStore(s => s.prefs.notes) ?? NO_NOTES;
   const [draft, setDraft] = useState('');
@@ -139,7 +139,7 @@ function LumenNotes() {
   const saveEdit = () => { if (!edit) return; const t = edit.text.trim(); put(t ? notes.map(n => (n.id === edit.id ? { ...n, text: t } : n)) : notes.filter(n => n.id !== edit.id)); setEdit(null); };
   return (
     <div className="section">
-      <div className="section-head"><span className="section-title">Lumen notes</span><span className="tiny muted">{notes.length || ''}</span></div>
+      <div className="section-head"><span className="section-title">Luna notes</span><span className="tiny muted">{notes.length || ''}</span></div>
       <div className="list">
         <AnimatePresence initial={false}>
           {notes.map(n => (
@@ -161,23 +161,23 @@ function LumenNotes() {
           {draft.trim() && <button className="small bold" style={{ color: 'var(--accent)', flex: 'none' }} onClick={add}>Add</button>}
         </div>
       </div>
-      <div className="tiny muted" style={{ padding: '6px 6px 0' }}>Lumen reads these before every answer. It suggests new ones in the chat; tap a note to edit it.</div>
+      <div className="tiny muted" style={{ padding: '6px 6px 0' }}>Luna reads these before every answer. It suggests new ones in the chat; tap a note to edit it.</div>
     </div>
   );
 }
 
-/** "About me": goals and situation, sent to Lumen with every chat. Synced to your devices. */
+/** "About me": goals and situation, sent to Luna with every chat. Synced to your devices. */
 function AboutMe() {
   const saved = useStore(s => s.prefs.aboutMe ?? '');
   const [text, setText] = useState(saved);
   const dirty = text.trim() !== saved.trim();
   return (
     <div className="section">
-      <div className="section-head"><span className="section-title">About me · for Lumen</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
+      <div className="section-head"><span className="section-title">About me · for Luna</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
       <textarea className="input about" rows={6} value={text} onChange={e => setText(e.target.value)} onBlur={() => dirty && setPrefs({ aboutMe: text.trim() })}
         placeholder={'Goals, debts, plans — e.g. "I want 3.000 € saved by June", "Eurobank loan 2.000 €, 150 €/month"'} />
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
-        <span className="tiny muted">Sent with every question to Lumen. Only you see it.</span>
+        <span className="tiny muted">Sent with every question to Luna. Only you see it.</span>
         {dirty && <button className="small bold" style={{ color: 'var(--accent)' }} onClick={() => { setPrefs({ aboutMe: text.trim() }); toast('Saved'); }}>Save</button>}
       </div>
     </div>

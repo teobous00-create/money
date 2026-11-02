@@ -11,7 +11,7 @@ import { applyProposal, type Proposal } from '../lib/aiActions';
 
 const IDEAS = ['Τι να κόψω αυτόν τον μήνα;', 'Πόσα έδωσα σε delivery φέτος;', 'Ποια βάρδια μου αποδίδει περισσότερο;', 'Πώς πάει το trading σε σχέση με τη δουλειά;'];
 
-/** Lumen: ask about your money. Comes down from the top; drag it back up (or press back) to close. */
+/** Luna: ask about your money. Comes down from the top; drag it back up (or press back) to close. */
 export function ChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const drag = useDragControls();
   // the phone's back button closes it
@@ -78,7 +78,7 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
       <div className="chat-head" onPointerDown={startDrag}>
         <button className="iconbtn" aria-label="Conversations" onPointerDown={stop} onClick={() => { haptic(4); setShowList(v => !v); }}
           style={{ color: showList ? 'var(--accent)' : undefined, marginLeft: -12 }}><MessagesSquare size={21} /></button>
-        <span className="chat-title">Lumen</span>
+        <span className="chat-title">Luna</span>
         <span className="tiny muted">{left != null ? `${left} left today` : ''}</span>
         <span className="grow" />
         {(items.length > 0 || showList) && (
@@ -95,7 +95,7 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
           <motion.div key={'c' + convo.id} className="chat-list" ref={list} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.2, ease }}>
             {items.length === 0 && (
               <div className="chat-empty">
-                <div className="small muted" style={{ marginBottom: 12 }}>Lumen sees your totals, budgets, goals, levels, work and trading, looks up exact numbers when it needs them, and can work out when you'll get where you're going.</div>
+                <div className="small muted" style={{ marginBottom: 12 }}>Luna sees your totals, budgets, goals, levels, work and trading, looks up exact numbers when it needs them, and can work out when you'll get where you're going.</div>
                 {IDEAS.map(q => <button key={q} className="chip" style={{ margin: '0 6px 8px 0' }} onClick={() => void send(q)}>{q}</button>)}
               </div>
             )}
@@ -109,7 +109,7 @@ function Body({ onClose, startDrag }: { onClose: () => void; startDrag: (e: Reac
         )}
       </AnimatePresence>
       <div className="chat-input">
-        <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : 'Ρώτα τον Lumen…'} onChange={e => setText(e.target.value)}
+        <input className="quick-input" value={text} placeholder={listening ? 'Listening…' : 'Ρώτα τη Luna…'} onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') void send(text); }} enterKeyHint="send" />
         {text.trim() && !listening
           ? <button className="quick-btn go" aria-label="Send" onClick={() => void send(text)} disabled={!!busy}><ArrowUp size={19} /></button>
@@ -188,7 +188,7 @@ export function AskSheet() {
     if (c) saveConvo({ ...c, items: c.items.map((x, k) => (k === 1 ? { ...x, ...p } : x)) });
   };
   return (
-    <Sheet open={!!ask} onClose={close} title="Lumen">
+    <Sheet open={!!ask} onClose={close} title="Luna">
       <div className="sheet-body">
         <div className="ask-q small muted">“{q}”</div>
         <div className="ask-a">
@@ -226,7 +226,7 @@ function Bubble({ m, onProposal, onNote }: { m: ChatItem; onProposal: (s: Propos
   );
 }
 
-/** A note Lumen suggests keeping in mind; saved only with a tap. */
+/** A note Luna suggests keeping in mind; saved only with a tap. */
 function NoteCardView({ n, onStatus }: { n: NoteCard; onStatus: (s: NoteCard['status']) => void }) {
   return (
     <div className={`pcard ${n.status === 'pending' ? '' : 'applied'}`}>
@@ -234,7 +234,7 @@ function NoteCardView({ n, onStatus }: { n: NoteCard; onStatus: (s: NoteCard['st
       <div className="small">{n.text}</div>
       {n.status === 'pending' ? (
         <div className="row" style={{ gap: 8, marginTop: 10 }}>
-          <button className="btn" style={{ height: 40, flex: 1 }} onClick={() => { haptic(10); saveNote(n.text); onStatus('saved'); toast('Note saved · Settings › Lumen notes'); }}>Save</button>
+          <button className="btn" style={{ height: 40, flex: 1 }} onClick={() => { haptic(10); saveNote(n.text); onStatus('saved'); toast('Note saved · Settings › Luna notes'); }}>Save</button>
           <button className="btn secondary" style={{ height: 40, flex: 1 }} onClick={() => onStatus('dismissed')}>No</button>
         </div>
       ) : (
