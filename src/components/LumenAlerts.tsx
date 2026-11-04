@@ -1,25 +1,31 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Sparkles, X, Wallet, Target, TrendingUp, PiggyBank } from 'lucide-react';
+import { Sparkles, X, Wallet, Target, TrendingUp, PiggyBank, Users } from 'lucide-react';
 import { useStore } from '../lib/store';
-import { alive, catName } from '../lib/calc';
-import { addDays, money, todayISO } from '../lib/format';
+import { alive, catName, catStyle, useSharedRoots } from '../lib/calc';
+import { addDays, money, num, todayISO } from '../lib/format';
 import { setUi } from '../lib/ui';
 import { useBudgetSpend } from '../lib/insights';
 import { goalIds, goalRows } from '../lib/goals';
 import { isPending } from '../lib/txTime';
 import { payPeriods, periodLabel } from '../lib/tracker';
-import { ease } from './ui';
+import { ease, IconBox, Sheet } from './ui';
+import type { Tx } from '../lib/types';
 
 /**
  * Luna's heads-ups, worked out on the phone (no AI): a budget at 80% / over, an entry far above its usual
- * size, a goal just reached, a finished pay period still not marked paid 3 days later. Each one can be
+ * size, a goal just reached, a finished pay period still not marked paid 3 days later, and what your partner
+ * spent on shared categories in the last 24 hours. Each one can be
  * dismissed; it comes back only for a new event (next month, another entry…).
  */
-interface Alert { key: string; kind: 'budget' | 'unusual' | 'goal' | 'pay'; text: string; sub?: string; go?: () => void }
+interface Alert { key: string; kind: 'budget' | 'unusual' | 'goal' | 'pay' | 'shared'; text: string; sub?: string; go?: () => void }
 
 const KEY = 'money:lumen-dismissed';
 const loadDismissed = (): string[] => { try { return JSON.parse(localStorage.getItem(KEY) ?? '[]'); } catch { return []; } };
+const DAY_MS = 24 * 3600 * 1000;
+/** Added in the last 24 hours (when it was entered; an entry without that time counts by its date: today or yesterday). */
+const lastDay = (t: Tx, now: number, today: string) =>
+  t.date <= today && (t.created_at ? Date.parse(t.created_at) >= now - DAY_MS : t.date >= addDays(today, -1));
 
 export function LumenAlerts() {
   const analytics = useStore(s => !!s.prefs.analytics);
@@ -33,6 +39,11 @@ export function LumenAlerts() {
   const today = todayISO();
   const spend = useBudgetSpend(today);
   const [dismissed, setDismissed] = useState<string[]>(loadDismissed);
+  const profiles = useStore(s => s.profiles);
+  const shared = useSharedRoots();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 5 * 60 * 1000); return () => clearInterval(t); }, []);   // the 24 hours move on
+  const [partner, setPartner] = useState<string | null>(null);   // whose shared entries are open
 
   const alerts = useMemo(() => {
     if (!analytics) return [];
@@ -73,8 +84,24 @@ export function LumenAlerts() {
         out.push({ key: `p:${j.id}:${p.start}`, kind: 'pay', text: `${j.name} ${periodLabel(p)}: ${money(p.owed)} not marked as paid`, sub: 'Got it? Tap to enter it', go: () => setUi({ tab: 'tracker', payJob: j.id }) });
       }
     }
+    // what a partner spent on shared categories in the last 24 hours (one line per person, back for each new entry)
+    const byOwner = new Map<string, Tx[]>();
+    for (const t of alive(txs)) {
+      if (t.owner_id === me || t.type !== 'expense' || !t.category_id || isPending(t, today) || !lastDay(t, now, today)) continue;
+      if (!shared.has(cats[t.category_id]?.parent_id ?? t.category_id)) continue;
+      byOwner.set(t.owner_id, [...(byOwner.get(t.owner_id) ?? []), t]);
+    }
+    for (const [owner, list] of byOwner) {
+      const total = list.reduce((x, t) => x + t.amount, 0);
+      const newest = list.reduce((a, b) => ((b.created_at ?? b.date) > (a.created_at ?? a.date) ? b : a));
+      out.push({ key: `s:${owner}:${newest.id}`, kind: 'shared', text: `${profiles[owner]?.display_name ?? 'Partner'}: ${money(total)} on shared`, sub: `${list.length} ${list.length === 1 ? 'entry' : 'entries'} in the last 24 hours · tap to see`, go: () => setPartner(owner) });
+    }
     return out;
-  }, [analytics, me, prefs, cats, txs, jobs, shifts, payouts, spend, today]);
+  }, [analytics, me, prefs, cats, txs, jobs, shifts, payouts, spend, today, shared, profiles, now]);
+
+  const partnerTxs = useMemo(() => !partner ? [] : alive(txs)
+    .filter(t => t.owner_id === partner && t.type === 'expense' && t.category_id && !isPending(t, today) && lastDay(t, now, today) && shared.has(cats[t.category_id]?.parent_id ?? t.category_id))
+    .sort((a, b) => (b.created_at ?? b.date).localeCompare(a.created_at ?? a.date)), [partner, txs, today, now, shared, cats]);
 
   const shown = alerts.filter(a => !dismissed.includes(a.key));
   const dismiss = (key: string) => {
@@ -82,10 +109,33 @@ export function LumenAlerts() {
     setDismissed(next);
     try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
   };
-  const Icon = { budget: Wallet, unusual: TrendingUp, goal: Target, pay: PiggyBank };
-  const color = { budget: 'var(--warn)', unusual: 'var(--expense)', goal: 'var(--income)', pay: 'var(--accent)' };
+  const Icon = { budget: Wallet, unusual: TrendingUp, goal: Target, pay: PiggyBank, shared: Users };
+  const color = { budget: 'var(--warn)', unusual: 'var(--expense)', goal: 'var(--income)', pay: 'var(--accent)', shared: 'var(--accent)' };
 
   return (
+    <>
+    <Sheet open={!!partner} onClose={() => setPartner(null)} title={`${partner ? profiles[partner]?.display_name ?? 'Partner' : ''} · last 24 hours`}>
+      <div className="sheet-body">
+        {partnerTxs.length === 0 && <div className="empty">Nothing on shared in the last 24 hours.</div>}
+        <div className="list">
+          {partnerTxs.map((t, i) => {
+            const st = catStyle(t.category_id, cats);
+            return (
+              <motion.div key={t.id} className="list-row" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease, delay: i * 0.03 }}>
+                <IconBox icon={st.icon} color={st.color} round />
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div className="ellipsis" style={{ fontWeight: 550 }}>{catName(t.category_id, cats)}</div>
+                  <div className="tx-sub ellipsis">{ago(t, now)}</div>
+                  {t.note && <div className="tx-note ellipsis">{t.note}</div>}
+                </div>
+                <span className="tx-amt num" style={{ color: 'var(--expense)' }}>−{num(t.amount)}<span className="cur">€</span></span>
+              </motion.div>
+            );
+          })}
+        </div>
+        {partnerTxs.length > 1 && <div className="row small bold" style={{ justifyContent: 'space-between', padding: '12px 4px 4px' }}><span>Total</span><span className="num">{money(partnerTxs.reduce((x, t) => x + t.amount, 0))}</span></div>}
+      </div>
+    </Sheet>
     <AnimatePresence initial={false}>
       {shown.length > 0 && (
         <motion.div className="card lumen-card" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease }}>
@@ -108,5 +158,13 @@ export function LumenAlerts() {
         </motion.div>
       )}
     </AnimatePresence>
+    </>
   );
+}
+
+/** "2 h ago", "35 min ago"; by date when the entry has no time. */
+function ago(t: Tx, now: number): string {
+  if (!t.created_at) return t.date === todayISO() ? 'today' : 'yesterday';
+  const m = Math.max(0, Math.round((now - Date.parse(t.created_at)) / 60000));
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
