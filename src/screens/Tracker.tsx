@@ -10,7 +10,7 @@ import { useAccounts, alive } from '../lib/calc';
 import { COLORS } from '../lib/icons';
 import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } from '../lib/format';
 import {
-  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
+  useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, roundUp, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
   useStrategies, useArchivedStrategies, saveStrategyOrder, nextStrategySort, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
@@ -450,13 +450,18 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
   const [bonus, setBonus] = useState(initial(pick)[1]);
   const [account, setAccount] = useState(lsGet('money:payacc:' + job.id) ?? accounts.find(a => /eurobank|τράπεζ|bank/i.test(a.name))?.id ?? accounts[0]?.id ?? '');
   const [date, setDate] = useState(todayISO());
-  const choose = (p: PayPeriod) => { setPick(p); const [a, b] = initial(p); setAmount(a); setBonus(b); };
-  const save = () => {
+  const [over, setOver] = useState(0);   // paid more than owed and it isn't rounding: asking whether it's extra or an advance
+  const choose = (p: PayPeriod) => { setPick(p); const [a, b] = initial(p); setAmount(a); setBonus(b); setOver(0); };
+  const save = (settled?: boolean) => {
     if (!pick) return;
     const amt = amount.trim() ? parseNum(amount) : 0;
     const bon = split && bonus.trim() ? parseNum(bonus) : 0;
     if (amt <= 0 && bon <= 0) return toast('Enter the amount you got');
-    const { txId, bonusTx } = writePayout(job, pick, amt, bon, account || null, date);
+    if (settled === undefined && job.kind === 'hourly') {
+      const after = round2(pick.paid + amt + bon), extra = round2(after - pick.earned);
+      if (extra > 0.004 && !roundUp(job, after, pick.earned)) { haptic(8); return setOver(extra); }
+    }
+    const { txId, bonusTx } = writePayout(job, pick, amt, bon, account || null, date, !!settled);
     if (account) lsSet('money:payacc:' + job.id, account);
     haptic(12);
     toast(txId || bonusTx ? `${money(round2(amt + bon))} added to your income` : 'Payment saved');
@@ -472,7 +477,7 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
             <span className="grow">
               <span style={{ fontWeight: 600 }}>{periodLabel(p)}{p.current && <span className="badge" style={{ marginLeft: 6 }}>now</span>}</span>
               <div className="tiny muted num">
-                {split ? `salary ${money(p.base)} + bonus ${money(p.bonus)}` : `earned ${money(p.earned)}`} · paid {money(p.paid)}
+                {split ? `salary ${money(p.base)} + bonus ${money(p.bonus)}` : `earned ${money(p.earned)}`} · paid {money(p.paid)}{p.extra > 0.004 && ` · +${money(p.extra)} extra`}
               </div>
             </span>
             <span className="num bold" style={{ color: p.owed > 0.004 ? 'var(--ink)' : p.owed < -0.004 ? 'var(--warn)' : 'var(--income)' }}>{p.owed > 0.004 ? money(p.owed) : p.owed < -0.004 ? `+${money(-p.owed)}` : '✓'}</span>
@@ -485,13 +490,13 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
           {split ? (
             <div className="row" style={{ gap: 10 }}>
               <div className="field grow"><label>Salary {cats(job.salary_category_id)}</label>
-                <input className="input num" inputMode="decimal" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+                <input className="input num" inputMode="decimal" placeholder="0" value={amount} onChange={e => { setAmount(e.target.value); setOver(0); }} /></div>
               <div className="field grow"><label>Bonus {cats(job.bonus_category_id)}</label>
                 <input className="input num" inputMode="decimal" placeholder="0" value={bonus} onChange={e => setBonus(e.target.value)} /></div>
             </div>
           ) : (
             <div className="field"><label>Amount you got for {periodLabel(pick)}</label>
-              <input className="input num" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
+              <input className="input num" inputMode="decimal" value={amount} onChange={e => { setAmount(e.target.value); setOver(0); }} />
             </div>
           )}
           {split && <div className="tiny muted" style={{ margin: '-6px 4px 12px' }}>Got only one of the two? Leave the other empty — it stays owed.</div>}
@@ -503,7 +508,15 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
               <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} style={{ width: 150 }} />
             </div>
           ) : <div className="tiny muted">Choose a salary category in ⚙ so the payment is also added to your accounts.</div>}
-          <button className="btn" style={{ marginTop: 14 }} onClick={save}>Save payment</button>
+          {over > 0 ? (
+            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} style={{ marginTop: 14 }}>
+              <div className="tiny muted" style={{ margin: '0 4px 8px' }}>That's <span className="num bold" style={{ color: 'var(--ink)' }}>{money(over)}</span> more than you're owed for {periodLabel(pick)}.</div>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn" style={{ flex: 1 }} onClick={() => save(true)}>Extra · keep it</button>
+                <button className="btn secondary" style={{ flex: 1 }} onClick={() => save(false)}>Advance · from next pay</button>
+              </div>
+            </motion.div>
+          ) : <button className="btn" style={{ marginTop: 14 }} onClick={() => save()}>Save payment</button>}
         </motion.div>
       )}
     </div>

@@ -86,6 +86,16 @@ export interface PayPeriod {
   base: number; bonus: number; paidBase: number; paidBonus: number;
   pendingBonus?: number;                                     // contacts target: this month's bonus, not owed until the month ends
   target?: MonthBonus;
+  extra: number;                                             // paid over what was earned but kept, not owed back (rounding up, or marked as extra)
+}
+
+/** Hourly jobs round the pay up: a whole or half euro amount up to this much over what's owed is kept as extra, not taken from the next pay. */
+export const ROUND_UP_MAX = 5;
+const isRound = (v: number) => Math.abs(v * 2 - Math.round(v * 2)) < 0.001;
+/** How much of an overpayment counts as rounding (0 = none: either not over, too much, or not a round amount). */
+export function roundUp(job: Job, paid: number, earned: number): number {
+  const over = round2(paid - earned);
+  return job.kind === 'hourly' && over > 0.004 && over <= ROUND_UP_MAX && isRound(paid) ? over : 0;
 }
 
 export function useJobs() {
@@ -111,7 +121,7 @@ export function payPeriods(job: Job, shifts: Shift[], payouts: Record<string, Pa
   const [cs, ce] = periodOf(job, today);
   const get = (start: string, end: string) => {
     let p = map.get(start);
-    if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs, base: 0, bonus: 0, paidBase: 0, paidBonus: 0 }));
+    if (!p) map.set(start, (p = { start, end, earned: 0, paid: 0, owed: 0, shifts: 0, hours: 0, current: start === cs, base: 0, bonus: 0, paidBase: 0, paidBonus: 0, extra: 0 }));
     return p;
   };
   get(cs, ce);
@@ -142,10 +152,15 @@ export function payPeriods(job: Job, shifts: Shift[], payouts: Record<string, Pa
     p.paidBonus += part(po.bonus_tx_id, po.bonus ?? 0);
     if (po.settled) settled.add(po.period_start);
   }
-  for (const st of settled) { const p = map.get(st); if (p) { p.paidBase = Math.max(p.paidBase, p.base); p.paidBonus = Math.max(p.paidBonus, p.bonus); } }
   const list = [...map.values()].map(p => {
     const earned = round2(p.base + p.bonus), paid = round2(p.paidBase + p.paidBonus);
-    return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(p.paidBase), paidBonus: round2(p.paidBonus), earned, paid, owed: round2(earned - paid), hours: round2(p.hours) };
+    let paidBase = p.paidBase, paidBonus = p.paidBonus, extra = 0;
+    if (settled.has(p.start)) {
+      // paid in full: anything under is forgiven, anything over is kept
+      extra = Math.max(0, round2(paid - earned));
+      paidBase = p.base; paidBonus = p.bonus;
+    } else if ((extra = roundUp(job, paid, earned))) paidBase -= extra;
+    return { ...p, base: round2(p.base), bonus: round2(p.bonus), paidBase: round2(paidBase), paidBonus: round2(paidBonus), earned, paid, extra, owed: round2(earned - paidBase - paidBonus), hours: round2(p.hours) };
   })
     .sort((a, b) => b.start.localeCompare(a.start));
   const owed = round2(list.reduce((s, p) => s + p.owed, 0));
@@ -201,8 +216,8 @@ export function writeShift(job: Job, date: string, f: ShiftInput) {
   };
 }
 
-/** Records a payment for a pay period, adding the salary and bonus to your income. Returns an undo. */
-export function writePayout(job: Job, period: { start: string; end: string }, amt: number, bon: number, account: string | null, date: string) {
+/** Records a payment for a pay period, adding the salary and bonus to your income. `settled`: the period is paid in full (anything over is extra, not an advance). Returns an undo. */
+export function writePayout(job: Job, period: { start: string; end: string }, amt: number, bon: number, account: string | null, date: string, settled = false) {
   const label = periodLabel(period);
   const income = (category: string, a: number, what: string) => {
     const id = uuid();
@@ -219,7 +234,7 @@ export function writePayout(job: Job, period: { start: string; end: string }, am
   }
   // one row per payment, each linked to its own income entries (delete the entry → it's owed again)
   const id = `${payoutId(job.id, period.start)}:${uuid().slice(0, 8)}`;
-  put('payouts', { id, owner_id: '', job_id: job.id, period_start: period.start, period_end: period.end, amount: round2(amt), bonus: round2(bon), tx_id: txId, bonus_tx_id: bonusTx, date });
+  put('payouts', { id, owner_id: '', job_id: job.id, period_start: period.start, period_end: period.end, amount: round2(amt), bonus: round2(bon), tx_id: txId, bonus_tx_id: bonusTx, settled, date });
   return { txId, bonusTx, undo: () => { remove('payouts', id); if (txId) remove('transactions', txId); if (bonusTx) remove('transactions', bonusTx); } };
 }
 
