@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Pencil, Plus, Users } from 'lucide-react';
+import { Pencil, Plus, Users, X } from 'lucide-react';
 import { Sheet, DragZone, IconBox, Money, Bar, Segmented, ease } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, getState } from '../lib/store';
@@ -37,6 +37,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const sel = useSelection();
   const sharedRoots = useSharedRoots();
   const [scope, setScope] = useState<Scope>('mine');
+  const [sub, setSub] = useState<string | null>(null);   // a row tapped: the list below shows only its transactions
+  const listRef = useRef<HTMLDivElement>(null);
   const budgets = useStore(s => s.prefs.budgets);
   const showBudget = period.mode === 'month' && cat?.type === 'expense';
   const bs = useBudgetSpend(period.anchor);
@@ -84,6 +86,14 @@ function Detail({ id, close }: { id: string; close: () => void }) {
     return `Joint budget · ${myName} ${money(mine)} · ${partnerName} ${money(round2(all - mine))}`;
   };
   const max = Math.max(...data.rows.map(r => r.v), 0.01);
+  const pick = (rid: string) => {
+    const next = sub === rid ? null : rid;
+    setSub(next);
+    if (next) requestAnimationFrame(() => listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const subName = sub ? data.rows.find(r => r.id === sub)?.name ?? catRec[sub]?.name ?? '' : '';
+  const shown = sub ? data.scoped.filter(t => t.category_id === sub) : data.scoped;
+  const shownTotal = round2(shown.filter(t => !isPending(t)).reduce((x, t) => x + t.amount, 0));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
@@ -120,8 +130,8 @@ function Detail({ id, close }: { id: string; close: () => void }) {
             {data.rows.length > 0 && (
               <div className="list">
                 {data.rows.map((r, i) => (
-                  <div key={r.id} className="list-row" style={{ paddingRight: 6 }}>
-                    <button className="grow" style={{ textAlign: 'left' }} onClick={() => { close(); setUi({ addTx: { type: cat.type, categoryId: r.id } }); }}>
+                  <div key={r.id} className="list-row" style={{ paddingRight: 6, background: sub === r.id ? tint(cat.color, 0.14) : undefined, transition: 'background 0.2s' }}>
+                    <button className="grow" style={{ textAlign: 'left' }} onClick={() => pick(r.id)}>
                       <div className="row" style={{ justifyContent: 'space-between' }}>
                         <span className="ellipsis" style={{ fontWeight: 550, opacity: r.hidden ? 0.55 : 1 }}>{r.name}{r.hidden && <span className="badge" style={{ marginLeft: 6 }}>hidden</span>}</span>
                         <span className="num bold">{money(r.v)}</span>
@@ -144,14 +154,25 @@ function Detail({ id, close }: { id: string; close: () => void }) {
               </div>
             )}
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
-              <button className="btn" onClick={() => { close(); setUi({ addTx: { type: cat.type, categoryId: id } }); }}><Plus size={18} />Add {cat.type}</button>
+              <button className="btn" onClick={() => { close(); setUi({ addTx: { type: cat.type, categoryId: sub ?? id } }); }}><Plus size={18} />Add {cat.type}</button>
               <button className="btn secondary" onClick={() => setUi({ category: { parentId: id } })}><Plus size={18} />Subcategory</button>
             </div>
-            {data.scoped.length > 0 && (
-              <div className="section">
-                <div className="section-head"><span className="section-title">Transactions</span></div>
-                <div className="list">
-                  {data.scoped.slice(0, 150).map((t, i) => {
+            {(data.scoped.length > 0 || sub) && (
+              <div className="section" ref={listRef} style={{ scrollMarginTop: 8 }}>
+                <div className="section-head">
+                  <span className="section-title">Transactions</span>
+                  <AnimatePresence initial={false}>
+                    {sub && (
+                      <motion.button key="f" className="badge row" style={{ gap: 4, background: tint(cat.color, 0.18), color: 'var(--ink)' }} onClick={() => setSub(null)}
+                        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={{ duration: 0.18 }}>
+                        {subName} · {shown.length} · {money(shownTotal)}<X size={13} />
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+                </div>
+                {shown.length === 0 && <div className="empty">No {subName} transactions in {label(period)}.</div>}
+                {shown.length > 0 && <div className="list" key={sub ?? 'all'}>
+                  {shown.slice(0, 150).map((t, i) => {
                     const mine = t.owner_id === me;
                     return (
                       <motion.button key={t.id} className="list-row" onClick={() => setUi({ addTx: { editId: t.id } })}
@@ -168,7 +189,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
                       </motion.button>
                     );
                   })}
-                </div>
+                </div>}
               </div>
             )}
           </motion.div>
