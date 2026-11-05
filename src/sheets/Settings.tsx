@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic, RefreshCw } from 'lucide-react';
+import { CloudCheck, CloudUpload, Download, LogOut, Repeat, Trash2, Upload, Smartphone, ChevronRight, CloudAlert, EyeOff, Mic, RefreshCw, Sparkles } from 'lucide-react';
 import { Sheet, Segmented, Toggle, toast, ease } from '../components/ui';
 import { setVoiceAutoSave, voiceAutoSave } from '../lib/voiceRun';
 import { setTheme, useTheme } from '../lib/theme';
@@ -37,7 +37,7 @@ function Body() {
   const name = (user && profiles[user.id]?.display_name) || 'Me';
   const theme = useTheme();
   const analytics = useStore(s => !!s.prefs.analytics);
-  const [voiceAuto, setVoiceAuto] = useState(voiceAutoSave);
+  const notesCount = useStore(s => s.prefs.notes?.length ?? 0);
 
   const doExport = async () => {
     const { exportCsv } = await import('../lib/import1money');   // the CSV library loads only when you export
@@ -77,18 +77,13 @@ function Body() {
         <Segmented value={theme} onChange={setTheme} options={[{ value: 'system', label: 'Phone' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
       </div>
 
-      {/* Luna & voice, grouped: voice entry, About me, notes */}
-      <div className="section group">
-        <div className="section-head"><span className="section-title">{analytics ? 'Luna' : 'Voice'}</span></div>
-        <div className="list">
-          <div className="list-row">
-            <Mic size={21} />
-            <span className="grow">Voice: save right away<div className="tiny muted">Off: what you say opens filled in, you tap ✓</div></span>
-            <Toggle on={voiceAuto} onChange={v => { setVoiceAutoSave(v); setVoiceAuto(v); }} />
-          </div>
-        </div>
-        {analytics && <AboutMe />}
-        {analytics && <LumenNotes />}
+      <div className="section list">
+        <button className="list-row" onClick={() => setUi({ luna: true })}>
+          {analytics ? <Sparkles size={21} /> : <Mic size={21} />}
+          <span className="grow">{analytics ? 'Luna' : 'Voice'}{analytics && <div className="tiny muted">Voice, About me, notes</div>}</span>
+          {analytics && notesCount > 0 && <span className="muted small">{notesCount}</span>}
+          <ChevronRight size={18} className="faint" />
+        </button>
       </div>
 
       <div className="section list">
@@ -127,6 +122,31 @@ function Body() {
         )}
       </AnimatePresence>
       <div className="tiny faint" style={{ textAlign: 'center', marginTop: 20 }}>Money · v{__APP_VERSION__}</div>
+    </div>
+  );
+}
+
+/** Luna & voice in one place: voice entry, About me, notes. Opened from Settings like Recurring. */
+export function LunaSheet() {
+  const open = useUi(u => !!u.luna);
+  const analytics = useStore(s => !!s.prefs.analytics);
+  const close = () => setUi({ luna: false });
+  return <Sheet open={open} onClose={close} title={analytics ? 'Luna' : 'Voice'} z={1}>{open && <LunaBody analytics={analytics} />}</Sheet>;
+}
+
+function LunaBody({ analytics }: { analytics: boolean }) {
+  const [voiceAuto, setVoiceAuto] = useState(voiceAutoSave);
+  return (
+    <div className="sheet-body">
+      <div className="list">
+        <div className="list-row">
+          <Mic size={21} />
+          <span className="grow">Voice: save right away<div className="tiny muted">Off: what you say opens filled in, you tap ✓</div></span>
+          <Toggle on={voiceAuto} onChange={v => { setVoiceAutoSave(v); setVoiceAuto(v); }} />
+        </div>
+      </div>
+      {analytics && <AboutMe />}
+      {analytics && <LumenNotes />}
     </div>
   );
 }

@@ -32,6 +32,7 @@ export interface UiState {
   shiftDay?: string | null;   // open this day's shift (shortcut, voice)
   payJob?: string | null;     // open "got paid" for this job (voice)
   levels?: boolean;           // the level card
+  luna?: boolean;             // Settings → Luna (voice, About me, notes)
 }
 
 const TABS: UiState['tab'][] = ['accounts', 'categories', 'transactions', 'overview', 'tracker'];

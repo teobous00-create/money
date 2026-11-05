@@ -30,6 +30,7 @@ import { FilterSheet } from './sheets/Filter';
 import { PeriodSheet } from './sheets/PeriodPicker';
 import { RecurringSheet } from './sheets/Recurring';
 import { HiddenSheet } from './sheets/Hidden';
+import { LunaSheet } from './sheets/Settings';
 import { LevelBadge, LevelSheet, LevelWatch } from './components/Level';
 
 const MODE_SHORT: Record<PeriodMode, string> = { day: 'Day', week: 'Week', month: 'Month', year: 'Year', all: 'All' };
@@ -261,6 +262,7 @@ function Sheets() {
       <RecurringSheet />
       {importerEver && <Suspense fallback={null}><ImportSheet /></Suspense>}
       <HiddenSheet />
+      <LunaSheet />
       <LevelSheet />
       <LevelWatch />
     </>
