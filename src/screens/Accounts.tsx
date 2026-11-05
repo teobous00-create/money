@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Archive } from 'lucide-react';
 import { useAccounts, useBalances } from '../lib/calc';
-import { useStore } from '../lib/store';
+import { useStore, putMany } from '../lib/store';
+import { Sortable } from '../components/Sortable';
 import { setUi } from '../lib/ui';
 import { IconBox, Money, Ring, Segmented, ease, softSpring } from '../components/ui';
 import type { Account } from '../lib/types';
@@ -28,10 +29,27 @@ export function AccountsScreen() {
   const archived = accounts.filter(a => a.archived);
   const sum = (l: Account[]) => round2(l.reduce((s, a) => s + (bal.get(a.id) ?? 0), 0));
 
-  const Row = ({ a, i }: { a: Account; i: number }) => {
+  // hold an account and drag it to reorder (within its group); your own accounts get the new order
+  const saveOrder = (group: Account[], ids: string[]) => {
+    const pos = accounts.map(a => a.id);
+    const slots = group.map(a => pos.indexOf(a.id)).sort((x, y) => x - y);
+    slots.forEach((slot, k) => { pos[slot] = ids[k]; });
+    const rows = pos.map((id, i) => ({ a: accounts.find(x => x.id === id)!, i }))
+      .filter(({ a, i }) => a && a.owner_id === me && a.sort !== i).map(({ a, i }) => ({ ...a, sort: i }));
+    putMany('accounts', rows);
+  };
+  const sortList = (list: Account[], start: number) => (
+    <Sortable className="list sortable-list" ids={list.map(a => a.id)} liftScale={1.03}
+      onTap={id => setUi({ account: { id } })}
+      onCommit={ids => saveOrder(list, ids)}
+      render={id => { const k = list.findIndex(a => a.id === id); return k < 0 ? null : row(list[k], start + k, true); }} />
+  );
+
+  const row = (a: Account, i: number, sortable = false) => {
     const b = bal.get(a.id) ?? 0;
+    const Tag = sortable ? motion.div : motion.button;
     return (
-      <motion.button className="list-row" onClick={() => setUi({ account: { id: a.id } })}
+      <Tag key={a.id} className="list-row" onClick={sortable ? undefined : () => setUi({ account: { id: a.id } })}
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease, delay: Math.min(i, 10) * 0.03 }}>
         <div style={{ position: 'relative' }}>
           <IconBox icon={a.icon} color={a.color} />
@@ -52,7 +70,7 @@ export function AccountsScreen() {
             <Ring value={b / a.goal} color={a.color} />
           </div>
         ) : null}
-      </motion.button>
+      </Tag>
     );
   };
 
@@ -74,31 +92,31 @@ export function AccountsScreen() {
             {regular.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Accounts</span><Money value={sum(regular)} className="bold" colorize /></div>
-                <div className="list">{regular.map((a, i) => <Row key={a.id} a={a} i={i} />)}</div>
+                {sortList(regular, 0)}
               </div>
             )}
             {trading.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Trading capital</span><Money value={sum(trading)} className="bold" /></div>
-                <div className="list">{trading.map((a, i) => <Row key={a.id} a={a} i={i + regular.length} />)}</div>
+                {sortList(trading, regular.length)}
               </div>
             )}
             {savings.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Savings</span><Money value={sum(savings)} className="bold" /></div>
-                <div className="list">{savings.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length} />)}</div>
+                {sortList(savings, regular.length + trading.length)}
               </div>
             )}
             {investments.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Investments</span><Money value={sum(investments)} className="bold" /></div>
-                <div className="list">{investments.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length + savings.length} />)}</div>
+                {sortList(investments, regular.length + trading.length + savings.length)}
               </div>
             )}
             {debts.length > 0 && (
               <div className="section">
                 <div className="section-head"><span className="section-title">Debts</span><Money value={sum(debts)} className="bold" colorize /></div>
-                <div className="list">{debts.map((a, i) => <Row key={a.id} a={a} i={i + regular.length + trading.length + savings.length} />)}</div>
+                {sortList(debts, regular.length + trading.length + savings.length)}
               </div>
             )}
             {archived.length > 0 && (
@@ -110,7 +128,7 @@ export function AccountsScreen() {
                 <AnimatePresence initial={false}>
                   {showArchive && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3, ease }} style={{ overflow: 'hidden' }}>
-                      <div className="list">{archived.map((a, i) => <Row key={a.id} a={a} i={i} />)}</div>
+                      <div className="list">{archived.map((a, i) => row(a, i))}</div>
                     </motion.div>
                   )}
                 </AnimatePresence>

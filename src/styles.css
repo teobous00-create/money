@@ -139,6 +139,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .list-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; position: relative; background: var(--surface); width: 100%; text-align: left; }
 .list-row + .list-row::before { content: ''; position: absolute; top: 0; left: 72px; right: 0; height: 1px; background: var(--line); }
 .list-row:active { background: var(--surface-2); }
+.sortable-list > div + div .list-row::before { content: ''; position: absolute; top: 0; left: 72px; right: 0; height: 1px; background: var(--line); }
+.lifted .list-row { border-radius: var(--r); box-shadow: 0 14px 32px rgba(0,0,0,.28); }
 
 .ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; color: #fff; flex: none; }
 .ico.round { border-radius: 50%; }
