@@ -12,6 +12,7 @@ import { addDays, fromISO, haptic, money, num, round2, toISO, todayISO, uuid } f
 import {
   useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, roundUp, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
   useStrategies, useArchivedStrategies, saveStrategyOrder, nextStrategySort, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
+  shiftDone,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
 import { parseNum } from '../sheets/AccountEdit';
@@ -186,7 +187,7 @@ function MonthPlan({ anchor }: { anchor: string }) {
   const rows = useMemo(() => jobs.map(job => {
     const tipOf = (s: (typeof shifts)[number]) => { const t = s.tips_tx_id ? txs[s.tips_tx_id] : null; return t && !t.deleted_at ? t.amount : 0; };
     // tips per shift over the last 90 days, to estimate planned shifts
-    const recent = shifts.filter(s => s.job_id === job.id && s.date <= today && s.date > addDays(today, -90));
+    const recent = shifts.filter(s => s.job_id === job.id && shiftDone(job, s, today) && s.date > addDays(today, -90));
     const tipAvg = job.kind === 'hourly' && recent.length ? recent.reduce((x, s) => x + tipOf(s), 0) / recent.length : 0;
     const periods: Array<[string, string]> = job.pay === 'monthly' ? [[first, last]] : [[first, toISO(new Date(d.getFullYear(), d.getMonth(), 15))], [toISO(new Date(d.getFullYear(), d.getMonth(), 16)), last]];
     return {
@@ -194,7 +195,7 @@ function MonthPlan({ anchor }: { anchor: string }) {
       periods: periods.map(([a, b]) => {
         const inP = shifts.filter(s => s.job_id === job.id && s.date >= a && s.date <= b);
         const sum = (l: typeof inP) => ({ n: l.length, hours: round2(l.reduce((x, s) => x + (s.hours ?? 0), 0)), base: round2(l.reduce((x, s) => x + shiftParts(job, s).base, 0)), bonus: round2(l.reduce((x, s) => x + shiftParts(job, s).bonus, 0)), tips: round2(l.reduce((x, s) => x + tipOf(s), 0)) });
-        const worked = sum(inP.filter(s => s.date <= today)), planned = sum(inP.filter(s => s.date > today));
+        const worked = sum(inP.filter(s => shiftDone(job, s, today))), planned = sum(inP.filter(s => !shiftDone(job, s, today)));
         return { a, b, worked, planned, tipsEst: round2(planned.n * tipAvg) };
       }),
     };

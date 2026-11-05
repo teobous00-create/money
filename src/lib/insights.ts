@@ -4,7 +4,7 @@ import { useStore } from './store';
 import { useTxs, useSelection, useSharedRoots } from './calc';
 import { fromISO, round2, toISO, todayISO } from './format';
 import type { Category, Job, Tx } from './types';
-import { shiftPay, shiftParts, monthBonus } from './tracker';
+import { shiftPay, shiftParts, monthBonus, shiftDone } from './tracker';
 import { alive } from './calc';
 
 export const monthStart = (iso: string) => { const d = fromISO(iso); return toISO(new Date(d.getFullYear(), d.getMonth(), 1)); };
@@ -177,7 +177,7 @@ export function useWorkStats(anchor: string): WorkRow[] {
         const e = monthEnd(m);
         const w: WorkMonth = { shifts: 0, hours: 0, bonus: 0, earned: 0, tips: 0 };
         for (const s of alive(shifts)) {
-          if (s.job_id !== job.id || s.date < m || s.date > e || s.date > today) continue;
+          if (s.job_id !== job.id || s.date < m || s.date > e || !shiftDone(job, s, today)) continue;
           w.shifts++; w.hours += s.hours; w.bonus += shiftParts(job, s).bonus; w.earned += shiftPay(job, s);
         }
         // contacts target: the month's bonus (final, or as things stand this month)

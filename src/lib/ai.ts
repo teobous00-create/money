@@ -9,7 +9,7 @@ import { alive, computeBalances, catName } from './calc';
 import { addDays, fromISO, round2, toISO, todayISO } from './format';
 import { norm, sameWord } from './quickparse';
 import { isQuestion } from './voice';
-import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf } from './tracker';
+import { payPeriods, rateAt, shiftParts, shiftPay, monthBonus, contactRule, contactsOf, shiftDone } from './tracker';
 import { chatDetail, plannedAhead, untilNextPay } from './aiFacts';
 import { goalRows } from './goals';
 import { PROJECT_TOOL, runProject, type ProjectInput } from './aiProject';
@@ -185,7 +185,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
       L.push(`${j.name}: ${j.kind === 'daily' ? `day rate ${r.day ?? '?'} + sales bonus` : `hourly ${r.hour ?? '?'}/h + tips`}, paid ${j.pay === 'monthly' ? 'monthly' : '1–15 and 16–end'}`);
       for (const m of months) {
         const e = monthEnd(m);
-        const sh = shifts.filter(x => x.job_id === j.id && x.date >= m && x.date <= e && x.date <= today);
+        const sh = shifts.filter(x => x.job_id === j.id && x.date >= m && x.date <= e && shiftDone(j, x, today));
         if (!sh.length) continue;
         const hours = r2(sh.reduce((x, y) => x + (y.hours ?? 0), 0));
         const earned = r2(sh.reduce((x, y) => x + shiftPay(j, y), 0));
@@ -195,7 +195,7 @@ export function buildSnapshot(s: State = getState(), today = todayISO()): string
         if (mb) L.push(`  ${ym(m)}: contacts ${mb.contacts} over ${mb.worked} days (avg ${mb.avg}; target ${mb.min}/day → ${mb.over ? `bonus ${mb.bonus}` : mb.met ? `on track, bonus ${mb.bonus} so far` : `below target, bonus 0 so far`}${mb.planned ? `; ${mb.planned} days planned, need ${mb.needPerDay}/day` : ''})`);
         L.push(`  ${ym(m)}: ${sh.length} ${j.kind === 'daily' ? 'days' : 'shifts'}, ${j.kind === 'hourly' ? `${hours}h, ` : ''}earned ${earned}${bonus ? ` (bonus ${bonus})` : ''}${tips ? `, tips ${tips} (${r2(tips / sh.length)}/shift)` : ''}${j.kind === 'hourly' && hours ? `, ${r2((earned + tips) / hours)}/h with tips` : ''}`);
       }
-      const fut = shifts.filter(x => x.job_id === j.id && x.date > today).sort((a, b) => a.date.localeCompare(b.date));
+      const fut = shifts.filter(x => x.job_id === j.id && !shiftDone(j, x, today)).sort((a, b) => a.date.localeCompare(b.date));
       if (fut.length) {
         const byM = new Map<string, { n: number; hours: number; pay: number }>();
         for (const x of fut) { const k = ym(x.date); const v = byM.get(k) ?? { n: 0, hours: 0, pay: 0 }; v.n++; v.hours += x.hours ?? 0; v.pay += shiftParts(j, x).base; byM.set(k, v); }
@@ -315,7 +315,7 @@ export function runWork(q: WorkInput, s: State = getState(), today = todayISO())
   const days = new Map<string, string[]>();
   const tot = new Map<string, { n: number; hours: number; pay: number; bonus: number; tips: number }>();
   const wd = new Map<string, { pay: number; hours: number; n: number }>();
-  for (const sh of alive(s.shifts).filter(x => x.date >= from && x.date <= to && x.date <= today).sort((a, b) => a.date.localeCompare(b.date))) {
+  for (const sh of alive(s.shifts).filter(x => x.date >= from && x.date <= to && shiftDone(s.jobs[x.job_id], x, today)).sort((a, b) => a.date.localeCompare(b.date))) {
     const j = jobs.find(x => x.id === sh.job_id);
     if (!j) continue;
     const tip = sh.tips_tx_id ? s.transactions[sh.tips_tx_id] : null;

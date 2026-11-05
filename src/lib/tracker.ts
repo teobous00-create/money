@@ -40,13 +40,25 @@ export interface MonthBonus {
   projected: number; projectedBonus: number; over: boolean;
 }
 
+/** When a shift is over, so today's shift isn't counted (as earned / as a worked day) from midnight: the morning job (daily) ends ~15:00, the evening job (hourly) ~23:30. */
+export const SHIFT_END: Record<Job['kind'], string> = { daily: '15:00', hourly: '23:30' };
+
+/** Has this shift happened yet? Past days yes, future days no; today only after the job's end time — or once that day's contacts are logged. */
+export function shiftDone(job: Job | undefined, s: Shift, today = todayISO(), now = new Date()): boolean {
+  if (s.date !== today) return s.date < today;
+  if (today !== toISO(now)) return true;                     // asked about another "today" (e.g. a past month): treat as over
+  if (job && contactRule(job, s.date) && (s.sales ?? 0) > 0) return true;
+  const [h, m] = SHIFT_END[job?.kind ?? 'daily'].split(':').map(Number);
+  return now.getHours() * 60 + now.getMinutes() >= h * 60 + m;
+}
+
 /** Where the month's contacts target stands. */
 export function monthBonus(job: Job, shifts: Shift[], anyDate: string, today = todayISO()): MonthBonus | null {
   const rule = contactRule(job, anyDate);
   if (!rule) return null;
   const a = firstOf(anyDate), b = lastOf(anyDate);
   const inM = shifts.filter(s => s.job_id === job.id && !s.deleted_at && s.date >= a && s.date <= b);
-  const done = inM.filter(s => s.date <= today), todo = inM.filter(s => s.date > today);
+  const done = inM.filter(s => shiftDone(job, s, today)), todo = inM.filter(s => !shiftDone(job, s, today));
   const contacts = done.reduce((x, s) => x + contactsOf(job, s), 0);
   const worked = done.length, planned = todo.length;
   const avg = worked ? contacts / worked : 0;
@@ -126,7 +138,7 @@ export function payPeriods(job: Job, shifts: Shift[], payouts: Record<string, Pa
   };
   get(cs, ce);
   for (const s of shifts) {
-    if (s.job_id !== job.id || s.deleted_at || s.date > today) continue;
+    if (s.job_id !== job.id || s.deleted_at || !shiftDone(job, s, today)) continue;
     const [a, b] = periodOf(job, s.date);
     const p = get(a, b);
     const parts = shiftParts(job, s);
