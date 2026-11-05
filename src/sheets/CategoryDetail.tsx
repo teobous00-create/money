@@ -19,7 +19,7 @@ export function CategoryDetailSheet() {
   const close = () => setUi({ catDetail: null });
   return (
     <Sheet open={!!arg} onClose={close} full>
-      {arg && <Detail id={arg.id} close={close} />}
+      {arg && <Detail key={arg.id} id={arg.id} close={close} />}
     </Sheet>
   );
 }
@@ -36,7 +36,7 @@ function Detail({ id, close }: { id: string; close: () => void }) {
   const txs = useTxs();
   const sel = useSelection();
   const sharedRoots = useSharedRoots();
-  const [scope, setScope] = useState<Scope>('mine');
+  const [scope, setScope] = useState<Scope>(() => (sharedRoots.has(id) ? 'both' : 'mine'));   // shared categories open on Both
   const [sub, setSub] = useState<string | null>(null);   // a row tapped: the list below shows only its transactions
   const listRef = useRef<HTMLDivElement>(null);
   const budgets = useStore(s => s.prefs.budgets);
