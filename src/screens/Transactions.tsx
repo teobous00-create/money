@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeftRight, Search, Trash2, X, Repeat, Mic, Clock } from 'lucide-react';
 import { useTxs, useSelection, useProjected, viewWindow, catName, catStyle, sortTxs } from '../lib/calc';
@@ -67,9 +67,22 @@ export function TransactionsScreen() {
     return () => io.disconnect();
   }, [groups.length, limit]);
 
+  // open on today: the planned days (newer) sit above it, past days below — scroll either way
+  const screen = useRef<HTMLDivElement>(null);
+  const landed = useRef(false);
+  const todayIdx = q ? -1 : groups.findIndex(g => g.date <= todayISO());
+  useEffect(() => { if (todayIdx >= limit) setLimit(todayIdx + 12); }, [todayIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (landed.current || q || todayIdx <= 0 || todayIdx >= limit) return;
+    const box = screen.current, el = box?.querySelector<HTMLElement>(`[data-day="${groups[todayIdx].date}"]`);
+    if (!box || !el) return;
+    landed.current = true;
+    box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  }, [todayIdx, limit, q, groups]);
+
   let rowIndex = 0;
   return (
-    <div className="screen" style={{ width: '100%' }}>
+    <div className="screen" ref={screen} style={{ width: '100%' }}>
       <AnimatePresence initial={false}>
         {search && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25, ease }} style={{ overflow: 'hidden' }}>
@@ -98,7 +111,7 @@ export function TransactionsScreen() {
         const d = fromISO(g.date);
         const rel = relativeDay(g.date);
         return (
-          <div key={g.date}>
+          <div key={g.date} data-day={g.date}>
             <div className="day-head">
               <div className="day-num num" style={{ color: g.date === todayISO() ? 'var(--accent)' : undefined }}>{d.getDate()}</div>
               <div className="day-meta grow">
