@@ -133,6 +133,8 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 .card { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); padding: 16px; }
 .card + .card, .card + .section, .section + .card { margin-top: 12px; }
 .section { margin-top: 18px; }
+.group > .section { margin-top: 14px; }
+.group > .section .section-title { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--ink); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px 8px; }
 .section-title { font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
 .list { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; }

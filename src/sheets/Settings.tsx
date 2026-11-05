@@ -77,16 +77,19 @@ function Body() {
         <Segmented value={theme} onChange={setTheme} options={[{ value: 'system', label: 'Phone' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
       </div>
 
-      <div className="section list">
-        <div className="list-row">
-          <Mic size={21} />
-          <span className="grow">Voice: save right away<div className="tiny muted">Off: what you say opens filled in, you tap ✓</div></span>
-          <Toggle on={voiceAuto} onChange={v => { setVoiceAutoSave(v); setVoiceAuto(v); }} />
+      {/* Luna & voice, grouped: voice entry, About me, notes */}
+      <div className="section group">
+        <div className="section-head"><span className="section-title">{analytics ? 'Luna' : 'Voice'}</span></div>
+        <div className="list">
+          <div className="list-row">
+            <Mic size={21} />
+            <span className="grow">Voice: save right away<div className="tiny muted">Off: what you say opens filled in, you tap ✓</div></span>
+            <Toggle on={voiceAuto} onChange={v => { setVoiceAutoSave(v); setVoiceAuto(v); }} />
+          </div>
         </div>
+        {analytics && <AboutMe />}
+        {analytics && <LumenNotes />}
       </div>
-
-      {analytics && <AboutMe />}
-      {analytics && <LumenNotes />}
 
       <div className="section list">
         <button className="list-row" onClick={() => setUi({ recurring: true })}>
@@ -108,7 +111,7 @@ function Body() {
         )}
       </div>
 
-      <RecentlyDeleted />
+      {SHOW_RECENTLY_DELETED && <RecentlyDeleted />}
 
       <div className="section list">
         {REMOTE && <button className="list-row" onClick={() => { toast('Reloading everything from the server…'); void resyncAll().then(() => toast('Up to date')); }}><RefreshCw size={21} /><span className="grow">Reload everything from the server<div className="tiny muted">If something looks missing or wrong on this phone</div></span></button>}
@@ -139,7 +142,7 @@ function LumenNotes() {
   const saveEdit = () => { if (!edit) return; const t = edit.text.trim(); put(t ? notes.map(n => (n.id === edit.id ? { ...n, text: t } : n)) : notes.filter(n => n.id !== edit.id)); setEdit(null); };
   return (
     <div className="section">
-      <div className="section-head"><span className="section-title">Luna notes</span><span className="tiny muted">{notes.length || ''}</span></div>
+      <div className="section-head"><span className="section-title">Notes</span><span className="tiny muted">{notes.length || ''}</span></div>
       <div className="list">
         <AnimatePresence initial={false}>
           {notes.map(n => (
@@ -173,7 +176,7 @@ function AboutMe() {
   const dirty = text.trim() !== saved.trim();
   return (
     <div className="section">
-      <div className="section-head"><span className="section-title">About me · for Luna</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
+      <div className="section-head"><span className="section-title">About me</span>{dirty && <span className="tiny" style={{ color: 'var(--accent)', fontWeight: 600 }}>not saved</span>}</div>
       <textarea className="input about" rows={6} value={text} onChange={e => setText(e.target.value)} onBlur={() => dirty && setPrefs({ aboutMe: text.trim() })}
         placeholder={'Goals, debts, plans — e.g. "I want 3.000 € saved by June", "Eurobank loan 2.000 €, 150 €/month"'} />
       <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
@@ -185,6 +188,9 @@ function AboutMe() {
 }
 
 const whenFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** Hidden for now (not needed day to day) — flip to true to bring the section back. */
+const SHOW_RECENTLY_DELETED = false;
 
 /** Big deletions of your own data in the last 30 days (a re-import that replaced everything, a deleted account…), with a way back. */
 function RecentlyDeleted() {
