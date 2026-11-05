@@ -82,9 +82,11 @@ export function TransactionsScreen() {
 
   let rowIndex = 0;
   return (
-    <div className="screen" ref={screen} style={{ width: '100%' }}>
-      <AnimatePresence initial={false}>
-        {search && (
+    <div style={{ flex: 1, width: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* fixed on top: search, banners, Luna card, favorites — the days scroll under them */}
+      <div style={{ flex: 'none', padding: '4px 16px 0' }}>
+        <AnimatePresence initial={false}>
+          {search && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25, ease }} style={{ overflow: 'hidden' }}>
             <div className="row" style={{ gap: 8, paddingBottom: 6 }}>
               <div className="grow" style={{ position: 'relative' }}>
@@ -96,10 +98,12 @@ export function TransactionsScreen() {
             {q && <div className="tiny faint" style={{ padding: '0 4px' }}>Searching all dates</div>}
           </motion.div>
         )}
-      </AnimatePresence>
-      {!search && <RecurringBanner />}
-      {!search && <LumenAlerts />}
-      {!search && <FavoritesBar />}
+        </AnimatePresence>
+        {!search && <RecurringBanner />}
+        {!search && <LumenAlerts />}
+        {!search && <FavoritesBar />}
+      </div>
+      <div className="screen" ref={screen} style={{ width: '100%', paddingTop: 0 }}>
       {groups.length === 0 && (
         <div className="empty">
           <IconBox icon="receipt" color="#64748B" size="lg" />
@@ -127,6 +131,7 @@ export function TransactionsScreen() {
         );
       })}
       {groups.length > limit && <div ref={more} style={{ height: 40 }} />}
+      </div>
     </div>
   );
 }
