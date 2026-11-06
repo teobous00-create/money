@@ -162,7 +162,19 @@ export interface Prefs {
   homeSeeded?: number;              // household budgets taken from the Excel (version)
   learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
   paySplit?: PaySplitPrefs;         // what to do with each pay once the month is covered
+  botPlan?: BotPlan;                // the trading bot's growth plan and milestones (Tracker → Trading)
 }
+
+/** A bot's growth plan: compounding at `pct`/trading day, with withdrawal milestones, on one or two accounts. */
+export interface BotPlan {
+  bought: string | null;                                  // the day you checked in "I bought it" (null = waiting)
+  pct: number;                                            // % a trading day
+  a1: { capital: number; start: string; strategy: string | null };
+  a2: { capital: number; start: string | null; strategy: string | null };   // start null = the trading day after account 1's first withdrawal
+  milestones: BotMilestone[];
+  logged?: Record<string, string>;                        // one-off withdrawals you marked as done → the day
+}
+export interface BotMilestone { id: string; acc: 1 | 2; at: number; kind: 'once' | 'daily'; amount: number }
 
 /** Pay split: on each pay (not tips), what the rest of the month still needs stays; the spare goes to these, in order. */
 export interface PaySplitPrefs {

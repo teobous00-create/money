@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Delete, Menu, Pencil, Plus, Settings2, Check, Sun, Moon, Wallet } from 'lucide-react';
 import { Segmented, Sheet, toast, ease } from '../components/ui';
+import { BotPlanCard } from '../components/BotPlan';
 import { Sortable } from '../components/Sortable';
 import { useStore, put, putMany, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
@@ -724,17 +725,21 @@ function Trading() {
 
   if (!strategies.length) {
     return (
+      <div>
+      <BotPlanCard />
       <div className="empty">
         <div className="bold" style={{ color: 'var(--ink)', marginBottom: 6 }}>No strategies yet</div>
         <div className="small" style={{ marginBottom: 14 }}>Add each strategy or EA you trade, then log its daily result on the calendar.</div>
         <button className="btn" onClick={() => setPicker(true)}><Plus size={18} />Add strategy</button>
         <StrategyPicker open={picker} onClose={() => setPicker(false)} selected={selected} onSelect={setSel} startNew />
       </div>
+      </div>
     );
   }
 
   return (
     <div>
+      <BotPlanCard />
       <Segmented value={mode} onChange={changeMode}
         options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'all', label: 'All time' }]} />
       <div style={{ marginTop: 10 }}>
