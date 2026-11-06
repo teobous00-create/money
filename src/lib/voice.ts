@@ -223,8 +223,16 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
       const amount = nums.find(n => n.label === 'salary' || n.label === 'base')?.v ?? nums.find(n => n.label === null)?.v ?? null;
       // only one of the two was paid: "το μπόνους" → just the bonus, "τα μεροκάματα" → just the day pay
       const saysSalary = saysAt(SALARY);
+      // "πρωινή και μπόνους" / "μαζί με το μπόνους": both parts
+      const andBonus = ws.some((w, k) => BONUS.test(w.n) && !without(k) &&
+        ([ws[k - 1]?.n, /^(το|τα|τον)$/.test(ws[k - 1]?.n ?? '') ? ws[k - 2]?.n : ''].some(x => x === 'και' || x === 'μαζι' || x === 'με')));
+      // the morning job: "πληρώθηκα πρωινή" = the day pay only, "… και μπόνους" = both, "πληρώθηκα μπόνους" = the bonus only
       const only: 'salary' | 'bonus' | undefined = !(ref.job.kind === 'daily' && ref.job.bonus_category_id) ? undefined
-        : saysBonus && !saysBase && !saysSalary ? 'bonus' : saysBase && !saysBonus ? 'salary' : undefined;
+        : saysBonus && (saysBase || saysSalary || andBonus) ? undefined
+        : saysBonus ? 'bonus'
+        : saysBase ? 'salary'
+        : nums.length === 0 ? 'salary'
+        : undefined;   // an amount with no word ("πρωινή 706"): salary first, the rest is bonus
       // "300 eurobank και 100 μετρητά" / "eurobank 300, μετρητά 100": an amount per account
       const accAt = (k: number) => {
         const w = ws[k]?.n ?? '';
