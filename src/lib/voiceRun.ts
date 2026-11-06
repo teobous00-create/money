@@ -5,7 +5,7 @@ import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } fro
 import { catName, alive } from './calc';
 import { complete, type Cmd, type VoiceCtx } from './voice';
 import { norm } from './quickparse';
-import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf } from './tracker';
+import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf, payAccounts } from './tracker';
 import { toast } from '../components/ui';
 import type { Recurring, Tx, TxType } from './types';
 
@@ -210,11 +210,9 @@ function savePayout(c: Extract<Cmd, { kind: 'payout' }>): Done | null {
   else if (split && c.bonus === null) { amt = Math.min(c.amount!, Math.max(0, owedBase)); bon = round2(c.amount! - amt); }   // "πρωινή 706" → salary first, the rest is bonus
   else { amt = c.amount ?? 0; bon = split ? c.bonus ?? 0 : 0; if (!split && c.bonus) amt += c.bonus; }
   if (amt <= 0 && bon <= 0) return null;
-  let account: string | null = null;
-  try { account = localStorage.getItem('money:payacc:' + job.id); } catch { /* ignore */ }
-  const mine = Object.values(st.accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === st.user?.id);
-  if (!account || !mine.some(a => a.id === account)) account = mine.find(a => /eurobank|τράπεζ|bank/i.test(a.name))?.id ?? mine[0]?.id ?? null;
-  const r = writePayout(job, period, amt, bon, account, c.date);
+  const mine = Object.values(st.accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === st.user?.id).sort((a, b) => a.sort - b.sort);
+  const acc = payAccounts(job, mine);
+  const r = writePayout(job, period, amt, bon, acc.salary, c.date, false, split ? acc.bonus : null);
   const parts = split ? `${money(amt)} + ${money(bon)}` : money(round2(amt + bon));
   return { label: `${job.name} paid ${parts} · ${periodLabel(period)}`, amount: round2(amt + bon), undo: r.undo, edit: () => setUi({ tab: 'tracker' }) };
 }

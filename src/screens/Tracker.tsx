@@ -13,6 +13,7 @@ import {
   useJobs, useJobShifts, usePayPeriods, shiftPay, shiftParts, shiftId, rateAt, periodLabel, writeShift, writePayout, roundUp, savePnl, contactRule, contactsOf, monthBonus, type MonthBonus,
   useStrategies, useArchivedStrategies, saveStrategyOrder, nextStrategySort, usePnlByDay, statsFor, tRange, tShift, goalOf, pnlId, type TMode, type PayPeriod,
   shiftDone,
+  payAccounts, rememberPayAccounts,
 } from '../lib/tracker';
 import type { Job, Strategy } from '../lib/types';
 import { parseNum } from '../sheets/AccountEdit';
@@ -449,7 +450,9 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
   const initial = (p: PayPeriod | null) => (p ? (split ? [fmt(p.base - p.paidBase), fmt(p.bonus - p.paidBonus)] : [fmt(p.owed), '']) : ['', '']);
   const [amount, setAmount] = useState(initial(pick)[0]);
   const [bonus, setBonus] = useState(initial(pick)[1]);
-  const [account, setAccount] = useState(lsGet('money:payacc:' + job.id) ?? accounts.find(a => /eurobank|τράπεζ|bank/i.test(a.name))?.id ?? accounts[0]?.id ?? '');
+  const [defaults] = useState(() => payAccounts(job, accounts));
+  const [account, setAccount] = useState(defaults.salary ?? '');
+  const [bonusAccount, setBonusAccount] = useState(defaults.bonus ?? '');   // split jobs: the bonus can go to another account
   const [date, setDate] = useState(todayISO());
   const [over, setOver] = useState(0);   // paid more than owed and it isn't rounding: asking whether it's extra or an advance
   const choose = (p: PayPeriod) => { setPick(p); const [a, b] = initial(p); setAmount(a); setBonus(b); setOver(0); };
@@ -462,8 +465,8 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
       const after = round2(pick.paid + amt + bon), extra = round2(after - pick.earned);
       if (extra > 0.004 && !roundUp(job, after, pick.earned)) { haptic(8); return setOver(extra); }
     }
-    const { txId, bonusTx } = writePayout(job, pick, amt, bon, account || null, date, !!settled);
-    if (account) lsSet('money:payacc:' + job.id, account);
+    const { txId, bonusTx } = writePayout(job, pick, amt, bon, account || null, date, !!settled, split ? bonusAccount || null : null);
+    rememberPayAccounts(job, account || null, split ? bonusAccount || null : null);
     haptic(12);
     toast(txId || bonusTx ? `${money(round2(amt + bon))} added to your income` : 'Payment saved');
     onClose();
@@ -489,11 +492,17 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
       {pick && (
         <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} style={{ marginTop: 14 }}>
           {split ? (
-            <div className="row" style={{ gap: 10 }}>
-              <div className="field grow"><label>Salary {cats(job.salary_category_id)}</label>
-                <input className="input num" inputMode="decimal" placeholder="0" value={amount} onChange={e => { setAmount(e.target.value); setOver(0); }} /></div>
-              <div className="field grow"><label>Bonus {cats(job.bonus_category_id)}</label>
-                <input className="input num" inputMode="decimal" placeholder="0" value={bonus} onChange={e => setBonus(e.target.value)} /></div>
+            <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+              <div className="field grow" style={{ minWidth: 0 }}><label>Salary {cats(job.salary_category_id)}</label>
+                <input className="input num" inputMode="decimal" placeholder="0" value={amount} onChange={e => { setAmount(e.target.value); setOver(0); }} />
+                {linked && <div style={{ marginTop: 8 }}><select className="input" value={account} onChange={e => setAccount(e.target.value)}>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select></div>}</div>
+              <div className="field grow" style={{ minWidth: 0 }}><label>Bonus {cats(job.bonus_category_id)}</label>
+                <input className="input num" inputMode="decimal" placeholder="0" value={bonus} onChange={e => setBonus(e.target.value)} />
+                {linked && <div style={{ marginTop: 8 }}><select className="input" value={bonusAccount} onChange={e => setBonusAccount(e.target.value)}>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select></div>}</div>
             </div>
           ) : (
             <div className="field"><label>Amount you got for {periodLabel(pick)}</label>
@@ -503,10 +512,12 @@ function PayoutForm({ job, onClose }: { job: Job; onClose: () => void }) {
           {split && <div className="tiny muted" style={{ margin: '-6px 4px 12px' }}>Got only one of the two? Leave the other empty — it stays owed.</div>}
           {linked ? (
             <div className="row" style={{ gap: 8 }}>
-              <select className="input" value={account} onChange={e => setAccount(e.target.value)} style={{ flex: 1 }}>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} style={{ width: 150 }} />
+              {!split && (
+                <select className="input" value={account} onChange={e => setAccount(e.target.value)} style={{ flex: 1 }}>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              )}
+              <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} style={split ? { flex: 1 } : { width: 150 }} />
             </div>
           ) : <div className="tiny muted">Choose a salary category in ⚙ so the payment is also added to your accounts.</div>}
           {over > 0 ? (

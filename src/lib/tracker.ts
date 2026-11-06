@@ -229,21 +229,33 @@ export function writeShift(job: Job, date: string, f: ShiftInput) {
 }
 
 /** Records a payment for a pay period, adding the salary and bonus to your income. `settled`: the period is paid in full (anything over is extra, not an advance). Returns an undo. */
-export function writePayout(job: Job, period: { start: string; end: string }, amt: number, bon: number, account: string | null, date: string, settled = false) {
+/** Where a job's pay goes by default: the last account used for it (salary and bonus remembered separately), else a sensible guess. */
+export function payAccounts(job: Job, mine: Array<{ id: string; name: string }>): { salary: string | null; bonus: string | null } {
+  const get = (k: string) => { try { const v = localStorage.getItem(k); return v && mine.some(a => a.id === v) ? v : null; } catch { return null; } };
+  const guess = (re: RegExp) => mine.find(a => re.test(a.name))?.id ?? null;
+  const salary = get('money:payacc:' + job.id) ?? guess(/eurobank|τράπεζ|bank/i) ?? mine[0]?.id ?? null;
+  const bonus = get('money:payacc-bonus:' + job.id) ?? guess(/eden|bonus/i) ?? salary;
+  return { salary, bonus };
+}
+export function rememberPayAccounts(job: Job, salary: string | null, bonus: string | null) {
+  try { if (salary) localStorage.setItem('money:payacc:' + job.id, salary); if (bonus) localStorage.setItem('money:payacc-bonus:' + job.id, bonus); } catch { /* ignore */ }
+}
+
+/** `bonusAccount`: where the bonus goes when it's paid to a different account than the salary (e.g. a meal-voucher card). */
+export function writePayout(job: Job, period: { start: string; end: string }, amt: number, bon: number, account: string | null, date: string, settled = false, bonusAccount?: string | null) {
   const label = periodLabel(period);
-  const income = (category: string, a: number, what: string) => {
+  const income = (category: string, a: number, what: string, acct: string) => {
     const id = uuid();
     put('transactions', {
-      id, owner_id: '', type: 'income', date, amount: a, account_id: account!, to_account_id: null,
+      id, owner_id: '', type: 'income', date, amount: a, account_id: acct, to_account_id: null,
       category_id: category, note: `${job.name} ${what}${label}`, recurring_id: null, seq: Date.now() % 100000,
     });
     return id;
   };
   let txId: string | null = null, bonusTx: string | null = null;
-  if (account) {
-    if (amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '');
-    if (bon > 0 && job.bonus_category_id) bonusTx = income(job.bonus_category_id, bon, 'bonus ');
-  }
+  const bonAcc = bonusAccount ?? account;
+  if (account && amt > 0 && job.salary_category_id) txId = income(job.salary_category_id, amt, '', account);
+  if (bonAcc && bon > 0 && job.bonus_category_id) bonusTx = income(job.bonus_category_id, bon, 'bonus ', bonAcc);
   // one row per payment, each linked to its own income entries (delete the entry → it's owed again)
   const id = `${payoutId(job.id, period.start)}:${uuid().slice(0, 8)}`;
   put('payouts', { id, owner_id: '', job_id: job.id, period_start: period.start, period_end: period.end, amount: round2(amt), bonus: round2(bon), tx_id: txId, bonus_tx_id: bonusTx, settled, date });
