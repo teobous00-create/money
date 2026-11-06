@@ -17,7 +17,8 @@ import type { Account, Category, PaySplitPrefs, Tx } from './types';
  *              · categories without a budget: your average of the last 3 months (without repeating entries), for the
  *                days left, plus their planned and repeating entries
  *              · planned and repeating entries on the 1st–5th of next month (only those, no budget share)
- *              · what the credit card owes · a safety margin
+ *              · what the credit card owes, less planned payments to it from accounts not counted here (savings…)
+ *              · a safety margin
  *   available  every everyday account (not trading, investments, savings or debts), the new pay included
  *   spare      available − needs, at most the pay itself
  * and splits the spare: the matched goal (what your partner put in), the reserve, fixed goals, then what's left to the
@@ -174,8 +175,18 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   const next = round2(sum(nextPlanned));
   if (freeTotal > 0.004) needs.push({ id: 'free', label: 'No budget · usual spending + planned', amount: round2(freeTotal), kind: 'free' });
   if (next > 0.004) needs.push({ id: 'next', label: 'Planned for the 1st–5th next month', amount: next, kind: 'free' });
-  const owed = round2(credit.reduce((x, a) => x + Math.max(0, -(bal.get(a.id) ?? 0)), 0));
-  if (owed > 0.004) needs.push({ id: 'card', label: 'Credit card owed', amount: owed, kind: 'card' });
+  // the card's debt, less what's already planned to pay it from money not counted here (e.g. savings kept for it until a date)
+  const regularIds = new Set(regular.map(a => a.id)), creditIds = new Set(credit.map(a => a.id));
+  const toCard = [
+    ...txs.filter(t => t.owner_id === me && t.type === 'transfer' && isPending(t, today) && t.date <= n5),
+    ...Object.values(s.recurring).filter(r => r.owner_id === me && r.type === 'transfer').flatMap(r => ruleDates(r, addDays(today, 1), n5).map(d => ruleToTx(r, d))),
+  ].filter(t => t.to_account_id && creditIds.has(t.to_account_id) && !regularIds.has(t.account_id));
+  const owedAll = credit.reduce((x, a) => x + Math.max(0, -(bal.get(a.id) ?? 0)), 0);
+  const covered = Math.min(owedAll, sum(toCard));
+  const owed = round2(owedAll - covered);
+  const from = [...new Set(toCard.map(t => s.accounts[t.account_id]?.name).filter(Boolean))].join(', ');
+  if (owed > 0.004) needs.push({ id: 'card', label: covered > 0.004 ? `Credit card owed · ${round2(covered)} € planned from ${from}` : 'Credit card owed', amount: owed, kind: 'card' });
+  else if (covered > 0.004) notes.push(`The credit card is covered by what's planned from ${from}.`);
   if (cfg.margin > 0) needs.push({ id: 'margin', label: 'Safety margin', amount: cfg.margin, kind: 'margin' });
   const needTotal = round2(needs.reduce((x, n) => x + n.amount, 0));
   const available = round2(regular.reduce((x, a) => x + (bal.get(a.id) ?? 0), 0));
