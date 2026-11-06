@@ -11,11 +11,12 @@ import type { Account, Category, PaySplitPrefs, Tx } from './types';
  * Pay split, worked out on the phone (no AI).
  *
  * When a pay comes in (a job's salary or bonus category; tips never), the card works out:
- *   needs      what the rest of this month + the first 5 days of the next still need:
+ *   needs      what the rest of this month still needs, plus anything planned for the 1st–5th of the next:
  *              · every top category with a budget: what's left of it (its subcategories pooled), never less than its
- *                planned/recurring entries still to come; shared categories count only your usual share
+ *                planned/recurring entries still to come this month; shared categories count only your usual share
  *              · categories without a budget: your average of the last 3 months (without repeating entries), for the
  *                days left, plus their planned and repeating entries
+ *              · planned and repeating entries on the 1st–5th of next month (only those, no budget share)
  *              · what the credit card owes · a safety margin
  *   available  every everyday account (not trading, investments, savings or debts), the new pay included
  *   spare      available − needs, at most the pay itself
@@ -112,9 +113,9 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   const shared = sharedRoots(s);
   const budgets = s.prefs.budgets ?? {};
 
-  // ---- the window: rest of this month + days 1–5 of the next
-  const mEnd = monthEnd(today), nStart = nextMonth(today), n5 = addDays(nStart, 4), nEnd = monthEnd(nStart);
-  const dim = daysIn(today), dimNext = daysIn(nStart);
+  // ---- the window: rest of this month; of the next month only what's planned for days 1–5
+  const mEnd = monthEnd(today), nStart = nextMonth(today), n5 = addDays(nStart, 4);
+  const dim = daysIn(today);
   const daysLeft = dayDiff(today, mEnd) + 1;             // today included: it's not over yet
   const [p3a, p3b] = [monthsBack(today, 3), addDays(monthStart(today), -1)];
   const firstMine = txs.reduce((m, t) => (t.owner_id === me && t.date < m ? t.date : m), today);
@@ -125,9 +126,10 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   const done = txs.filter(t => counts(t) && !isPending(t, today));
   // what's still to come up to the 5th of next month: future-dated entries + repeating ones
   const scheduled: Tx[] = [
-    ...txs.filter(t => t.owner_id === me && counts(t) && isPending(t, today) && t.date <= nEnd),
-    ...Object.values(s.recurring).filter(r => r.owner_id === me && r.type === 'expense').flatMap(r => ruleDates(r, addDays(today, 1), nEnd).map(d => ruleToTx(r, d))).filter(counts),
+    ...txs.filter(t => t.owner_id === me && counts(t) && isPending(t, today) && t.date <= n5),
+    ...Object.values(s.recurring).filter(r => r.owner_id === me && r.type === 'expense').flatMap(r => ruleDates(r, addDays(today, 1), n5).map(d => ruleToTx(r, d))).filter(counts),
   ];
+  const nextPlanned = scheduled.filter(t => t.date >= nStart);   // days 1–5 of next month
   const sum = (l: Tx[]) => l.reduce((x, t) => x + t.amount, 0);
   const inSet = (ids: Set<string>) => (t: Tx) => ids.has(t.category_id!);
 
@@ -156,22 +158,22 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
       const spent = sum(done.filter(t => t.owner_id === me && inSet(budgeted)(t) && t.date >= monthStart(today) && t.date <= today));
       const sch = scheduled.filter(inSet(budgeted));
       const cur = Math.max(myBudget - spent, sum(sch.filter(t => t.date <= mEnd)));
-      const nextAll = sum(sch.filter(t => t.date >= nStart));
-      const next5 = sum(sch.filter(t => t.date >= nStart && t.date <= n5)) + Math.max(0, myBudget - nextAll) * (5 / dimNext);
-      const amount = round2(Math.max(0, cur) + next5);
+      const amount = round2(Math.max(0, cur));
       if (amount > 0.004) needs.push({ id: root.id, label: root.name + (share < 0.995 ? ` · your ${Math.round(share * 100)}%` : ''), amount, kind: 'budget' });
     }
     if (free.size) {
       const isIn = inSet(free);
       const avgVar = sum(done.filter(t => t.owner_id === me && isIn(t) && !t.recurring_id && t.date >= p3a && t.date <= p3b)) / nMonths;
-      const sch = scheduled.filter(t => isIn(t) && t.date <= n5);
+      const sch = scheduled.filter(t => isIn(t) && t.date <= mEnd);
       const repeating = sum(sch.filter(t => t.virtual || t.recurring_id));
       const oneOff = sum(sch.filter(t => !t.virtual && !t.recurring_id));
-      freeTotal += Math.max(avgVar * (daysLeft / dim) + avgVar * (5 / dimNext), oneOff) + repeating;
+      freeTotal += Math.max(avgVar * (daysLeft / dim), oneOff) + repeating;
     }
   }
   needs.sort((a, b) => b.amount - a.amount);
+  const next = round2(sum(nextPlanned));
   if (freeTotal > 0.004) needs.push({ id: 'free', label: 'No budget · usual spending + planned', amount: round2(freeTotal), kind: 'free' });
+  if (next > 0.004) needs.push({ id: 'next', label: 'Planned for the 1st–5th next month', amount: next, kind: 'free' });
   const owed = round2(credit.reduce((x, a) => x + Math.max(0, -(bal.get(a.id) ?? 0)), 0));
   if (owed > 0.004) needs.push({ id: 'card', label: 'Credit card owed', amount: owed, kind: 'card' });
   if (cfg.margin > 0) needs.push({ id: 'margin', label: 'Safety margin', amount: cfg.margin, kind: 'margin' });

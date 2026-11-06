@@ -35,6 +35,9 @@ await p.evaluate((today) => {
     T('expense', first, 40, 'pir', 'coffee'), T('expense', first, 50, 'pir', 'cig'), T('expense', first, 100, 'pir', 'sm'), T('expense', first, 80, 'cc', 'del'),
     T('expense', first, 150, 'partner-acc', 'dent', 'partner'),     // the partner put 150 into the dentist goal
     T('income', today, 25, 'cash', 'tips'),                          // tips never bring the card up
+    T('expense', addM(today, 1).slice(0, 8) + '03', 20, 'eur', 'phone'),   // planned for the 3rd of next month: counts
+    T('expense', addM(today, 1).slice(0, 8) + '04', 15, 'pir', 'coffee'),  // planned on the 4th in a budgeted category: counts too
+    T('expense', addM(today, 1).slice(0, 8) + '12', 40, 'eur', 'phone'),   // the 12th: doesn't
   ]);
   const next20 = today.slice(8) <= '20' ? today.slice(0, 8) + '20' : addM(today, 1).slice(0, 8) + '20';
   putMany('recurring', [{ id: 'r1', owner_id: '', type: 'expense', amount: 30, account_id: 'eur', to_account_id: null, category_id: 'phone', note: 'Cosmote', freq: 'monthly', anchor_day: 20, next_date: next20, active: true, end_date: null, skip_dates: [] }]);
@@ -60,15 +63,17 @@ const dim = dIn(today), dimNext = dIn(today, 1), day = Number(today.slice(8));
 const left = dim - day + 1;
 const cosmote = day <= 20 || true ? 30 : 0;   // the 20th of this month, or of the next (only if it falls by the 5th — it doesn't)
 const exp = {
-  daily: 30 + 120 * 5 / dimNext,
-  home: 320 + 500 * 5 / dimNext,
-  free: 60 * left / dim + 60 * 5 / dimNext + (day <= 20 ? cosmote : 0),
+  daily: 30,                                          // budget left this month, nothing of next month's budget
+  home: 320,
+  free: 60 * left / dim + (day <= 20 ? cosmote : 0),
+  next: 35,                                           // only what's planned for the 1st–5th
 };
-const need = exp.daily + exp.home + exp.free + 80 + 100;
+const need = exp.daily + exp.home + exp.free + exp.next + 80 + 100;
 const near = (a, b) => Math.abs(a - b) < 0.02;
-ok(near(split.needs.find(x => x.id === 'daily')?.amount, exp.daily), `Καθημερινά pooled: 30 left + 5 days → ${split.needs.find(x => x.id === 'daily')?.amount} (≈${exp.daily.toFixed(2)})`);
+ok(near(split.needs.find(x => x.id === 'daily')?.amount, exp.daily), `Καθημερινά pooled: 30 left → ${split.needs.find(x => x.id === 'daily')?.amount} (≈${exp.daily.toFixed(2)})`);
 ok(near(split.needs.find(x => x.id === 'home')?.amount, exp.home), `Σπίτι: sub budgets pooled, card spending counted → ${split.needs.find(x => x.id === 'home')?.amount}`);
 ok(near(split.needs.find(x => x.id === 'free')?.amount, exp.free), `no budget: dog average for the days left + Cosmote → ${split.needs.find(x => x.id === 'free')?.amount} (≈${exp.free.toFixed(2)})`);
+ok(split.needs.find(x => x.id === 'next')?.amount === exp.next, `next month: only the entries planned for the 1st–5th → ${split.needs.find(x => x.id === 'next')?.amount}`);
 ok(split.needs.find(x => x.id === 'card')?.amount === 80, 'credit card owed counts');
 ok(split.needs.find(x => x.id === 'margin')?.amount === 100, '100 € margin');
 ok(near(split.needTotal, need), `needs ${split.needTotal} (≈${need.toFixed(2)})`);

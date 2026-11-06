@@ -72,7 +72,7 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
       <div className="card" style={{ padding: '12px 14px' }}>
         <Line label="Paid" value={split.payTotal} bold />
         <button className="row" style={{ width: '100%', padding: '6px 0', alignItems: 'baseline', textAlign: 'left' }} onClick={() => setShowNeeds(v => !v)}>
-          <span className="grow small">The month still needs <span className="tiny muted">(to the 5th)</span></span>
+          <span className="grow small">The month still needs</span>
           <motion.span animate={{ rotate: showNeeds ? 180 : 0 }} style={{ display: 'grid', marginRight: 6, color: 'var(--ink-3)' }}><ChevronDown size={16} /></motion.span>
           <span className="num small">{money(split.needTotal)}</span>
         </button>
@@ -187,7 +187,7 @@ function Rules({ back }: { back: () => void }) {
   return (
     <div className="sheet-body">
       <div className="tiny muted" style={{ padding: '0 4px 12px' }}>
-        On each pay (not tips) the rest of the month and the first 5 days of the next stay where they are. What's spare goes, in this order: matching → reserve → goals.
+        On each pay (not tips) what the rest of the month needs stays where it is, plus anything planned for the 1st–5th of the next. What's spare goes, in this order: matching → reserve → goals.
       </div>
 
       <div className="field"><label>Safety margin on top of the month (€)</label>
