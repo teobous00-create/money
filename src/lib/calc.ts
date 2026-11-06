@@ -286,3 +286,16 @@ export function usePlanned(p: Period) {
     return { show: b > today || (b === today && pending.length > 0), inPeriod: round2(inPeriod), endBalance: round2(total + untilEnd), end: b };
   }, [txs, projected, sel, total, today, a, b, v]); // eslint-disable-line react-hooks/exhaustive-deps
 }
+
+/** Accounts in the groups the Accounts tab shows: Accounts · Trading capital · Savings · Investments · Debts (same order). */
+export function accountGroups(list: Account[], tradingIds: string[] = [], investIds: string[] = []): Array<{ key: string; title: string; list: Account[] }> {
+  const isT = (a: Account) => tradingIds.includes(a.id);
+  const isI = (a: Account) => !isT(a) && investIds.includes(a.id);
+  return [
+    { key: 'regular', title: 'Accounts', list: list.filter(a => a.kind === 'regular' && !isT(a) && !isI(a)) },
+    { key: 'trading', title: 'Trading capital', list: list.filter(isT) },
+    { key: 'savings', title: 'Savings', list: list.filter(a => a.kind === 'savings' && !isT(a) && !isI(a)) },
+    { key: 'invest', title: 'Investments', list: list.filter(a => a.kind !== 'credit' && isI(a)) },
+    { key: 'debts', title: 'Debts', list: list.filter(a => a.kind === 'credit' && !isT(a)) },
+  ].filter(g => g.list.length > 0);
+}

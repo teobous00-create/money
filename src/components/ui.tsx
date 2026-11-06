@@ -84,8 +84,8 @@ export function DragZone({ children, className, style }: { children: ReactNode; 
   return <div className={className} style={{ touchAction: 'none', ...style }} onPointerDown={start}>{children}</div>;
 }
 
-export function Sheet({ open, onClose, title, children, full = false, right, z = 0 }: {
-  open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; full?: boolean; right?: ReactNode; z?: number;
+export function Sheet({ open, onClose, title, children, full = false, right, z = 0, height }: {
+  open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; full?: boolean; right?: ReactNode; z?: number; height?: string;
 }) {
   useBackButton(open, onClose);
   const controls = useDragControls();
@@ -99,7 +99,7 @@ export function Sheet({ open, onClose, title, children, full = false, right, z =
         <>
           <motion.div className="scrim" style={{ zIndex: 50 + z * 2 }} onClick={onClose}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} />
-          <motion.div className={`sheet ${full ? 'full' : ''}`} style={{ zIndex: 51 + z * 2 }}
+          <motion.div className={`sheet ${full ? 'full' : ''}`} style={{ zIndex: 51 + z * 2, ...(height ? { height } : null) }}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={spring}
             drag="y" dragListener={false} dragControls={controls} dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.7 }} onDragEnd={onDragEnd}>

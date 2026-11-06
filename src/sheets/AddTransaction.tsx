@@ -4,10 +4,10 @@ import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, CalendarDays, Check, Clock
 import { Sheet, DragZone, IconBox, Icon, Pressable, toast, ease, softSpring } from '../components/ui';
 import { useUi, setUi, type AddTxArgs } from '../lib/ui';
 import { useStore, put, putMany, remove, restore, getState, nextOccurrence } from '../lib/store';
-import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots, catName, catStyle, parseVirtualId, ruleToTx } from '../lib/calc';
+import { useAccounts, useCategories, useBalances, usePeriodStats, useSharedRoots, catName, catStyle, parseVirtualId, ruleToTx, accountGroups } from '../lib/calc';
 import { evalExpr, haptic, money, num, shortDate, todayISO, uuid, fromISO, relativeDay, addDays } from '../lib/format';
 import { tint } from '../lib/icons';
-import type { Freq, Recurring, Tx, TxType } from '../lib/types';
+import type { Account, Freq, Recurring, Tx, TxType } from '../lib/types';
 import { learn, learnFromFix, unmarkVoice } from '../lib/voiceRun';
 import { findFavorite, toggleFavorite, useFavorites } from '../lib/favorites';
 import { type Parsed } from '../lib/quickparse';
@@ -30,7 +30,7 @@ export function AddTransactionSheet() {
   const args = useUi(u => u.addTx);
   const close = () => setUi({ addTx: null });
   return (
-    <Sheet open={!!args} onClose={close} full>
+    <Sheet open={!!args} onClose={close} height="min(80dvh, calc(100% - var(--safe-t) - 24px))">
       {args && <Editor key={args.editId ?? 'new' + JSON.stringify(args)} args={args} close={close} />}
     </Sheet>
   );
@@ -321,26 +321,34 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
     <AnimatePresence mode="popLayout" initial={false}>
       {picking ? (
         <motion.div key="pick" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-          initial={{ opacity: 0, x: -24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.22, ease }}>
+          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }} transition={{ duration: 0.24, ease }}>
           <Picker type={type} onType={setType} onPick={onPick} exclude={accountId} />
         </motion.div>
       ) : (
-        <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-          initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.22, ease }}>
+        <motion.div key="amount" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: 'var(--bg)', borderRadius: '22px 22px 0 0' }}
+          initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 420, damping: 40 }}>
           {/* split header: from (left) → to (right) */}
           <DragZone className="split">
-            <motion.button className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicker('from')}
-              animate={{ backgroundColor: from?.color ?? '#64748B' }} transition={{ duration: 0.3 }}>
-              <span className="split-icon"><Icon name={from?.icon ?? 'wallet'} size={19} /></span>
-              <span className="split-label">From account</span>
-              <span className="split-name">{from?.name ?? 'Choose'}</span>
-            </motion.button>
-            <motion.button className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicking(true)}
-              animate={{ backgroundColor: rightColor }} transition={{ duration: 0.3 }}>
-              <span className="split-icon"><Icon name={type === 'transfer' ? to?.icon ?? 'wallet' : catStyle(parent, catRec).icon} size={19} /></span>
-              <span className="split-label">{type === 'transfer' ? 'To account' : 'To category'}</span>
-              <span className="split-name">{type === 'transfer' ? to?.name ?? 'Choose' : parent ? catRec[parent]?.name : 'Choose'}</span>
-            </motion.button>
+            {(() => {
+              const acc = (
+                <motion.button key="acc" className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicker('from')}
+                  animate={{ backgroundColor: from?.color ?? '#64748B' }} transition={{ duration: 0.3 }}>
+                  <span className="split-icon" style={{ color: from?.color ?? '#64748B' }}><Icon name={from?.icon ?? 'wallet'} size={22} /></span>
+                  <span className="split-label">{type === 'income' ? 'To account' : 'From account'}</span>
+                  <span className="split-name">{from?.name ?? 'Choose'}</span>
+                </motion.button>
+              );
+              const other = (
+                <motion.button key="other" className="split-half" whileTap={{ scale: 0.98 }} onClick={() => setPicking(true)}
+                  animate={{ backgroundColor: rightColor }} transition={{ duration: 0.3 }}>
+                  <span className="split-icon" style={{ color: rightColor }}><Icon name={type === 'transfer' ? to?.icon ?? 'wallet' : catStyle(parent, catRec).icon} size={22} /></span>
+                  <span className="split-label">{type === 'transfer' ? 'To account' : type === 'income' ? 'From category' : 'To category'}</span>
+                  <span className="split-name">{type === 'transfer' ? to?.name ?? 'Choose' : parent ? catRec[parent]?.name : 'Choose'}</span>
+                </motion.button>
+              );
+              // money flows left → right: income comes from a category into an account
+              return type === 'income' ? <>{other}{acc}</> : <>{acc}{other}</>;
+            })()}
           </DragZone>
 
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '12px 14px 0' }}>
@@ -461,7 +469,6 @@ function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: T
   const me = useStore(s => s.user?.id);
   const stats = usePeriodStats();
   const shared = useSharedRoots();
-  const bal = useBalances();
   const tabs: Array<[TxType, string, typeof ArrowUpRight]> = [['income', 'Income', ArrowDownLeft], ['expense', 'Expense', ArrowUpRight], ['transfer', 'Transfer', ArrowLeftRight]];
   const list = type === 'transfer'
     ? accounts.filter(a => a.owner_id === me && !a.archived && a.id !== exclude)
@@ -476,20 +483,12 @@ function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: T
         ))}
         <span className="ptab-ind" style={{ left: `calc(100% * (${Math.max(0, tabs.findIndex(x => x[0] === type))} + 0.22) / 3)`, width: 'calc(100% * 0.56 / 3)' }} />
       </DragZone>
-      <div className="sheet-body" style={{ paddingTop: 14 }}>
-        <div className="small muted" style={{ margin: '0 4px 12px', fontWeight: 600 }}>{type === 'transfer' ? 'Transfer to' : 'Choose a category'}</div>
+      <div className="sheet-body" style={{ paddingTop: 16 }}>
+        {type === 'transfer' ? (
+          <AccountList key="transfer" list={list as typeof accounts} onPick={id => onPick('transfer', id)} />
+        ) : (
         <motion.div className="cat-grid" key={type} initial="h" animate="s" variants={{ s: { transition: { staggerChildren: 0.018 } } }}>
-          {type === 'transfer'
-            ? (list as typeof accounts).map(a => (
-              <motion.div key={a.id} variants={{ h: { opacity: 0, scale: 0.85 }, s: { opacity: 1, scale: 1 } }} transition={softSpring}>
-                <Pressable className="cat-tile" style={{ width: '100%' }} onClick={() => onPick('transfer', a.id)}>
-                  <span className="cat-name">{a.name}</span>
-                  <IconBox icon={a.icon} color={a.color} />
-                  <span className="cat-amt num" style={{ color: 'var(--ink-2)' }}>{money(bal.get(a.id) ?? 0)}</span>
-                </Pressable>
-              </motion.div>
-            ))
-            : (list as typeof cats).map(c => {
+          {(list as typeof cats).map(c => {
               const v = stats.byCat.get(c.id) ?? 0;
               return (
                 <motion.div key={c.id} variants={{ h: { opacity: 0, scale: 0.85 }, s: { opacity: 1, scale: 1 } }} transition={softSpring}>
@@ -505,6 +504,7 @@ function Picker({ type, onType, onPick, exclude }: { type: TxType; onType: (t: T
               );
             })}
         </motion.div>
+        )}
         {list.length === 0 && (
           <div className="empty">
             {type === 'transfer' ? 'Add another account first.' : `No ${type} categories yet.`}
@@ -549,27 +549,53 @@ function Key({ k, onKey, onSave, onDate, onClear, hasOp, ready, color }: {
 function AccountPicker({ open, onClose, onPick, exclude, title }: { open: boolean; onClose: () => void; onPick: (id: string) => void; exclude: string | null; title: string }) {
   const accounts = useAccounts();
   const me = useStore(s => s.user?.id);
-  const bal = useBalances();
   const list = accounts.filter(a => a.owner_id === me && !a.archived && a.id !== exclude);
   return (
     <Sheet open={open} onClose={onClose} title={title} z={1}>
       <div className="sheet-body">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {list.map((a, i) => (
-            <motion.button key={a.id} className="row" whileTap={{ scale: 0.96 }} onClick={() => { haptic(6); onPick(a.id); }}
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02, duration: 0.25, ease }}
-              style={{ background: a.color, color: '#fff', borderRadius: 16, padding: '12px 12px', gap: 10, textAlign: 'left' }}>
-              <Icon name={a.icon} size={22} />
-              <div className="grow">
-                <div className="ellipsis small bold">{a.name}</div>
-                <div className="num small" style={{ opacity: 0.9 }}>{money(bal.get(a.id) ?? 0)}</div>
-              </div>
-            </motion.button>
-          ))}
-        </div>
+        <AccountList list={list} onPick={id => { haptic(6); onPick(id); }} />
         {list.length === 0 && <div className="empty">No accounts. Add one in the Accounts tab.</div>}
       </div>
     </Sheet>
+  );
+}
+
+/** Accounts as a list, grouped and ordered like the Accounts tab; credit cards show what's still available. */
+function AccountList({ list, onPick }: { list: Account[]; onPick: (id: string) => void }) {
+  const bal = useBalances();
+  const tradingIds = useStore(s => s.prefs.tradingAccounts);
+  const investIds = useStore(s => s.prefs.investmentAccounts);
+  const groups = accountGroups(list, tradingIds ?? [], investIds ?? []);
+  let i = 0;
+  return (
+    <>
+      {groups.map(g => (
+        <div key={g.key} style={{ marginBottom: 16 }}>
+          <div className="section-head"><span className="section-title">{g.title}</span></div>
+          <div className="list">
+            {g.list.map(a => {
+              const b = bal.get(a.id) ?? 0;
+              return (
+                <motion.button key={a.id} className="list-row" onClick={() => onPick(a.id)}
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease, delay: Math.min(i++, 12) * 0.02 }}>
+                  <IconBox icon={a.icon} color={a.color} />
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div className="ellipsis" style={{ fontWeight: 550 }}>{a.name}</div>
+                    <div className="num small" style={{ color: b < 0 ? 'var(--expense)' : b === 0 ? 'var(--ink-3)' : 'var(--ink-2)' }}>{money(b)}</div>
+                  </div>
+                  {a.kind === 'credit' && a.credit_limit != null && (
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="tiny faint">Available</div>
+                      <div className="small bold num pos">{money(Math.round((a.credit_limit + b) * 100) / 100)}</div>
+                    </div>
+                  )}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 

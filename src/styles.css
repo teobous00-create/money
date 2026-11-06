@@ -158,7 +158,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 /* ---------- categories grid ---------- */
 .cat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 6px; padding: 6px 0; }
 .cat-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
-.cat-tile .ico { width: 54px; height: 54px; border-radius: 18px; transition: background 0.3s, color 0.3s; }
+.cat-tile .ico { width: 56px; height: 56px; border-radius: 50%; transition: background 0.3s, color 0.3s; }
 .cat-name { font-size: 12.5px; font-weight: 550; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cat-amt { font-size: 12.5px; font-weight: 650; }
 
@@ -264,10 +264,10 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 
 /* ---------- add transaction (split layout) ---------- */
 .split { display: grid; grid-template-columns: 1fr 1fr; margin: -2px 0 0; }
-.split-half { position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 2px; min-height: 96px; padding: 14px 16px 14px; color: #fff; text-align: left; overflow: hidden; }
+.split-half { position: relative; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 2px; min-height: 96px; padding: 14px 16px 14px; color: #fff; text-align: left; }
 .split-half:first-child { border-top-left-radius: 22px; }
 .split-half:last-child { border-top-right-radius: 22px; }
-.split-icon { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: rgba(255,255,255,0.22); }
+.split-icon { position: absolute; top: -20px; right: 16px; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); box-shadow: 0 4px 14px rgba(0,0,0,.22); z-index: 1; }
 .split-label { font-size: 12.5px; font-weight: 550; opacity: 0.85; }
 .split-name { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .subchip { height: 38px; padding: 0 14px 0 11px; border-radius: 999px; border: 1.6px solid; display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; white-space: nowrap; flex: none; transition: background .2s, color .2s; }
