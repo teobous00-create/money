@@ -351,9 +351,9 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
             })()}
           </DragZone>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '12px 14px 0' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '10px 14px 0' }}>
             {type !== 'transfer' && subs.length > 0 && (
-              <div className="chips" style={{ paddingBottom: 4 }}>
+              <div className="chips" style={{ paddingBottom: 0 }}>
                 {subs.map(s => {
                   const on = categoryId === s.id;
                   return (
@@ -366,8 +366,8 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
                 })}
               </div>
             )}
-            <div className="amount-wrap" style={{ minHeight: 92 }}>
-              <div className="tiny bold" style={{ color: amountColor, letterSpacing: '.02em', marginBottom: 4 }}>{TYPE_LABEL[type]}</div>
+            <div className="amount-wrap" style={{ minHeight: 0, padding: '6px 0 2px' }}>
+              <div className="tiny bold" style={{ color: amountColor, letterSpacing: '.02em', marginBottom: 2 }}>{TYPE_LABEL[type]}</div>
               <div className="amount num" style={{ fontSize, color: expr ? amountColor : 'var(--ink-3)' }}>
                 <AnimatePresence initial={false} mode="popLayout">
                   {shown.split('').map((ch, i) => (
@@ -377,9 +377,17 @@ function Editor({ args, close }: { args: AddTxArgs; close: () => void }) {
                 </AnimatePresence>
                 <span className="cur" style={{ fontSize: '0.6em' }}>€</span>
               </div>
-              <div className="expr" style={{ marginTop: 4, marginBottom: 0 }}>{hasOp ? `= ${money(amount)}` : ''}</div>
+              {/* the "= result" line only takes room while there's a calculation */}
+              <AnimatePresence initial={false}>
+                {hasOp && (
+                  <motion.div key="expr" className="expr" style={{ marginBottom: 0, overflow: 'hidden' }}
+                    initial={{ height: 0, opacity: 0, marginTop: 0 }} animate={{ height: 20, opacity: 1, marginTop: 4 }} exit={{ height: 0, opacity: 0, marginTop: 0 }} transition={{ duration: 0.2, ease }}>
+                    = {money(amount)}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            <input className="input note-input" placeholder="Notes…" value={note} onChange={e => setNote(e.target.value)} />
+            <input className="input note-input" style={{ margin: '8px 0 6px' }} placeholder="Notes…" value={note} onChange={e => setNote(e.target.value)} />
           </div>
 
           <div className="keypad5">
