@@ -151,6 +151,8 @@ ok(mor && mor.date === ym1(1) + '-10' && mor.amount === 50 + 15, `this month's m
 ok(!f.events.some(e => /^Morning/.test(e.label) && e.date < today.slice(0, 8) + '28'), 'last month\'s morning (paid by hand) is not expected again');
 ok(f.until === mor?.date, 'until defaults to the last pay your shifts bring: ' + f.until);
 ok(f.goals.length >= 1 && f.goals.every(g => 'closes' in g), 'goals with a close date (or none): ' + JSON.stringify(f.goals));
+const toDent = f.events.flatMap(e => e.moves).filter(m => m.kind === 'match').reduce((v, m) => v + m.amount, 0);
+ok(toDent === 165 && f.events.find(e => /^Morning/.test(e.label)).moves[0].amount === 65, `matching: 100 in November (once a month, up to 150 with the partner's share), then December's: ${toDent}`);
 
 // the forecast from the Goals card (Overview → Analytics)
 await p.click('.nav-item:nth-child(4)'); await p.waitForTimeout(600);

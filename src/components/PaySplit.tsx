@@ -354,7 +354,7 @@ function ForecastBody({ back }: { back?: () => void }) {
         </div>
       </div>
       <div className="tiny faint" style={{ padding: '8px 4px 0' }}>
-        Assumes you spend what your budgets (and your usual for the rest) say, every declared shift happens, {money(f.tips)} tips per evening shift, and the bonus per morning shift above. Morning pays on the 10th, evening on the 16th and the 1st.
+        Assumes you spend what your budgets (and your usual for the rest) say, every declared shift happens, {money(f.tips)} tips per evening shift, the bonus per morning shift above, and your partner matches what you put into the shared goal. The credit card is paid off once from today's money. Morning pays on the 10th, evening on the 16th and the 1st.
       </div>
       {back && <button className="btn secondary" style={{ marginTop: 16 }} onClick={back}>Back</button>}
     </div>

@@ -15,8 +15,10 @@ import type { Job } from './types';
  *             `bonusPerShift` per shift for months not closed yet (closed months: the Tracker's real bonus)
  *   tips      `tipsPerShift` on each planned shift of a job with tips, on the day
  *   spending  as planned: each month needs a typical month (budgets at your share + usual spending + repeating)
+ *   card      what the credit card owes now is paid from today's money once; no new card debt after that
  *   each pay  spare = money not needed by the month + this month's pays still to come; at most the pay itself;
- *             split with your rules (matching once a month, reserve per pay, goals) — goals fill up and close
+ *             split with your rules (matching once a month, reserve per pay, goals) — goals fill up and close;
+ *             the matched goal gets as much again from your partner
  */
 
 export const DEFAULT_BONUS_PER_SHIFT = 15;
@@ -99,13 +101,16 @@ export function forecast(s: State, today = todayISO()): Forecast {
     const ids = new Set([mg, ...alive(s.categories).filter(c => c.parent_id === mg).map(c => c.id)]);
     matched.set(today.slice(0, 7), alive(s.transactions).filter(t => t.owner_id === me && t.type === 'expense' && t.category_id && ids.has(t.category_id) && t.date >= monthStart(today) && !isPending(t, today)).reduce((v, t) => v + t.amount, 0));
   }
-  const apply = (moves: Move[], month: string) => {
+  // the matched goal fills from both sides: your partner puts in what you do, so you need only half of what's left
+  const apply = (moves: Move[], month: string, partnerToo: boolean) => {
     for (const m of moves) {
       free -= m.amount;
-      if (m.kind !== 'reserve' && left.has(m.to)) left.set(m.to, Math.max(0, left.get(m.to)! - m.amount));
+      const both = m.kind === 'match' && partnerToo ? 2 : 1;
+      if (m.kind !== 'reserve' && left.has(m.to)) left.set(m.to, Math.max(0, left.get(m.to)! - m.amount * both));
       if (m.kind === 'match') matched.set(month, (matched.get(month) ?? 0) + m.amount);
     }
   };
+  const myRoom = () => { const r = new Map(left); if (mg && r.has(mg)) r.set(mg, Math.ceil(r.get(mg)! / 2)); return r; };
   const closes = new Map<string, string>();
   const markClosed = (date: string) => { for (const [id, v] of left) if (v <= 0.004 && !closes.has(id)) closes.set(id, date); };
   for (const [id, v] of left) if (v <= 0.004) closes.set(id, '');   // already reached: not shown as a forecast
@@ -113,7 +118,7 @@ export function forecast(s: State, today = todayISO()): Forecast {
   // today's pay, as the card proposes it
   if (waiting.length) {
     events.push({ date: today, label: 'Today', amount: now.payTotal, spare: now.spare, toSplit: now.toSplit, moves: now.moves, today: true });
-    apply(now.moves, today.slice(0, 7));
+    apply(now.moves, today.slice(0, 7), false);   // today's matching follows what your partner already put in
     markClosed(today);
   }
 
@@ -142,8 +147,8 @@ export function forecast(s: State, today = todayISO()): Forecast {
       const spare = round2(free + still);
       const toSplit = Math.max(0, Math.floor(Math.min(spare, p.amount)));
       const want = Math.max(0, cfg.match.monthly - (matched.get(month) ?? 0));
-      const { moves } = allocate(s, cfg, toSplit, want, left);
-      apply(moves, month);
+      const { moves } = allocate(s, cfg, toSplit, want, myRoom());
+      apply(moves, month, true);
       markClosed(p.date);
       events.push({ date: p.date, label: p.label, amount: p.amount, spare, toSplit, moves });
     },
