@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, Coins, Settings2, X } from 'lucide-react';
+import { CalendarRange, ChevronDown, Coins, Settings2, X } from 'lucide-react';
 import { useStore, getState } from '../lib/store';
 import { alive, catName } from '../lib/calc';
 import { goalIds, goalRows } from '../lib/goals';
-import { money, round2 } from '../lib/format';
+import { money, round2, shortDate, todayISO } from '../lib/format';
+import { DEFAULT_BONUS_PER_SHIFT, DEFAULT_TIPS_PER_SHIFT, useForecast } from '../lib/payForecast';
 import { parseNum } from '../sheets/AccountEdit';
 import { applySplit, markDone, setSplitPrefs, splitSettings, usePaySplit, type Move, type Split } from '../lib/paySplit';
 import { ease, Segmented, Sheet, toast, Toggle } from './ui';
@@ -47,6 +48,7 @@ export function PaySplitCard() {
 
 function SplitBody({ split, close }: { split: Split; close: () => void }) {
   const [rules, setRules] = useState(false);
+  const [fc, setFc] = useState(false);
   const accounts = useStore(s => s.accounts);
   const [showNeeds, setShowNeeds] = useState(false);
   const [showExp, setShowExp] = useState(false);
@@ -60,6 +62,7 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
   const over = split.source ? total > Math.max(0, split.sourceBalance) + 0.004 : false;
 
   if (rules) return <Rules back={() => setRules(false)} />;
+  if (fc) return <ForecastBody back={() => setFc(false)} />;
 
   const accept = () => {
     const undo = applySplit(split, moves);
@@ -148,6 +151,7 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
 
       <div style={{ display: 'grid', gap: 8, marginTop: 16 }}>
         {split.toSplit > 0 && <button className="btn" disabled={over || total <= 0} onClick={accept}>Accept</button>}
+        <button className="btn secondary" onClick={() => setFc(true)}><CalendarRange size={18} />Forecast</button>
         <div className="row" style={{ gap: 8 }}>
           <button className="btn secondary" onClick={() => setRules(true)}><Settings2 size={18} />Rules</button>
           <button className="btn secondary" onClick={skip}>{split.toSplit > 0 ? 'Skip this pay' : 'OK'}</button>
@@ -285,6 +289,74 @@ function Rules({ back }: { back: () => void }) {
         <button className="btn" onClick={save}>Save</button>
         <button className="btn secondary" onClick={back}>Back</button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- forecast
+
+/** The forecast on its own, from anywhere (e.g. the Goals card). */
+export function ForecastSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return <Sheet open={open} onClose={onClose} title="Pay forecast">{open && <ForecastBody />}</Sheet>;
+}
+
+function ForecastBody({ back }: { back?: () => void }) {
+  const f = useForecast(true);
+  const prefs = useStore(s => s.prefs.paySplit?.forecast);
+  const [until, setUntil] = useState(prefs?.until ?? '');
+  const [bonus, setBonus] = useState(String(prefs?.bonusPerShift ?? DEFAULT_BONUS_PER_SHIFT));
+  const [tips, setTips] = useState(String(prefs?.tipsPerShift ?? DEFAULT_TIPS_PER_SHIFT));
+  const save = (patch: { until?: string | null; bonusPerShift?: number; tipsPerShift?: number }) =>
+    setSplitPrefs({ forecast: { ...(getState().prefs.paySplit?.forecast ?? {}), ...patch } });
+  if (!f) return null;
+  return (
+    <div className="sheet-body">
+      <div className="row" style={{ gap: 8 }}>
+        <div className="field grow" style={{ minWidth: 0 }}><label>Until</label>
+          <input className="input" type="date" value={until || f.until} min={todayISO()} onChange={e => { setUntil(e.target.value); save({ until: e.target.value || null }); }} style={{ height: 44 }} /></div>
+        <div className="field" style={{ width: 92 }}><label>Bonus/shift</label>
+          <input className="input num" inputMode="decimal" aria-label="Bonus per shift" value={bonus} onChange={e => setBonus(e.target.value)} onBlur={() => save({ bonusPerShift: Math.max(0, parseNum(bonus)) })} style={{ height: 44 }} /></div>
+        <div className="field" style={{ width: 92 }}><label>Tips/shift</label>
+          <input className="input num" inputMode="decimal" aria-label="Tips per shift" value={tips} onChange={e => setTips(e.target.value)} onBlur={() => save({ tipsPerShift: Math.max(0, parseNum(tips)) })} style={{ height: 44 }} /></div>
+      </div>
+      {until && <button className="tiny" style={{ color: 'var(--accent)', padding: '0 4px 10px' }} onClick={() => { setUntil(''); save({ until: null }); }}>Back to: as far as your shifts go</button>}
+
+      {f.goals.length > 0 && (
+        <div className="card" style={{ padding: '10px 14px' }}>
+          {f.goals.map(g => (
+            <div key={g.id} className="row" style={{ justifyContent: 'space-between', padding: '5px 0', gap: 8 }}>
+              <span className="small ellipsis" style={{ fontWeight: 600 }}>{g.name} <span className="tiny muted num">{money(g.left)} to go</span></span>
+              <span className="small num" style={{ fontWeight: 650, color: g.closes ? 'var(--income)' : 'var(--ink-3)', flex: 'none' }}>{g.closes ? shortDate(g.closes) : 'not by then'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="section">
+        <div className="section-head"><span className="section-title">Pays until {shortDate(f.until)}</span></div>
+        {f.events.length === 0 && <div className="tiny muted" style={{ padding: '0 4px' }}>No pays expected by then — declare your shifts in the Tracker.</div>}
+        <div className="list">
+          {f.events.map((e, i) => (
+            <motion.div key={e.date + e.label} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}
+              initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease, delay: Math.min(i * 0.03, 0.3) }}>
+              <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                <span className="small num muted" style={{ width: 52, flex: 'none' }}>{e.today ? 'Today' : shortDate(e.date)}</span>
+                <span className="grow ellipsis" style={{ fontWeight: 550 }}>{e.today ? 'This pay' : e.label}</span>
+                <span className="num small" style={{ fontWeight: 650 }}>{money(e.amount)}</span>
+              </div>
+              <div className="tiny muted" style={{ paddingLeft: 60 }}>
+                {e.moves.length
+                  ? e.moves.map(m => `${m.label.replace(' · matching', '')} ${money(m.amount)}`).join(' · ')
+                  : e.spare < 0 ? `all of it stays · month short ${money(-e.spare)}` : 'all of it stays for the month'}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+      <div className="tiny faint" style={{ padding: '8px 4px 0' }}>
+        Assumes you spend what your budgets (and your usual for the rest) say, every declared shift happens, {money(f.tips)} tips per evening shift, and the bonus per morning shift above. Morning pays on the 10th, evening on the 16th and the 1st.
+      </div>
+      {back && <button className="btn secondary" style={{ marginTop: 16 }} onClick={back}>Back</button>}
     </div>
   );
 }

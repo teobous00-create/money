@@ -40,6 +40,8 @@ export interface Split {
   source: string | null; sourceBalance: number;
   moves: Move[];
   notes: string[];
+  monthly: number;                            // a typical full month's needs (budgets at your share + usual spending + repeating)
+  nextReserved: number;                       // what's kept for the 1st–5th of next month
 }
 
 export const DEFAULT_MARGIN = 100;
@@ -63,7 +65,7 @@ function guessMatch(goals: Set<string>, cats: Record<string, Category>) {
 }
 
 /** The settings with defaults filled in (50 € reserve per pay, 150 €/month matching, 100 € margin). */
-export function splitSettings(s: State): Required<Omit<PaySplitPrefs, 'done'>> & { done: string[] } {
+export function splitSettings(s: State): Required<Omit<PaySplitPrefs, 'done' | 'forecast'>> & { done: string[] } {
   const me = s.user?.id;
   const p = s.prefs.paySplit ?? {};
   const trading = new Set(s.prefs.tradingAccounts ?? []), invest = new Set(s.prefs.investmentAccounts ?? []);
@@ -140,7 +142,11 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   const inSet = (ids: Set<string>) => (t: Tx) => ids.has(t.category_id!);
 
   const needs: NeedLine[] = [];
-  let freeTotal = 0;
+  let freeTotal = 0, monthly = 0;
+  // repeating expenses per month (weekly ×52/12, yearly ÷12), rules still running
+  const PER = { weekly: 52 / 12, monthly: 1, yearly: 1 / 12 } as const;
+  const rules = Object.values(s.recurring).filter(r => r.owner_id === me && r.type === 'expense' && r.active && !r.deleted_at && (!r.end_date || r.end_date >= today) && r.category_id && !goals.has(r.category_id));
+  const ruleMonthly = (ids: Set<string>) => rules.filter(r => ids.has(r.category_id!)).reduce((x, r) => x + r.amount * PER[r.freq], 0);
   const roots = alive(cats).filter(c => c.type === 'expense' && !c.parent_id && !goals.has(c.id));
   for (const root of roots) {
     const subs = alive(cats).filter(c => c.parent_id === root.id && !goals.has(c.id));
@@ -165,6 +171,7 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
       const sch = scheduled.filter(inSet(budgeted));
       const cur = Math.max(myBudget - spent, sum(sch.filter(t => t.date <= mEnd)));
       const amount = round2(Math.max(0, cur));
+      monthly += Math.max(myBudget, ruleMonthly(budgeted));
       if (amount > 0.004) needs.push({ id: root.id, label: root.name + (share < 0.995 ? ` · your ${Math.round(share * 100)}%` : ''), amount, kind: 'budget' });
     }
     if (free.size) {
@@ -174,6 +181,7 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
       const repeating = sum(sch.filter(t => t.virtual || t.recurring_id));
       const oneOff = sum(sch.filter(t => !t.virtual && !t.recurring_id));
       freeTotal += Math.max(avgVar * (daysLeft / dim), oneOff) + repeating;
+      monthly += avgVar + ruleMonthly(free);
     }
   }
   needs.sort((a, b) => b.amount - a.amount);
@@ -214,22 +222,41 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   }
 
   // ---- the split, in order
-  const moves: Move[] = [];
-  let left = toSplit;
-  const take = (want: number) => { const v = Math.max(0, Math.min(left, Math.round(want))); left -= v; return v; };
-  const rows = goalRows(s, today);
-  const goalLeft = (id: string) => { const g = rows.find(r => r.id === id); return g ? (g.doneOn ? 0 : Math.max(0, g.target - g.saved)) : Infinity; };   // a goal without a target never fills up
-  const goalName = (id: string) => cats[id]?.name ?? 'Goal';
-
-  // 1. matching: what your partner put in that you haven't yet; else the monthly amount minus what you put in this month
+  const left0 = goalLeftNow(s, today);
+  let matchWant = 0;
   const mg = cfg.match.goal;
-  if (mg && cats[mg] && !cats[mg].deleted_at && goalLeft(mg) > 0) {
+  if (mg && cats[mg] && !cats[mg].deleted_at) {
+    // what your partner put in that you haven't yet; else the monthly amount minus what you put in this month
     const ids = new Set([mg, ...alive(cats).filter(c => c.parent_id === mg).map(c => c.id)]);
     const g = txs.filter(t => t.type === 'expense' && t.category_id && ids.has(t.category_id) && !isPending(t, today));
     const partner = sum(g.filter(t => t.owner_id !== me)), mine = sum(g.filter(t => t.owner_id === me));
     const thisMonth = sum(g.filter(t => t.owner_id === me && t.date >= monthStart(today)));
-    const want = partner - mine > 0.5 ? partner - mine : Math.max(0, cfg.match.monthly - thisMonth);
-    const v = take(Math.min(want, goalLeft(mg)));
+    matchWant = partner - mine > 0.5 ? partner - mine : Math.max(0, cfg.match.monthly - thisMonth);
+  }
+  const al = allocate(s, cfg, toSplit, matchWant, left0);
+  notes.push(...al.notes);
+
+  return { pays, payTotal, needs, needTotal, available, expected, expectedTotal, spare, toSplit, source, sourceBalance, moves: al.moves, notes, monthly: round2(monthly), nextReserved: next };
+}
+
+/** How much each goal with a target still needs (a goal without a target never fills up). */
+export function goalLeftNow(s: State, today = todayISO()): Map<string, number> {
+  return new Map(goalRows(s, today).map(g => [g.id, g.doneOn ? 0 : Math.max(0, g.target - g.saved)]));
+}
+
+/** The rules, in order: matching (up to `matchWant`) → reserve → fixed goals → the rest to goals by share, else the reserve. */
+export function allocate(s: State, cfg: ReturnType<typeof splitSettings>, toSplit: number, matchWant: number, goalLeftMap: Map<string, number>): { moves: Move[]; notes: string[] } {
+  const cats = s.categories;
+  const notes: string[] = [];
+  const moves: Move[] = [];
+  let left = toSplit;
+  const take = (want: number) => { const v = Math.max(0, Math.min(left, Math.round(want))); left -= v; return v; };
+  const goalLeft = (id: string) => goalLeftMap.get(id) ?? Infinity;
+  const goalName = (id: string) => cats[id]?.name ?? 'Goal';
+  // 1. matching
+  const mg = cfg.match.goal;
+  if (mg && cats[mg] && !cats[mg].deleted_at && goalLeft(mg) > 0) {
+    const v = take(Math.min(matchWant, goalLeft(mg)));
     if (v > 0) moves.push({ key: 'match', kind: 'match', label: `${goalName(mg)} · matching`, to: mg, amount: v });
   }
   // 2. the reserve
@@ -273,8 +300,7 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
     if (!active.some(g => g.mode === 'share')) notes.push('No active goal: what\'s left goes to the reserve.');
     left = 0;
   }
-
-  return { pays, payTotal, needs, needTotal, available, expected, expectedTotal, spare, toSplit, source, sourceBalance, moves: moves.filter(m => m.amount > 0), notes };
+  return { moves: moves.filter(m => m.amount > 0), notes };
 }
 
 /**

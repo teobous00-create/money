@@ -139,6 +139,28 @@ ok(await p.getByText('Paid 1.100 € · PDA Salary').count() === 1, '…and brin
 await p.locator('.lumen-card [aria-label=Dismiss]').first().click(); await p.waitForTimeout(500);
 ok(await p.getByText(/^Paid /).count() === 0, 'dismissed: gone');
 
+// ---- forecast: the pays the shifts will bring, split ahead
+const f = await p.evaluate(async () => { const m = await import('/src/lib/payForecast.ts'); return m.forecast(window.__money.getState()); });
+const ym1 = (k) => { const [y, mo] = today.split('-').map(Number); const d = new Date(y, mo - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const ev = Object.fromEntries(f.events.map(e => [e.label, e]));
+ok(Object.values(ev).some(e => /^Evening 16–/.test(e.label) && e.amount === 20 && e.date > today), `last month's evening 16–end, unpaid: any day now (${JSON.stringify(f.events.map(e => [e.date, e.label, e.amount]))})`);
+const e115 = f.events.find(e => /^Evening 1–15/.test(e.label));
+ok(e115 && e115.date === today.slice(0, 8) + '16' && e115.amount === eveFirst, `evening 1–15 paid on the 16th: ${e115?.amount}`);
+const mor = f.events.find(e => /^Morning/.test(e.label));
+ok(mor && mor.date === ym1(1) + '-10' && mor.amount === 50 + 15, `this month's morning (1 shift × 50 + 15 bonus/shift) paid on the 10th of next month: ${mor?.date} ${mor?.amount}`);
+ok(!f.events.some(e => /^Morning/.test(e.label) && e.date < today.slice(0, 8) + '28'), 'last month\'s morning (paid by hand) is not expected again');
+ok(f.until === mor?.date, 'until defaults to the last pay your shifts bring: ' + f.until);
+ok(f.goals.length >= 1 && f.goals.every(g => 'closes' in g), 'goals with a close date (or none): ' + JSON.stringify(f.goals));
+
+// the forecast from the Goals card (Overview → Analytics)
+await p.click('.nav-item:nth-child(4)'); await p.waitForTimeout(600);
+const an = p.getByText('Analytics', { exact: true });
+if (await an.count()) { await an.first().click(); await p.waitForTimeout(700); }
+await p.getByRole('button', { name: 'Forecast' }).first().click(); await p.waitForTimeout(800);
+const ft = await p.locator('.sheet').last().innerText();
+ok(/Pay forecast/.test(ft) && /PAYS UNTIL/i.test(ft), 'forecast opens from the Goals card');
+await shot('ps6-forecast');
+
 console.log('errors:', errors.length ? errors : 'none');
 console.log(fails ? `${fails} FAILED` : 'all passed');
 await b.close();

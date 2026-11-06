@@ -1,23 +1,28 @@
 import { motion } from 'motion/react';
-import { Check, Target } from 'lucide-react';
+import { useState } from 'react';
+import { CalendarRange, Check, Target } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { catStyle } from '../lib/calc';
 import { money, round2, shortDate } from '../lib/format';
 import { useGoals } from '../lib/goals';
 import { setUi } from '../lib/ui';
 import { ease } from './ui';
+import { ForecastSheet } from './PaySplit';
 
 /** Goals with a target: a bar that fills as money goes in, and a check when it's reached. */
 export function GoalsCard() {
   const goals = useGoals();
   const cats = useStore(s => s.categories);
+  const [fc, setFc] = useState(false);
   if (!goals.length) return null;
   return (
     <motion.div className="card" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }}>
       <div className="row" style={{ gap: 10, marginBottom: 12 }}>
         <span style={{ color: 'var(--accent)', display: 'grid' }}><Target size={20} /></span>
         <span className="grow bold">Goals</span>
+        <button className="chip" style={{ height: 32, fontSize: 13 }} onClick={() => setFc(true)}><CalendarRange size={15} />Forecast</button>
       </div>
+      <ForecastSheet open={fc} onClose={() => setFc(false)} />
       {goals.map((g, i) => {
         const done = !!g.doneOn;
         const v = Math.min(1, g.saved / g.target);

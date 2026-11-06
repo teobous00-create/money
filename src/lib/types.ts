@@ -172,6 +172,7 @@ export interface PaySplitPrefs {
   match?: { goal: string | null; monthly: number };  // a shared goal where you put in what your partner did
   goals?: Array<{ id: string; mode: 'share' | 'eur' | 'pct'; value: number }>;   // active goals; 'share' = a part of what's left
   done?: string[];                                   // pay entries already split or dismissed
+  forecast?: { until?: string | null; bonusPerShift?: number; tipsPerShift?: number };
 }
 
 export interface Review { text: string; upTo: string; at: string; v?: number }
