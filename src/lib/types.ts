@@ -161,6 +161,17 @@ export interface Prefs {
   levelDefs?: LevelDef[];          // your own ladder of levels (empty = the defaults)
   homeSeeded?: number;              // household budgets taken from the Excel (version)
   learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
+  paySplit?: PaySplitPrefs;         // what to do with each pay once the month is covered
+}
+
+/** Pay split: on each pay (not tips), what the rest of the month still needs stays; the spare goes to these, in order. */
+export interface PaySplitPrefs {
+  margin?: number;                                   // safety margin kept on top of the month's needs (€)
+  sources?: string[];                                // accounts the money can be moved out of (to the reserve/goals)
+  reserve?: { account: string | null; mode: 'eur' | 'pct'; value: number };
+  match?: { goal: string | null; monthly: number };  // a shared goal where you put in what your partner did
+  goals?: Array<{ id: string; mode: 'share' | 'eur' | 'pct'; value: number }>;   // active goals; 'share' = a part of what's left
+  done?: string[];                                   // pay entries already split or dismissed
 }
 
 export interface Review { text: string; upTo: string; at: string; v?: number }
