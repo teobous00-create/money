@@ -25,7 +25,7 @@ await p.evaluate((today) => {
     C('pda', 'PDA Salary', 'income'), C('pdab', 'PDA Bonus', 'income'), C('cake', 'Cake & Roll', 'income'), C('tips', 'Tips', 'income')]);
   putMany('jobs', [
     { id: 'j1', owner_id: '', name: 'Morning', kind: 'daily', pay: 'monthly', rates: [], color: '#E8A33D', salary_category_id: 'pda', bonus_category_id: 'pdab', tips_category_id: null, tips_account_id: null, sort: 0, archived: false },
-    { id: 'j2', owner_id: '', name: 'Evening', kind: 'hourly', pay: 'semimonthly', rates: [], color: '#5B5BD6', salary_category_id: 'cake', bonus_category_id: null, tips_category_id: 'tips', tips_account_id: 'cash', sort: 1, archived: false }]);
+    { id: 'j2', owner_id: '', name: 'Evening', kind: 'hourly', pay: 'semimonthly', rates: [], color: '#5B5BD6', salary_category_id: 'cake', bonus_category_id: null, tips_category_id: 'tips', tips_account_id: 'cash', sort: 1, archived: false, rates: [{ from: '2000-01-01', hour: 5 }] }]);
   const addM = (iso, k) => { const [y, m] = iso.split('-').map(Number); const d = new Date(y, m - 1 + k, 10); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-10`; };
   let n = 0;
   const T = (type, date, amount, account, cat, owner = '', to = null) => ({ id: 't' + (++n), owner_id: owner, type, date, amount, account_id: account, to_account_id: to, category_id: cat, note: null, recurring_id: null, seq: n });
@@ -42,12 +42,28 @@ await p.evaluate((today) => {
     { ...T('transfer', soon, 50, 'sav', null), to_account_id: 'cc' },       // planned: savings pay part of the card → less owed
     { ...T('transfer', soon, 20, 'eur', null), to_account_id: 'cc' },       // from an everyday account: still owed (it's that money)
   ]);
+  // shifts: last month's morning (2 × 50 owed), evening last 16–end (4 h owed), evening this 1–15 (8 h worked + 8 h planned
+  // tomorrow), and an old evening shift 3 months back (not counted)
+  const pm = (d) => addM(today, -1).slice(0, 8) + d;
+  const S = (job, date, hours, base = null) => ({ id: `${job}:${date}`, owner_id: '', job_id: job, date, hours, sales: 0, base, bonus: null, tips_tx_id: null });
+  const tomorrow = (() => { const [y, m, d] = today.split('-').map(Number); const x = new Date(y, m - 1, d + 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; })();
+  putMany('shifts', [S('j1', pm('03'), 8, 50), S('j1', pm('04'), 8, 50), S('j1', first, 8, 50), S('j2', pm('20'), 4), S('j2', first, 8), S('j2', tomorrow, 8), S('j2', addM(today, -3).slice(0, 8) + '05', 8)]);
   const next20 = today.slice(8) <= '20' ? today.slice(0, 8) + '20' : addM(today, 1).slice(0, 8) + '20';
   putMany('recurring', [{ id: 'r1', owner_id: '', type: 'expense', amount: 30, account_id: 'eur', to_account_id: null, category_id: 'phone', note: 'Cosmote', freq: 'monthly', anchor_day: 20, next_date: next20, active: true, end_date: null, skip_dates: [] }]);
   setPrefs({ analytics: true, budgets: { daily: 120, sm: 350, del: 150 }, goals: { goals: 0, dent: 600, bed: 400 }, tradingAccounts: ['ec'] });
 }, today);
 await p.click('.nav-item:nth-child(3)'); await p.waitForTimeout(700);
 ok(await p.getByText(/^Paid /).count() === 0, 'tips alone bring no card');
+
+// expected pay before any pay is entered
+const day0 = Number(today.slice(8));
+const eveFirst = 40 + (day0 + 1 <= 15 ? 40 : 0);
+const exp0 = await p.evaluate(async () => { const m = await import('/src/lib/paySplit.ts'); return m.expectedPay(window.__money.getState()); });
+const e0 = Object.fromEntries(exp0.map(e => [e.label.split(' ')[0] + (e.id.includes('-16') ? '2' : ''), e.amount]));
+ok(exp0.find(e => e.id.startsWith('j1:'))?.amount === 100 && !exp0.some(e => e.id.startsWith('j1:') && e.id.endsWith(today.slice(0, 8) + '01')), `morning: last month's 100 owed, this month's not counted (paid next month): ${JSON.stringify(exp0)}`);
+ok(exp0.find(e => e.id === `j2:${today.slice(0, 8)}01`)?.amount === eveFirst, `evening 1–15: worked + planned shifts = ${eveFirst}`);
+ok(exp0.some(e => e.id.startsWith('j2:') && e.amount === 20), 'evening: last month\'s 16–end still owed (20)');
+ok(exp0.length === 3, 'nothing older than last month');
 
 // ---- the pay
 await p.evaluate((today) => window.__money.putMany('transactions', [{ id: 'pay1', owner_id: '', type: 'income', date: today, amount: 1100, account_id: 'pir', to_account_id: null, category_id: 'pda', note: 'Morning', recurring_id: null, seq: 99 }]), today);
@@ -72,6 +88,7 @@ const exp = {
   next: 35,                                           // only what's planned for the 1st–5th
 };
 const need = exp.daily + exp.home + exp.free + exp.next + 30 + 100;
+ok(split.expectedTotal === 20 + eveFirst && !split.expected.some(e => e.id.startsWith('j1:')), `the 1.100 € morning pay entered by hand covers last month's morning; expected now ${split.expectedTotal}`);
 const near = (a, b) => Math.abs(a - b) < 0.02;
 ok(near(split.needs.find(x => x.id === 'daily')?.amount, exp.daily), `Καθημερινά pooled: 30 left → ${split.needs.find(x => x.id === 'daily')?.amount} (≈${exp.daily.toFixed(2)})`);
 ok(near(split.needs.find(x => x.id === 'home')?.amount, exp.home), `Σπίτι: sub budgets pooled, card spending counted → ${split.needs.find(x => x.id === 'home')?.amount}`);
@@ -81,7 +98,7 @@ ok(split.needs.find(x => x.id === 'card')?.amount === 30 && /50 € planned from
 ok(split.needs.find(x => x.id === 'margin')?.amount === 100, '100 € margin');
 ok(near(split.needTotal, need), `needs ${split.needTotal} (≈${need.toFixed(2)})`);
 ok(split.available === 1485, `available = everyday accounts incl. today's tips in cash (no trading, savings, card): ${split.available}`);
-ok(split.toSplit === Math.floor(Math.min(1485 - split.needTotal, 1100)), `to split ${split.toSplit}`);
+ok(split.toSplit === Math.floor(Math.min(1485 + split.expectedTotal - split.needTotal, 1100)), `to split ${split.toSplit} (expected pay counted)`);
 ok(split.source === 'pir', 'moved from the account the pay came into');
 const mv = Object.fromEntries(split.moves.map(m => [m.key, m.amount]));
 ok(mv.match === 150, 'matching: what the partner put in (150)');

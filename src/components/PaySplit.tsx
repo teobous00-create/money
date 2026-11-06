@@ -49,6 +49,7 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
   const [rules, setRules] = useState(false);
   const accounts = useStore(s => s.accounts);
   const [showNeeds, setShowNeeds] = useState(false);
+  const [showExp, setShowExp] = useState(false);
   // the proposed amounts, editable before accepting (reset when the proposal changes)
   const sig = split.moves.map(m => `${m.key}:${m.amount}`).join('|');
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -90,6 +91,31 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
           )}
         </AnimatePresence>
         <Line label="In your accounts now" value={split.available} />
+        {split.expected.length > 0 && (
+          <>
+            <button className="row" style={{ width: '100%', padding: '6px 0', alignItems: 'baseline', textAlign: 'left' }} onClick={() => setShowExp(v => !v)}>
+              <span className="grow small">Expected this month</span>
+              <motion.span animate={{ rotate: showExp ? 180 : 0 }} style={{ display: 'grid', marginRight: 6, color: 'var(--ink-3)' }}><ChevronDown size={16} /></motion.span>
+              <span className="num small">{money(split.expectedTotal)}</span>
+            </button>
+            <AnimatePresence initial={false}>
+              {showExp && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease }} style={{ overflow: 'hidden' }}>
+                  <div style={{ padding: '2px 0 6px 10px', borderLeft: '2px solid var(--line)', marginBottom: 4 }}>
+                    {split.expected.map(e => (
+                      <div key={e.id} style={{ padding: '3px 0' }}>
+                        <div className="row tiny" style={{ justifyContent: 'space-between', gap: 8 }}>
+                          <span className="ellipsis muted">{e.label}</span><span className="num">{money(e.amount)}</span>
+                        </div>
+                        {e.planned > 0 && <div className="tiny faint num">{money(e.worked)} worked + {money(e.planned)} planned shifts</div>}
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
         <div style={{ borderTop: '1px solid var(--line)', marginTop: 6, paddingTop: 6 }}>
           <Line label={split.spare >= 0 ? 'Spare after the month' : 'Short for the month'} value={split.spare} bold color={split.spare >= 0 ? 'var(--income)' : 'var(--expense)'} />
         </div>
@@ -97,7 +123,7 @@ function SplitBody({ split, close }: { split: Split; close: () => void }) {
 
       {split.toSplit <= 0 ? (
         <div className="small muted" style={{ padding: '14px 4px' }}>
-          {split.spare < 0 ? `Nothing to put aside: keep all of it — the month needs ${money(-split.spare)} more than you have.` : 'Nothing to put aside: this pay covers the month.'}
+          {split.spare < 0 ? `Nothing to put aside: keep all of it — the month needs ${money(-split.spare)} more than you have and expect.` : 'Nothing to put aside: this pay covers the month.'}
         </div>
       ) : (
         <div className="section">

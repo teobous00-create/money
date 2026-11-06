@@ -3,6 +3,7 @@ import { useStore, getState, setPrefs, put, remove, type State } from './store';
 import { alive, computeBalances, ruleDates, ruleToTx } from './calc';
 import { goalIds, goalRows } from './goals';
 import { tipsCategoryIds } from './insights';
+import { payPeriods, periodLabel, shiftDone, shiftPay } from './tracker';
 import { isPending, useTimesVersion } from './txTime';
 import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
 import type { Account, Category, PaySplitPrefs, Tx } from './types';
@@ -20,17 +21,21 @@ import type { Account, Category, PaySplitPrefs, Tx } from './types';
  *              · what the credit card owes, less planned payments to it from accounts not counted here (savings…)
  *              · a safety margin
  *   available  every everyday account (not trading, investments, savings or debts), the new pay included
- *   spare      available − needs, at most the pay itself
+ *   expected   pay still to come this month, from the Tracker: every pay period that ends before the month does and
+ *              isn't paid yet (last month's day pay + contacts bonus, the evening job's 1–15 with its planned shifts…)
+ *   spare      available + expected − needs, at most the pay itself
  * and splits the spare: the matched goal (what your partner put in), the reserve, fixed goals, then what's left to the
  * active goals by their share (or to the reserve when there are none). Accepting writes the entries.
  */
 
 export interface NeedLine { id: string; label: string; amount: number; kind: 'budget' | 'free' | 'card' | 'margin' }
+export interface Expected { id: string; label: string; amount: number; worked: number; planned: number }
 export interface Move { key: string; kind: 'match' | 'reserve' | 'goal'; label: string; to: string; amount: number }
 export interface Split {
   pays: Tx[]; payTotal: number;
   needs: NeedLine[]; needTotal: number;
-  available: number; spare: number;           // spare can be negative (the month isn't covered yet)
+  available: number; expected: Expected[]; expectedTotal: number;
+  spare: number;                              // spare can be negative (the month isn't covered yet)
   toSplit: number;                            // what this pay frees: min(spare, pay), whole euros
   source: string | null; sourceBalance: number;
   moves: Move[];
@@ -190,7 +195,9 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
   if (cfg.margin > 0) needs.push({ id: 'margin', label: 'Safety margin', amount: cfg.margin, kind: 'margin' });
   const needTotal = round2(needs.reduce((x, n) => x + n.amount, 0));
   const available = round2(regular.reduce((x, a) => x + (bal.get(a.id) ?? 0), 0));
-  const spare = round2(available - needTotal);
+  const expected = expectedPay(s, today);
+  const expectedTotal = round2(expected.reduce((x, e) => x + e.amount, 0));
+  const spare = round2(available + expectedTotal - needTotal);
   const payTotal = round2(sum(pays));
   let toSplit = Math.max(0, Math.floor(Math.min(spare, payTotal)));
 
@@ -267,7 +274,39 @@ export function computeSplit(s: State, pays: Tx[], today = todayISO()): Split {
     left = 0;
   }
 
-  return { pays, payTotal, needs, needTotal, available, spare, toSplit, source, sourceBalance, moves: moves.filter(m => m.amount > 0), notes };
+  return { pays, payTotal, needs, needTotal, available, expected, expectedTotal, spare, toSplit, source, sourceBalance, moves: moves.filter(m => m.amount > 0), notes };
+}
+
+/**
+ * Pay still to come before the month ends, from the Tracker: every pay period that ends before the last day of this
+ * month, from last month on, not paid in full — what it owes now (worked shifts, a finished month's contacts bonus)
+ * plus its planned shifts. The month's own period of a monthly job, and the 16th–end of a twice-monthly one, are paid
+ * next month: not counted. Paying it (the "got paid" entry) moves it from here to the accounts.
+ */
+export function expectedPay(s: State, today = todayISO()): Expected[] {
+  const out: Expected[] = [];
+  const end = monthEnd(today), from = monthsBack(today, 1), me = s.user?.id;
+  const shifts = alive(s.shifts);
+  // pay entered by hand (not through "got paid") isn't linked to a period: it still counts against this month's expected
+  const linked = new Set(alive(s.payouts).flatMap(p => [p.tx_id, p.bonus_tx_id]).filter(Boolean) as string[]);
+  for (const job of alive(s.jobs).filter(j => !j.archived).sort((a, b) => a.sort - b.sort)) {
+    const { list } = payPeriods(job, shifts, s.payouts, s.transactions);
+    const cats = new Set([job.salary_category_id, job.bonus_category_id].filter(Boolean) as string[]);
+    let loose = alive(s.transactions).filter(t => t.owner_id === me && t.type === 'income' && t.category_id && cats.has(t.category_id) && !linked.has(t.id)
+      && t.date >= monthStart(today) && !isPending(t, today)).reduce((v, t) => v + t.amount, 0);
+    for (const p of list.slice().sort((a, b) => a.start.localeCompare(b.start))) {
+      if (p.start < from || p.end >= end) continue;
+      const planned = round2(shifts.filter(x => x.job_id === job.id && x.date >= p.start && x.date <= p.end && !shiftDone(job, x, today)).reduce((v, x) => v + shiftPay(job, x), 0));
+      let worked = Math.max(0, p.owed);
+      const off = Math.min(loose, worked); worked -= off; loose -= off;
+      worked = round2(worked);
+      const amount = round2(worked + planned);
+      if (amount <= 0.004) continue;
+      const bonus = round2(Math.max(0, p.bonus - p.paidBonus));
+      out.push({ id: `${job.id}:${p.start}`, label: `${job.name} ${periodLabel(p)}${bonus > 0.004 ? ` · incl. ${bonus} € bonus` : ''}`, amount, worked, planned });
+    }
+  }
+  return out;
 }
 
 export function usePaySplit(): Split | null {
@@ -278,7 +317,7 @@ export function usePaySplit(): Split | null {
     if (!s.user || !s.prefs.analytics) return null;
     const pays = waitingPays(s, today);
     return pays.length ? computeSplit(s, pays, today) : null;
-  }, [s.accounts, s.transactions, s.recurring, s.categories, s.prefs, s.jobs, s.members, s.user, today, tv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.accounts, s.transactions, s.recurring, s.categories, s.prefs, s.jobs, s.shifts, s.payouts, s.members, s.user, today, tv]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** The pays are handled (split or dismissed): the card goes away until the next pay. */
