@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Archive } from 'lucide-react';
 import { useAccounts, useBalances } from '../lib/calc';
 import { useStore, putMany } from '../lib/store';
 import { Sortable } from '../components/Sortable';
+import { NetWorthChart, netWorthSeries } from '../components/Charts';
+import { useTxs } from '../lib/calc';
 import { setUi } from '../lib/ui';
 import { IconBox, Money, Ring, Segmented, ease, softSpring } from '../components/ui';
 import type { Account } from '../lib/types';
@@ -137,7 +139,8 @@ export function AccountsScreen() {
           </motion.div>
         ) : (
           <motion.div key="worth" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <NetWorth accounts={accounts.filter(a => a.owner_id === me && !a.archived)} bal={bal} />
+            {/* net worth = accounts, savings and debts — not trading capital or investments */}
+            <NetWorth accounts={accounts.filter(a => a.owner_id === me && !a.archived && !isTrading(a) && !isInvest(a))} history={accounts.filter(a => a.owner_id === me && !isTrading(a) && !isInvest(a))} bal={bal} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -145,7 +148,9 @@ export function AccountsScreen() {
   );
 }
 
-function NetWorth({ accounts, bal }: { accounts: Account[]; bal: Map<string, number> }) {
+function NetWorth({ accounts, history, bal }: { accounts: Account[]; history: Account[]; bal: Map<string, number> }) {
+  const txs = useTxs();
+  const series = useMemo(() => netWorthSeries(history, txs), [history, txs]);
   let assets = 0, debts = 0;
   for (const a of accounts) { const b = bal.get(a.id) ?? 0; if (b >= 0) assets += b; else debts -= b; }
   assets = round2(assets); debts = round2(debts);
@@ -171,6 +176,7 @@ function NetWorth({ accounts, bal }: { accounts: Account[]; bal: Map<string, num
           ))}
         </div>
       </div>
+      <NetWorthChart series={series} />
       <div className="section">
         <div className="section-head"><span className="section-title">Debts</span></div>
         <div className="list">

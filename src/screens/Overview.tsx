@@ -8,6 +8,7 @@ import { containsToday, elapsedDays, range } from '../lib/period';
 import { IconBox, Money, Bar, Segmented, ease, softSpring } from '../components/ui';
 const AnalyticsView = lazy(() => import('./Analytics').then(m => ({ default: m.AnalyticsView })));
 import { BudgetLine } from '../components/Budget';
+import { Donut, Sankey, type Flow } from '../components/Charts';
 import { useBudgetSpend } from '../lib/insights';
 import { catName, catStyle, alive } from '../lib/calc';
 import { addDays, fromISO, money, num, round2, todayISO } from '../lib/format';
@@ -91,6 +92,32 @@ export function OverviewScreen() {
     ? [['Daily avg', avg], ['Today', sumBetween(t0, t0)], ['This week', sumBetween(weekStart, t0)]]
     : [['Daily avg', avg], [period.mode === 'year' ? 'Biggest month' : 'Biggest day', biggest], ['Entries', stats.txs.filter(t => t.type === type).length]];
 
+  // ---- donut: the biggest categories, the rest as one slice
+  const slices = useMemo(() => {
+    const top = ranked.slice(0, 7).map(r => ({ id: r.id, label: r.c?.name ?? 'Uncategorized', value: r.v, color: r.c?.color ?? '#94a3b8' }));
+    const rest = round2(ranked.slice(7).reduce((s, r) => s + r.v, 0));
+    return rest > 0 ? [...top, { id: 'other', label: 'Everything else', value: rest, color: '#94a3b8' }] : top;
+  }, [ranked]);
+
+  // ---- money flow: income sources → where it went (+ what's left, or what came from savings)
+  const flow = useMemo(() => {
+    const by = (k: CatType) => {
+      const m = new Map<string, number>();
+      for (const t of stats.txs) if (t.type === k) { const id = topCategoryId(t.category_id, cats); m.set(id, (m.get(id) ?? 0) + t.amount); }
+      return [...m.entries()].map(([id, v]) => ({ id, label: cats[id]?.name ?? 'Uncategorized', value: round2(v), color: cats[id]?.color ?? '#94a3b8' })).sort((a, b) => b.value - a.value);
+    };
+    const group = (l: Flow[], n: number) => {
+      const rest = round2(l.slice(n).reduce((s, x) => s + x.value, 0));
+      return rest > 0 ? [...l.slice(0, n), { id: 'other', label: 'Other', value: rest, color: '#94a3b8' }] : l;
+    };
+    const inc = by('income'), exp = by('expense');
+    const ti = round2(inc.reduce((s, x) => s + x.value, 0)), te = round2(exp.reduce((s, x) => s + x.value, 0));
+    const sources = group(inc, 4), targets = group(exp, 6);
+    if (ti > te) targets.push({ id: 'left', label: 'Left over', value: round2(ti - te), color: '#16a34a' });
+    else if (te > ti) sources.push({ id: 'savings', label: 'From savings', value: round2(te - ti), color: '#64748B' });
+    return { sources, targets, any: ti > 0 || te > 0 };
+  }, [stats, cats]);
+
   const tint = type === 'expense' ? 'var(--expense)' : 'var(--income)';
   const shown = expanded ? ranked : ranked.slice(0, 5);
   const restSum = round2(ranked.slice(5).reduce((s, r) => s + r.v, 0));
@@ -167,6 +194,12 @@ export function OverviewScreen() {
         ))}
       </div>
 
+      {slices.length > 0 && (
+        <div className="card" style={{ marginTop: 12, padding: '16px 12px' }}>
+          <Donut key={type} slices={slices} total={total} onOpen={id => id !== 'other' && cats[id] && setUi({ catDetail: { id, type } })} />
+        </div>
+      )}
+
       <div className="section">
         <div className="list">
           {ranked.length === 0 && <div className="list-row muted small">No {type === 'expense' ? 'expenses' : 'income'} in this period.</div>}
@@ -203,6 +236,16 @@ export function OverviewScreen() {
           )}
         </div>
       </div>
+
+      {flow.any && (
+        <div className="section">
+          <div className="section-head"><span className="section-title">Money flow</span><span className="tiny muted">pick the period at the top</span></div>
+          <div className="card" style={{ padding: '14px 10px' }}>
+            <Sankey sources={flow.sources} targets={flow.targets}
+              onOpen={id => { const c = cats[id]; if (c) setUi({ catDetail: { id, type: c.type } }); }} />
+          </div>
+        </div>
+      )}
 
       {period.mode === 'month' && <BudgetsCard anchor={period.anchor} />}
     </div>
