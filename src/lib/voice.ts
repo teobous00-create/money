@@ -211,14 +211,18 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
       if (byCat) ref = { job: byCat, at: -1 };
     }
     // "πληρώθηκα το μπόνους / τα μεροκάματα": the job that has a separate bonus
-    const saysBonus = ws.some(w => BONUS.test(w.n)), saysBase = ws.some(w => BASE.test(w.n));
+    // "χωρίς μπόνους" names the bonus to leave out: it then means the other part
+    const without = (k: number) => [ws[k - 1]?.n, ws[k - 2]?.n].some(w => w === 'χωρισ' || w === 'without');
+    const saysAt = (re: RegExp) => ws.some((w, k) => re.test(w.n) && !without(k));
+    const notBonus = ws.some((w, k) => BONUS.test(w.n) && without(k)), notBase = ws.some((w, k) => (BASE.test(w.n) || SALARY.test(w.n)) && without(k));
+    const saysBonus = saysAt(BONUS) || notBase, saysBase = saysAt(BASE) || notBonus;
     if (!ref && (saysBonus || saysBase)) { const j = ctx.jobs.find(x => x.kind === 'daily' && x.bonus_category_id); if (j) ref = { job: j, at: -1 }; }
     if (ref) {
       const nums = labelled(ws);
       const bonus = nums.find(n => n.label === 'bonus')?.v ?? null;
       const amount = nums.find(n => n.label === 'salary' || n.label === 'base')?.v ?? nums.find(n => n.label === null)?.v ?? null;
       // only one of the two was paid: "το μπόνους" → just the bonus, "τα μεροκάματα" → just the day pay
-      const saysSalary = ws.some(w => SALARY.test(w.n));
+      const saysSalary = saysAt(SALARY);
       const only: 'salary' | 'bonus' | undefined = !(ref.job.kind === 'daily' && ref.job.bonus_category_id) ? undefined
         : saysBonus && !saysBase && !saysSalary ? 'bonus' : saysBase && !saysBonus ? 'salary' : undefined;
       // "300 eurobank και 100 μετρητά" / "eurobank 300, μετρητά 100": an amount per account
