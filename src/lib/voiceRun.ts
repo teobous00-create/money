@@ -5,7 +5,7 @@ import { addDays, fromISO, money, num, relativeDay, todayISO, uuid, round2 } fro
 import { catName, alive } from './calc';
 import { complete, type Cmd, type VoiceCtx } from './voice';
 import { norm } from './quickparse';
-import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf, payAccounts } from './tracker';
+import { payPeriods, periodToPay, periodLabel, rateAt, savePnl, shiftId, writePayout, writeShift, contactRule, contactsOf, payAccounts, writePayoutParts } from './tracker';
 import { toast } from '../components/ui';
 import type { Recurring, Tx, TxType } from './types';
 
@@ -212,6 +212,11 @@ function savePayout(c: Extract<Cmd, { kind: 'payout' }>): Done | null {
   if (amt <= 0 && bon <= 0) return null;
   const mine = Object.values(st.accounts).filter(a => !a.deleted_at && !a.archived && a.owner_id === st.user?.id).sort((a, b) => a.sort - b.sort);
   const acc = payAccounts(job, mine);
+  if (c.parts?.length && !split) {
+    const r = writePayoutParts(job, period, c.parts.map(p => ({ amount: p.amount, account: p.accountId })), c.date);
+    const names = c.parts.map(p => `${money(p.amount)} ${mine.find(a => a.id === p.accountId)?.name ?? ''}`.trim()).join(' + ');
+    return { label: `${job.name} paid ${names} · ${periodLabel(period)}`, amount: round2(c.parts.reduce((x, p) => x + p.amount, 0)), undo: r.undo, edit: () => setUi({ tab: 'tracker' }) };
+  }
   const r = writePayout(job, period, amt, bon, acc.salary, c.date, false, split ? acc.bonus : null);
   const parts = split ? `${money(amt)} + ${money(bon)}` : money(round2(amt + bon));
   return { label: `${job.name} paid ${parts} · ${periodLabel(period)}`, amount: round2(amt + bon), undo: r.undo, edit: () => setUi({ tab: 'tracker' }) };

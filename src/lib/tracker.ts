@@ -230,15 +230,26 @@ export function writeShift(job: Job, date: string, f: ShiftInput) {
 
 /** Records a payment for a pay period, adding the salary and bonus to your income. `settled`: the period is paid in full (anything over is extra, not an advance). Returns an undo. */
 /** Where a job's pay goes by default: the last account used for it (salary and bonus remembered separately), else a sensible guess. */
-export function payAccounts(job: Job, mine: Array<{ id: string; name: string }>): { salary: string | null; bonus: string | null } {
+export function payAccounts(job: Job, mine: Array<{ id: string; name: string }>): { salary: string | null; bonus: string | null; second: string | null } {
   const get = (k: string) => { try { const v = localStorage.getItem(k); return v && mine.some(a => a.id === v) ? v : null; } catch { return null; } };
   const guess = (re: RegExp) => mine.find(a => re.test(a.name))?.id ?? null;
   const salary = get('money:payacc:' + job.id) ?? guess(/eurobank|τράπεζ|bank/i) ?? mine[0]?.id ?? null;
   const bonus = get('money:payacc-bonus:' + job.id) ?? guess(/eden|bonus/i) ?? salary;
-  return { salary, bonus };
+  const second = get('money:payacc-2:' + job.id) ?? guess(/μετρητ|cash/i) ?? salary;   // hourly jobs: the part paid another way (cash)
+  return { salary, bonus, second };
 }
-export function rememberPayAccounts(job: Job, salary: string | null, bonus: string | null) {
-  try { if (salary) localStorage.setItem('money:payacc:' + job.id, salary); if (bonus) localStorage.setItem('money:payacc-bonus:' + job.id, bonus); } catch { /* ignore */ }
+export function rememberPayAccounts(job: Job, salary: string | null, bonus: string | null, second: string | null = null) {
+  try {
+    if (salary) localStorage.setItem('money:payacc:' + job.id, salary);
+    if (bonus) localStorage.setItem('money:payacc-bonus:' + job.id, bonus);
+    if (second) localStorage.setItem('money:payacc-2:' + job.id, second);
+  } catch { /* ignore */ }
+}
+
+/** One payment split over several accounts (e.g. part to the bank, part in cash): a payout per account, one undo. */
+export function writePayoutParts(job: Job, period: { start: string; end: string }, parts: Array<{ amount: number; account: string | null }>, date: string, settled = false) {
+  const done = parts.filter(p => p.amount > 0).map(p => writePayout(job, period, p.amount, 0, p.account, date, settled));
+  return { txIds: done.map(d => d.txId).filter(Boolean) as string[], undo: () => done.forEach(d => d.undo()) };
 }
 
 /** `bonusAccount`: where the bonus goes when it's paid to a different account than the salary (e.g. a meal-voucher card). */

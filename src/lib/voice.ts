@@ -66,7 +66,7 @@ export type Cmd =
   | { kind: 'tx'; p: Parsed; repeat: Freq | null; until: string | null }
   | { kind: 'shift'; job: Job; date: string; hours: number | null; tips: number | null; bonus: number | null; base: number | null }
   | { kind: 'pnl'; strategy: Strategy; date: string; value: number | null }
-  | { kind: 'payout'; job: Job; date: string; amount: number | null; bonus: number | null };
+  | { kind: 'payout'; job: Job; date: string; amount: number | null; bonus: number | null; parts?: Array<{ accountId: string; amount: number }> };
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).map(raw => ({ raw, n: clean(stripPunct(raw)) }));   // raw keeps commas for splitting
 
@@ -214,6 +214,25 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
       const nums = labelled(ws);
       const bonus = nums.find(n => n.label === 'bonus')?.v ?? null;
       const amount = nums.find(n => n.label === 'salary')?.v ?? nums.find(n => n.label === null)?.v ?? null;
+      // "300 eurobank και 100 μετρητά" / "eurobank 300, μετρητά 100": an amount per account
+      const accAt = (k: number) => {
+        const w = ws[k]?.n ?? '';
+        return w.length >= 3 ? ctx.accounts.find(a => norm(a.name).split(/[^\p{L}\p{N}]+/u).some(t => t.length >= 3 && (t === w || sameWord(t, w)))) ?? null : null;
+      };
+      const SKIP = /^(ευρω|€|στη|στην|στο|σε|απο|με|και)$/;
+      const near = (from: number, dir: number) => { let k = from; while (SKIP.test(ws[k]?.n ?? '')) k += dir; return accAt(k); };
+      const parts: Array<{ accountId: string; amount: number }> = [];
+      const amounts = nums.filter(x => x.label === null || x.label === 'salary');
+      // the account is named before the amounts ("eurobank 300, μετρητά 100") or after them ("300 eurobank και 100 μετρητά")
+      const firstAcc = ws.findIndex((_, k) => accAt(k));
+      const before = amounts.length > 0 && firstAcc >= 0 && firstAcc < amounts[0].i;
+      for (const n of amounts) {
+        const a = before ? near(n.i - 1, -1) ?? near(n.end + 1, 1) : near(n.end + 1, 1) ?? near(n.i - 1, -1);
+        if (a && !parts.some(p => p.accountId === a.id)) parts.push({ accountId: a.id, amount: n.v });
+      }
+      if (parts.length && !(ref.job.kind === 'daily' && ref.job.bonus_category_id)) {
+        return [{ kind: 'payout', job: ref.job, date: date(), amount: round2(parts.reduce((x, p) => x + p.amount, 0)), bonus: null, parts }];
+      }
       return [{ kind: 'payout', job: ref.job, date: date(), amount, bonus }];
     }
   }
