@@ -206,7 +206,12 @@ function savePayout(c: Extract<Cmd, { kind: 'payout' }>): Done | null {
   const owedBase = round2(period.base - period.paidBase), owedBonus = round2(period.bonus - period.paidBonus);
   let amt: number, bon: number;
   const split = job.kind === 'daily' && !!job.bonus_category_id;
-  if (c.amount === null && c.bonus === null) { amt = split ? owedBase : period.owed; bon = split ? owedBonus : 0; }
+  if (c.amount === null && c.bonus === null) {
+    amt = split ? (c.only === 'bonus' ? 0 : owedBase) : period.owed;
+    bon = split ? (c.only === 'salary' ? 0 : owedBonus) : 0;
+  }
+  else if (split && c.only === 'bonus') { amt = 0; bon = c.bonus ?? c.amount ?? 0; }
+  else if (split && c.only === 'salary') { amt = c.amount ?? 0; bon = 0; }
   else if (split && c.bonus === null) { amt = Math.min(c.amount!, Math.max(0, owedBase)); bon = round2(c.amount! - amt); }   // "πρωινή 706" → salary first, the rest is bonus
   else { amt = c.amount ?? 0; bon = split ? c.bonus ?? 0 : 0; if (!split && c.bonus) amt += c.bonus; }
   if (amt <= 0 && bon <= 0) return null;

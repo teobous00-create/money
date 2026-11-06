@@ -54,7 +54,7 @@ export function fixDictation(text: string): string {
     const at = first;
     first = false;
     if (n === 'αλλαγη') return m[1] + 'συναλλαγή' + m[3];
-    if (n === 'πονουσ') return m[1] + 'μπόνους' + m[3];   // you never say "πόνους" to the app
+    if (/^(πονουσ|πονοσ|πονο|πονου|μπονο)$/.test(n)) return m[1] + 'μπόνους' + m[3];   // you never say "πόνους" to the app
     if (n === 'τι' && !at) return m[1] + 'tips' + m[3];
     return part;
   }).join('');
@@ -66,19 +66,19 @@ export type Cmd =
   | { kind: 'tx'; p: Parsed; repeat: Freq | null; until: string | null }
   | { kind: 'shift'; job: Job; date: string; hours: number | null; tips: number | null; bonus: number | null; base: number | null }
   | { kind: 'pnl'; strategy: Strategy; date: string; value: number | null }
-  | { kind: 'payout'; job: Job; date: string; amount: number | null; bonus: number | null; parts?: Array<{ accountId: string; amount: number }> };
+  | { kind: 'payout'; job: Job; date: string; amount: number | null; bonus: number | null; parts?: Array<{ accountId: string; amount: number }>; only?: 'salary' | 'bonus' };
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).map(raw => ({ raw, n: clean(stripPunct(raw)) }));   // raw keeps commas for splitting
 
 // how you call each job ("πρωινή" → the day-rate job, "απογευματινή / βράδυ" → the hourly one)
 export const DAY_ALIASES = ['πρωινη', 'πρωινο', 'πρωι', 'morning'];
 export const EVE_ALIASES = ['απογευματινη', 'απογευματινο', 'απογευμα', 'βραδινη', 'βραδινο', 'βραδυ', 'evening', 'night'];
-const PAY_WORDS = ['πληρωθηκα', 'πληρωθηκε', 'πληρωμη', 'μισθοσ', 'μισθο', 'μισθου', 'salary', 'payday', 'πληρωσαν'];
+const PAY_WORDS = ['πληρωθηκα', 'πληρωθηκε', 'πληρωθηκαν', 'πληρωμη', 'μισθοσ', 'μισθο', 'μισθου', 'salary', 'payday', 'πληρωσαν', 'μπηκε', 'μπηκαν', 'εβαλαν', 'κατεθεσαν'];
 const SHIFT_WORDS = ['βαρδια', 'βαρδιεσ', 'δουλεψα', 'shift', 'worked'];
 const HOURS = /^(ωρα|ωρεσ|ωρων|h|hours?|ωρ)$/;
 const TIPS = /^(tips?|φιλοδωρ\p{L}*|τιπσ|τιψ|τιπ)$/u;
 const BONUS = /^(bonus|μπονουσ|μπονου|επαφεσ|επαφη|επαφων|contacts?)$/;   // contacts count as the morning bonus
-const BASE = /^(μεροκαματο|βασικο|day)$/;
+const BASE = /^(μεροκαματο|μεροκαματα|μεροκαματων|βασικο|βασικα|day)$/;
 const SALARY = /^(μισθοσ|μισθο|μισθου|salary)$/;
 const NEG = /^(μειον|πλην|minus|χασαμε|εχασα|χασα|χασιμο|ζημια|loss|lost)$/;
 const POS = /^(συν|plus|κερδοσ|κερδισα|κερδισε|profit|won)$/;
@@ -210,10 +210,17 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
       });
       if (byCat) ref = { job: byCat, at: -1 };
     }
+    // "πληρώθηκα το μπόνους / τα μεροκάματα": the job that has a separate bonus
+    const saysBonus = ws.some(w => BONUS.test(w.n)), saysBase = ws.some(w => BASE.test(w.n));
+    if (!ref && (saysBonus || saysBase)) { const j = ctx.jobs.find(x => x.kind === 'daily' && x.bonus_category_id); if (j) ref = { job: j, at: -1 }; }
     if (ref) {
       const nums = labelled(ws);
       const bonus = nums.find(n => n.label === 'bonus')?.v ?? null;
-      const amount = nums.find(n => n.label === 'salary')?.v ?? nums.find(n => n.label === null)?.v ?? null;
+      const amount = nums.find(n => n.label === 'salary' || n.label === 'base')?.v ?? nums.find(n => n.label === null)?.v ?? null;
+      // only one of the two was paid: "το μπόνους" → just the bonus, "τα μεροκάματα" → just the day pay
+      const saysSalary = ws.some(w => SALARY.test(w.n));
+      const only: 'salary' | 'bonus' | undefined = !(ref.job.kind === 'daily' && ref.job.bonus_category_id) ? undefined
+        : saysBonus && !saysBase && !saysSalary ? 'bonus' : saysBase && !saysBonus ? 'salary' : undefined;
       // "300 eurobank και 100 μετρητά" / "eurobank 300, μετρητά 100": an amount per account
       const accAt = (k: number) => {
         const w = ws[k]?.n ?? '';
@@ -233,7 +240,8 @@ export function interpret(text: string, ctx: VoiceCtx): Cmd[] {
       if (parts.length && !(ref.job.kind === 'daily' && ref.job.bonus_category_id)) {
         return [{ kind: 'payout', job: ref.job, date: date(), amount: round2(parts.reduce((x, p) => x + p.amount, 0)), bonus: null, parts }];
       }
-      return [{ kind: 'payout', job: ref.job, date: date(), amount, bonus }];
+      if (only === 'bonus' && bonus === null && amount !== null) return [{ kind: 'payout', job: ref.job, date: date(), amount: null, bonus: amount, only }];   // "μπόνους 206" read as an unlabelled number
+      return [{ kind: 'payout', job: ref.job, date: date(), amount: only === 'bonus' ? null : amount, bonus: only === 'salary' ? null : bonus, only }];
     }
   }
 
