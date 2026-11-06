@@ -4,9 +4,35 @@ import { Sheet, IconBox, toast } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, put, remove, restore } from '../lib/store';
 import { alive, catName, catStyle, ruleDates, virtualId } from '../lib/calc';
-import { money, shortDate, addDays, todayISO } from '../lib/format';
+import { money, shortDate, addDays, todayISO, round2 } from '../lib/format';
+import type { Recurring } from '../lib/types';
 
 const F = { weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
+const PER_MONTH = { weekly: 52 / 12, monthly: 1, yearly: 1 / 12 };
+
+/** What the running rules cost (or bring in) per month and per day: weekly ×52/12, yearly ÷12; paused or ended rules don't count. */
+function Totals({ list }: { list: Recurring[] }) {
+  const t = todayISO();
+  const live = list.filter(r => r.active && r.type !== 'transfer' && (!r.end_date || r.end_date >= t) && ruleDates(r, r.next_date, addDays(t, 800), 1).length > 0);
+  const sum = (type: 'expense' | 'income') => live.filter(r => r.type === type).reduce((s, r) => s + r.amount * PER_MONTH[r.freq], 0);
+  const rows = ([['expense', 'Expenses', 'var(--expense)'], ['income', 'Income', 'var(--income)']] as const)
+    .map(([k, label, color]) => ({ label, color, m: sum(k) })).filter(x => x.m > 0);
+  if (!rows.length) return null;
+  return (
+    <div className="card" style={{ marginTop: 12, padding: '12px 16px' }}>
+      {rows.map(r => (
+        <div key={r.label} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+          <span className="small" style={{ fontWeight: 600 }}>{r.label}</span>
+          <span className="num small" style={{ textAlign: 'right' }}>
+            <b style={{ color: r.color }}>{money(round2(r.m))}</b><span className="muted">/month</span>
+            <span className="muted"> · </span>
+            <b style={{ color: r.color }}>{money(round2((r.m * 12) / 365))}</b><span className="muted">/day</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function RecurringSheet() {
   const open = useUi(u => u.recurring);
@@ -55,6 +81,7 @@ function Body() {
           })}
         </AnimatePresence>
       </div>
+      {list.length > 0 && <Totals list={list} />}
       {list.length > 0 && <p className="tiny muted" style={{ padding: '10px 6px' }}>Past entries stay when you pause or remove a rule.</p>}
     </div>
   );
