@@ -169,12 +169,19 @@ export interface Prefs {
 export interface BotPlan {
   bought: string | null;                                  // the day you checked in "I bought it" (null = waiting)
   pct: number;                                            // % a trading day
-  a1: { capital: number; start: string; strategy: string | null };
-  a2: { capital: number; start: string | null; strategy: string | null };   // start null = the trading day after account 1's first withdrawal
+  a1: BotAcc & { start: string };
+  a2: BotAcc & { start: string | null;                    // start null = the trading day after account 1's first withdrawal…
+    afterDaily?: number | null };                         // …or, if set, after account 1's Nth daily withdrawal (they pay for it)
   milestones: BotMilestone[];
   logged?: Record<string, string>;                        // one-off withdrawals you marked as done → the day
+  v?: number;                                             // plan version (one-time updates)
 }
-export interface BotMilestone { id: string; acc: 1 | 2; at: number; kind: 'once' | 'daily'; amount: number }
+export interface BotAcc {
+  capital: number; strategy: string | null;
+  boost?: { pct: number; until: number } | null;          // a higher % a day until the balance first reaches `until`, then the plan's %
+}
+/** `until`: a daily withdrawal stops after the day this milestone (on the other account) is reached. */
+export interface BotMilestone { id: string; acc: 1 | 2; at: number; kind: 'once' | 'daily'; amount: number; until?: string | null }
 
 /** Pay split: on each pay (not tips), what the rest of the month still needs stays; the spare goes to these, in order. */
 export interface PaySplitPrefs {

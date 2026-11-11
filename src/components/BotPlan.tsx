@@ -1,20 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
-import { getPlan, nextMonday, planView, savePlan, usePlanView, type AccView } from '../lib/botPlan';
+import { defaultPlan, getPlan, nextMonday, PLAN_V, planView, savePlan, usePlanView, type AccView } from '../lib/botPlan';
 import { useStrategies } from '../lib/tracker';
 import { parseNum } from '../sheets/AccountEdit';
 import { ease, Segmented, Sheet, toast } from './ui';
 import { getState } from '../lib/store';
-import type { BotMilestone, BotPlan } from '../lib/types';
+import type { BotAcc, BotMilestone, BotPlan } from '../lib/types';
 
 const days = (a: string, b: string) => Math.round((fromISO(b).getTime() - fromISO(a).getTime()) / 864e5);
 const until = (date: string, today: string) => { const n = days(today, date); return n <= 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`; };
 const label = (m: BotMilestone) => (m.kind === 'once' ? `Withdraw ${money(m.amount)}` : `${money(m.amount)} a day`);
 const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
 const when = (iso: string) => `${weekday.format(fromISO(iso))} ${shortDate(iso)}`;
+const pace = (p: BotPlan) => (p.a1.boost ? `${p.a1.boost.pct}% a trading day to ${money(p.a1.boost.until)}, then ${p.pct}%` : `${p.pct}% a trading day`);
 
 /** Tracker → Trading: the bot's plan — check in when you buy it, then the milestones count down. */
 export function BotPlanCard() {
@@ -24,6 +25,13 @@ export function BotPlanCard() {
   const today = todayISO();
   const { plan } = v;
   const acc1 = v.accs.find(a => a.acc === 1);
+  // once: the plan chosen on 11 Nov 2026 (plan B) — bought that day, starts Thu 12 Nov with 610 €; linked strategies stay
+  useEffect(() => {
+    if ((plan.v ?? 1) >= PLAN_V) return;
+    const b = defaultPlan();
+    savePlan({ ...b, bought: '2026-11-11', logged: {},
+      a1: { ...b.a1, capital: 610, start: '2026-11-12', strategy: plan.a1.strategy }, a2: { ...b.a2, strategy: plan.a2.strategy } });
+  }, [plan.v]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!plan.bought) {
     return (
@@ -33,7 +41,7 @@ export function BotPlanCard() {
             <Rocket size={18} style={{ color: 'var(--accent)', flex: 'none' }} />
             <div className="grow">
               <div className="small" style={{ fontWeight: 650 }}>Waiting for the bot</div>
-              <div className="tiny muted">At {plan.pct}% a trading day from {when(plan.a1.start)}:</div>
+              <div className="tiny muted">At {pace(plan)} from {when(plan.a1.start)}:</div>
             </div>
           </div>
           <Timeline v={v} today={today} compact />
@@ -53,7 +61,10 @@ export function BotPlanCard() {
       <motion.div className="card" style={{ padding: 14, marginBottom: 12 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }}>
         <div className="row" style={{ gap: 10, marginBottom: 10 }}>
           <Rocket size={18} style={{ color: 'var(--accent)', flex: 'none' }} />
-          <span className="grow bold">Bot plan</span>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="bold">Bot plan</div>
+            <div className="tiny muted">{pace(plan)}</div>
+          </div>
           <button className="iconbtn" style={{ width: 32, height: 32 }} aria-label="Plan settings" onClick={() => setSettings(true)}><Settings2 size={17} /></button>
         </div>
 
@@ -136,7 +147,8 @@ function Timeline({ v, today, compact }: { v: ReturnType<typeof planView>; today
             const h = byId.get(m.id);
             const acc = v.accs.find(a => a.acc === m.acc);
             const reached = acc?.actual != null && acc.actual >= m.at;
-            return <Row icon={h?.logged ? <Check size={14} /> : dot} title={label(m)} sub={`account ${m.acc} at ${money(m.at)}`} date={it.date} today={today} done={!!h?.logged}
+            const stop = m.kind === 'daily' && m.until ? v.plan.milestones.find(x => x.id === m.until) : null;
+            return <Row icon={h?.logged ? <Check size={14} /> : dot} title={label(m)} sub={`account ${m.acc} at ${money(m.at)}${stop ? ` · until account ${stop.acc} at ${money(stop.at)}` : ''}`} date={it.date} today={today} done={!!h?.logged}
               action={!compact && m.kind === 'once' && !h?.logged && reached ? { label: 'Done', run: () => markDone(m) } : undefined} />;
           })();
         return <motion.div key={it.key} layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25, ease, delay: i * 0.05 }}>{body}</motion.div>;
@@ -180,7 +192,7 @@ function Setup({ close }: { close: () => void }) {
   const [pct, setPct] = useState(String(p.pct));
   const [strategy, setStrategy] = useState(p.a1.strategy ?? '');
   const save = () => {
-    savePlan({ bought: todayISO(), pct: Math.max(0.1, parseNum(pct)), a1: { capital: Math.max(1, parseNum(capital)), start, strategy: strategy || null } });
+    savePlan({ bought: todayISO(), pct: Math.max(0.1, parseNum(pct)), a1: { ...p.a1, capital: Math.max(1, parseNum(capital)), start, strategy: strategy || null } });
     close();
     toast('Here we go');
   };
@@ -219,14 +231,17 @@ function Settings({ close }: { close: () => void }) {
   const [c2, setC2] = useState(String(p.a2.capital));
   const [s2, setS2] = useState(p.a2.start ?? '');
   const [st2, setSt2] = useState(p.a2.strategy ?? '');
+  const [b1, setB1] = useState(boostEdit(p.a1));
+  const [b2, setB2] = useState(boostEdit(p.a2));
+  const [after, setAfter] = useState(p.a2.afterDaily != null ? String(p.a2.afterDaily) : '');
   const [ms, setMs] = useState<MsEdit[]>(p.milestones.map(m => ({ ...m, at: String(m.at), amount: String(m.amount) })));
   const set = (id: string, patch: Partial<MsEdit>) => setMs(l => l.map(m => (m.id === id ? { ...m, ...patch } : m)));
   const save = () => {
     savePlan({
       pct: Math.max(0.1, parseNum(pct)),
-      a1: { capital: Math.max(1, parseNum(c1)), start: s1, strategy: st1 || null },
-      a2: { capital: Math.max(0, parseNum(c2)), start: s2 || null, strategy: st2 || null },
-      milestones: ms.filter(m => parseNum(m.at) > 0).map(m => ({ ...m, at: parseNum(m.at), amount: Math.max(0, parseNum(m.amount)) })),
+      a1: { capital: Math.max(1, parseNum(c1)), start: s1, strategy: st1 || null, boost: boostSave(b1) },
+      a2: { capital: Math.max(0, parseNum(c2)), start: s2 || null, strategy: st2 || null, boost: boostSave(b2), afterDaily: after.trim() === '' ? null : Math.max(0, Math.round(parseNum(after))) },
+      milestones: ms.filter(m => parseNum(m.at) > 0).map(m => ({ ...m, at: parseNum(m.at), amount: Math.max(0, parseNum(m.amount)), until: m.kind === 'daily' ? m.until ?? null : null })),
     });
     close();
   };
@@ -239,6 +254,7 @@ function Settings({ close }: { close: () => void }) {
         <div className="field grow"><label>Capital (€)</label><input className="input num" inputMode="decimal" value={c1} onChange={e => setC1(e.target.value)} /></div>
         <div className="field grow"><label>Starts</label><input className="input" type="date" value={s1} onChange={e => setS1(e.target.value)} /></div>
       </div>
+      <BoostFields value={b1} onChange={setB1} />
       <StrategySelect value={st1} onChange={setSt1} strategies={strategies} />
 
       <div className="section-head"><span className="section-title">Account 2</span></div>
@@ -246,7 +262,9 @@ function Settings({ close }: { close: () => void }) {
         <div className="field grow"><label>Capital (€)</label><input className="input num" inputMode="decimal" value={c2} onChange={e => setC2(e.target.value)} /></div>
         <div className="field grow"><label>Starts</label><input className="input" type="date" value={s2} onChange={e => setS2(e.target.value)} /></div>
       </div>
-      <div className="tiny faint" style={{ padding: '0 4px 10px', marginTop: -6 }}>{s2 ? <button className="tiny" style={{ color: 'var(--accent)' }} onClick={() => setS2('')}>Back to: the trading day after the first withdrawal</button> : 'Empty: the trading day after account 1’s first withdrawal.'}</div>
+      <div className="tiny faint" style={{ padding: '0 4px 10px', marginTop: -6 }}>{s2 ? <button className="tiny" style={{ color: 'var(--accent)' }} onClick={() => setS2('')}>Back to: worked out from account 1</button> : after.trim() !== '' ? `Empty: after account 1’s daily withdrawal no. ${after} (they pay for it).` : 'Empty: the trading day after account 1’s first withdrawal.'}</div>
+      {!s2 && <div className="field"><label>Start after account 1’s Nth daily withdrawal (empty = after its first withdrawal)</label><input className="input num" inputMode="numeric" value={after} onChange={e => setAfter(e.target.value)} /></div>}
+      <BoostFields value={b2} onChange={setB2} />
       <StrategySelect value={st2} onChange={setSt2} strategies={strategies} />
 
       <div className="section-head"><span className="section-title">Milestones</span></div>
@@ -264,6 +282,13 @@ function Settings({ close }: { close: () => void }) {
                 <div className="field grow" style={{ margin: 0 }}><label>When it reaches (€)</label><input className="input num" inputMode="decimal" value={m.at} onChange={e => set(m.id, { at: e.target.value })} style={{ height: 44 }} /></div>
                 <div className="field grow" style={{ margin: 0 }}><label>{m.kind === 'once' ? 'Withdraw (€)' : 'Withdraw a day (€)'}</label><input className="input num" inputMode="decimal" value={m.amount} onChange={e => set(m.id, { amount: e.target.value })} style={{ height: 44 }} /></div>
               </div>
+              {m.kind === 'daily' && ms.some(x => x.acc !== m.acc) && (
+                <div className="field" style={{ margin: 0 }}><label>Stops when</label>
+                  <select className="input" value={m.until ?? ''} onChange={e => set(m.id, { until: e.target.value || null })} style={{ height: 44 }}>
+                    <option value="">Never</option>
+                    {ms.filter(x => x.acc !== m.acc).map(x => <option key={x.id} value={x.id}>account {x.acc} reaches {money(parseNum(x.at))}</option>)}
+                  </select></div>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -274,6 +299,20 @@ function Settings({ close }: { close: () => void }) {
         <button className="btn" onClick={save}>Save</button>
         <button className="btn secondary" onClick={() => { savePlan({ bought: null, logged: {} }); close(); }}>Back to waiting for the bot</button>
       </div>
+    </div>
+  );
+}
+
+type BoostEdit = { pct: string; until: string };
+const boostEdit = (a: BotAcc): BoostEdit => ({ pct: a.boost ? String(a.boost.pct) : '', until: a.boost ? String(a.boost.until) : '' });
+const boostSave = (b: BoostEdit) => (parseNum(b.pct) > 0 && parseNum(b.until) > 0 ? { pct: parseNum(b.pct), until: parseNum(b.until) } : null);
+
+/** A higher % a day until the account first reaches an amount (empty = the plan's % all along). */
+function BoostFields({ value, onChange }: { value: BoostEdit; onChange: (v: BoostEdit) => void }) {
+  return (
+    <div className="row" style={{ gap: 8 }}>
+      <div className="field grow"><label>Higher % a day</label><input className="input num" inputMode="decimal" placeholder="—" value={value.pct} onChange={e => onChange({ ...value, pct: e.target.value })} /></div>
+      <div className="field grow"><label>Until it reaches (€)</label><input className="input num" inputMode="decimal" placeholder="—" value={value.until} onChange={e => onChange({ ...value, until: e.target.value })} /></div>
     </div>
   );
 }
