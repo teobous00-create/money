@@ -175,6 +175,7 @@ export interface BotPlan {
   milestones: BotMilestone[];
   logged?: Record<string, string>;                        // one-off withdrawals you marked as done → the day
   v?: number;                                             // plan version (one-time updates)
+  lotPer?: number;                                        // € of balance per 0.01 lot at the plan's % (default 300); scales with the % that day
 }
 export interface BotAcc {
   capital: number; strategy: string | null;

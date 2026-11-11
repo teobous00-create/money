@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Check, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
 import { useStore } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
-import { defaultPlan, getPlan, nextMonday, PLAN_V, planView, savePlan, usePlanView, type AccView } from '../lib/botPlan';
+import { defaultPlan, getPlan, isTradingDay, nextMonday, nextTradingDay, PLAN_V, planView, savePlan, usePlanView, type AccView } from '../lib/botPlan';
 import { useStrategies } from '../lib/tracker';
 import { parseNum } from '../sheets/AccountEdit';
 import { ease, Segmented, Sheet, toast } from './ui';
@@ -85,6 +85,7 @@ export function BotPlanCard() {
           </div>
         ) : <div className="small muted" style={{ marginBottom: 10 }}>Every milestone is behind you.</div>}
 
+        <TodayLot v={v} today={today} />
         {acc1?.actual != null && <Pace a={acc1} />}
         {acc1 && <PlanCurve a={acc1} today={today} />}
         <Timeline v={v} today={today} />
@@ -93,6 +94,29 @@ export function BotPlanCard() {
     </>
   );
 }
+
+/** Today's lot per running account, from its balance and the day's target %. Weekends: the next trading day's. */
+function TodayLot({ v, today }: { v: ReturnType<typeof planView>; today: string }) {
+  let day = nextOpen(today);
+  let accs = v.accs.filter(a => a.today && a.start <= day);
+  if (!accs.length) { day = nextTradingDay(day); accs = v.accs.filter(a => a.today && a.start <= day); }   // e.g. the night before the start
+  if (!accs.length) return null;
+  const lot = (n: number) => n.toFixed(2);
+  return (
+    <div className="card" style={{ padding: '10px 12px', marginBottom: 10, background: 'var(--surface-2)', boxShadow: 'none' }}>
+      <div className="tiny muted" style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>{day === today ? 'Today' : when(day)}</div>
+      {accs.map(a => (
+        <div key={a.acc} className="row" style={{ alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+          <span className="num" style={{ fontSize: 20, fontWeight: 750 }}>{lot(a.today!.lot)} lot</span>
+          <span className="small" style={{ fontWeight: 650, color: 'var(--accent)' }}>{a.today!.pct}% target</span>
+          <span className="grow" />
+          <span className="tiny muted num" style={{ textAlign: 'right' }}>{v.accs.length > 1 ? `acc ${a.acc} · ` : ''}{money(a.today!.bal)}{a.today!.real ? '' : ' · plan'}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+const nextOpen = (iso: string) => (isTradingDay(iso) ? iso : nextTradingDay(iso));
 
 function Pace({ a }: { a: AccView }) {
   const d = a.daysAhead ?? 0;
@@ -225,6 +249,7 @@ function Settings({ close }: { close: () => void }) {
   const p: BotPlan = useStore(s => getPlan(s));
   const strategies = useStrategies();
   const [pct, setPct] = useState(String(p.pct));
+  const [per, setPer] = useState(String(p.lotPer ?? 300));
   const [c1, setC1] = useState(String(p.a1.capital));
   const [s1, setS1] = useState(p.a1.start);
   const [st1, setSt1] = useState(p.a1.strategy ?? '');
@@ -238,7 +263,7 @@ function Settings({ close }: { close: () => void }) {
   const set = (id: string, patch: Partial<MsEdit>) => setMs(l => l.map(m => (m.id === id ? { ...m, ...patch } : m)));
   const save = () => {
     savePlan({
-      pct: Math.max(0.1, parseNum(pct)),
+      pct: Math.max(0.1, parseNum(pct)), lotPer: parseNum(per) > 0 ? parseNum(per) : 300,
       a1: { capital: Math.max(1, parseNum(c1)), start: s1, strategy: st1 || null, boost: boostSave(b1) },
       a2: { capital: Math.max(0, parseNum(c2)), start: s2 || null, strategy: st2 || null, boost: boostSave(b2), afterDaily: after.trim() === '' ? null : Math.max(0, Math.round(parseNum(after))) },
       milestones: ms.filter(m => parseNum(m.at) > 0).map(m => ({ ...m, at: parseNum(m.at), amount: Math.max(0, parseNum(m.amount)), until: m.kind === 'daily' ? m.until ?? null : null })),
@@ -247,7 +272,10 @@ function Settings({ close }: { close: () => void }) {
   };
   return (
     <div className="sheet-body">
-      <div className="field"><label>% a trading day</label><input className="input num" inputMode="decimal" value={pct} onChange={e => setPct(e.target.value)} /></div>
+      <div className="row" style={{ gap: 8 }}>
+        <div className="field grow"><label>% a trading day</label><input className="input num" inputMode="decimal" value={pct} onChange={e => setPct(e.target.value)} /></div>
+        <div className="field grow"><label>0.01 lot per (€) at that %</label><input className="input num" inputMode="decimal" value={per} onChange={e => setPer(e.target.value)} /></div>
+      </div>
 
       <div className="section-head"><span className="section-title">Account 1</span></div>
       <div className="row" style={{ gap: 8 }}>

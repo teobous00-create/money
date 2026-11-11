@@ -42,7 +42,7 @@ export const getPlan = (s: State): BotPlan => s.prefs.botPlan ?? defaultPlan();
 export function savePlan(patch: Partial<BotPlan>) { setPrefs({ botPlan: { ...getPlan(getState()), ...patch } }); }
 
 export interface Hit { id: string; date: string | null; logged?: string }
-interface Sim { curve: Array<{ date: string; bal: number; lr: number }>; hits: Map<string, string> }
+interface Sim { curve: Array<{ date: string; bal: number; lr: number; pct: number }>; hits: Map<string, string> }
 interface Rate { pct: number; boost: { pct: number; until: number } | null }   // boost null = already over (or none)
 
 /** Grow from `bal` on the trading days from `from` on; milestones in `done` are treated as already reached.
@@ -67,7 +67,7 @@ function simulate(bal: number, from: string, rate: Rate, ms: BotMilestone[], don
       hits.set(m.id, d);
       if (m.kind === 'once') bal -= m.amount; else if (!(stop.get(m.id) && d >= stop.get(m.id)!)) live.add(m.id);   // a daily one starts tomorrow
     }
-    curve.push({ date: d, bal: round2(Math.max(0, bal)), lr: Math.log(1 + pct / 100) });
+    curve.push({ date: d, bal: round2(Math.max(0, bal)), lr: Math.log(1 + pct / 100), pct });
     if (bal <= 0) break;
     n++;
     if (hits.size === pending.length && n > 10 && curve.length > 30) break;
@@ -82,6 +82,7 @@ export interface AccView {
   planNow: number | null;          // where the plan says it should be today
   daysAhead: number | null;        // + ahead of plan, − behind (trading days at the plan's pace)
   curvePlan: Sim['curve']; curveReal: Array<{ date: string; bal: number }>;
+  today: { bal: number; pct: number; lot: number; real: boolean } | null;   // today's trading day: balance to trade on, target %, lot
 }
 export interface PlanView { plan: BotPlan; hits: Hit[]; accs: AccView[]; next: (BotMilestone & { date: string | null }) | null }
 
@@ -107,6 +108,7 @@ export function planView(s: State, today = todayISO()): PlanView {
     let actual: number | null = null, planNow: number | null = null, daysAhead: number | null = null;
     const curveReal: AccView['curveReal'] = [];
     let sim = planSim;
+    let tday: { bal: number; pct: number; real: boolean } | null = null;
     if (days) {
       // real balance: capital + P&L − the one-off withdrawals you marked − the daily ones once their milestone is reached
       let b = cfg.capital, growth = 0, boostOver = !boost;
@@ -142,11 +144,17 @@ export function planView(s: State, today = todayISO()): PlanView {
       if (s0 < today) s0 = isTradingDay(today) ? today : nextTradingDay(today);
       for (const [id, d] of reached) hits.set(id, d);
       sim = simulate(Math.max(0, actual), s0, { pct: plan.pct, boost: boostOver ? null : boost }, mine, done, stop);
+      tday = { bal: round2(Math.max(0, actual)), pct: boostOver || !boost ? plan.pct : boost.pct, real: true };
       actual = round2(b);
       for (const m of mine) if (done.has(m.id) && !hits.has(m.id)) hits.set(m.id, logged[m.id] ?? planSim.hits.get(m.id) ?? today);
     }
     for (const m of mine) if (!hits.has(m.id)) hits.set(m.id, sim.hits.get(m.id) ?? null);
-    const view: AccView = { acc, start, capital: cfg.capital, started: today >= start, actual, planNow, daysAhead, curvePlan: planSim.curve, curveReal };
+    if (!tday) {   // from the plan: the balance it opens today with, at that day's %
+      const i = planSim.curve.findIndex(c => c.date >= today);
+      if (i >= 0) tday = { bal: i > 0 ? planSim.curve[i - 1].bal : cfg.capital, pct: planSim.curve[i].pct, real: false };
+    }
+    const view: AccView = { acc, start, capital: cfg.capital, started: today >= start, actual, planNow, daysAhead, curvePlan: planSim.curve, curveReal,
+      today: tday ? { ...tday, lot: lotFor(tday.bal, tday.pct, plan) } : null };
     return { view, hits };
   };
 
@@ -175,6 +183,12 @@ export function planView(s: State, today = todayISO()): PlanView {
   const list: Hit[] = ms.map(m => ({ id: m.id, date: hits.get(m.id) ?? null, logged: logged[m.id] }));
   const upcoming = ms.map(m => ({ ...m, date: hits.get(m.id) ?? null })).filter(m => !logged[m.id] && m.date && m.date >= today).sort((a, b) => a.date!.localeCompare(b.date!));
   return { plan, hits: list, accs, next: upcoming[0] ?? null };
+}
+
+/** 0.01 lot per `lotPer` € at the plan's % — a higher % a day takes proportionally more lot; rounded down, at least 0.01. */
+export function lotFor(bal: number, pct: number, plan: BotPlan) {
+  const per = (plan.lotPer ?? 300) * plan.pct / pct;
+  return Math.max(0.01, Math.floor((bal / per) + 1e-9) / 100);
 }
 
 export function usePlanView(): PlanView {
