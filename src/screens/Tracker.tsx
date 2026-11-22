@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, Delete, Menu, Pencil, Plus, Settings2, Check, Sun, Moon, Wallet } from 'lucide-react';
 import { Segmented, Sheet, toast, ease } from '../components/ui';
 import { BotPlanCard } from '../components/BotPlan';
+import { openStrategyAccount } from '../lib/tradingCats';
 import { Sortable } from '../components/Sortable';
 import { useStore, put, putMany, getState } from '../lib/store';
 import { REMOTE } from '../lib/supabase';
@@ -1002,6 +1003,7 @@ function StrategyPicker({ open, onClose, selected, onSelect, startNew = false }:
 
 function StrategyForm({ s, onDone }: { s: Strategy | null; onDone: (id?: string) => void }) {
   const strategies = useStrategies();
+  const hasAccount = useStore(st => !!s && !!st.prefs.strategyAccounts?.[s.id]);
   const [name, setName] = useState(s?.name ?? '');
   const [color, setColor] = useState(s?.color ?? COLORS[(strategies.length * 5 + 5) % COLORS.length]);
   const [goal, setGoal] = useState(s?.goal ? num(s.goal).replace(/\./g, '') : '');
@@ -1020,6 +1022,7 @@ function StrategyForm({ s, onDone }: { s: Strategy | null; onDone: (id?: string)
         <div className="pick-grid">{COLORS.map(c => <button key={c} className={c === color ? 'on' : ''} style={{ background: c }} onClick={() => setColor(c)} aria-label={c} />)}</div>
       </div>
       <button className="btn" onClick={save}>Save</button>
+      {s && !hasAccount && <button className="btn secondary" style={{ marginTop: 10 }} onClick={() => { const id = openStrategyAccount(s.id); onDone(); if (id) setUi({ account: { id } }); }}><Wallet size={18} />Open its account now</button>}
       {s && <button className="btn secondary" style={{ marginTop: 10 }} onClick={() => { put('strategies', { ...s, archived: true }); toast(`${s.name} archived · results kept`); onDone(); }}><Archive size={18} />Archive strategy</button>}
     </div>
   );

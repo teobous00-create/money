@@ -165,6 +165,7 @@ export interface Prefs {
   botPlan?: BotPlan;                // the trading bot's growth plan and milestones (Tracker → Trading)
   accountLinks?: Record<string, AccountLink>;   // trading account id → the strategy whose daily P&L its balance follows
   tradingCats?: { root: string | null; byStrategy: Record<string, string> };   // Income › Trading and its subcategory per strategy
+  strategyAccounts?: Record<string, string>;      // strategy id → its own trading account ('' = asked to open it, not made yet)
 }
 
 /** A bot's growth plan: compounding at `pct`/trading day, with withdrawal milestones, on one or two accounts. */

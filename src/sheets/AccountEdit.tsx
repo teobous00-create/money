@@ -4,7 +4,7 @@ import { ArrowLeftRight, Minus, Plus, Trash2 } from 'lucide-react';
 import { Sheet, Segmented, IconBox, Icon, Toggle, toast, ease } from '../components/ui';
 import { useUi, setUi } from '../lib/ui';
 import { useStore, put, remove, restore, getState, setPrefs } from '../lib/store';
-import { useBalances, useAccounts } from '../lib/calc';
+import { useBalances, useAccounts, linkedPnl } from '../lib/calc';
 import { ICON_NAMES, COLORS } from '../lib/icons';
 import { money, num, round2, uuid } from '../lib/format';
 import type { Account, AccountKind } from '../lib/types';
@@ -29,7 +29,10 @@ export function AccountSheet() {
 function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
   const bal = useBalances();
   const accounts = useAccounts();
-  const current = acc ? bal.get(acc.id) ?? 0 : 0;
+  // a trading account that follows a strategy: you set the capital you put in; the P&L comes on top by itself
+  const linked = useStore(s => !!acc && !!s.prefs.accountLinks?.[acc.id]);
+  const pnlPart = useStore(s => (acc && linked ? linkedPnl(acc.id, s.prefs.accountLinks, s.pnl, undefined, s.prefs.botPlan) : 0));
+  const current = acc ? round2((bal.get(acc.id) ?? 0) - pnlPart) : 0;
   const [name, setName] = useState(acc?.name ?? '');
   const [kind, setKind] = useState<AccountKind>(acc?.kind ?? 'regular');
   const [icon, setIcon] = useState(acc?.icon ?? 'wallet');
@@ -91,9 +94,10 @@ function AccountForm({ acc, close }: { acc?: Account; close: () => void }) {
         <Segmented value={kind} onChange={setKind} options={[{ value: 'regular', label: 'Regular' }, { value: 'credit', label: 'Credit card' }, { value: 'savings', label: 'Savings' }]} />
       </div>
       <div className="field">
-        <label>{acc ? 'Current balance' : 'Starting balance'}</label>
+        <label>{linked ? 'Capital in (what you put in, less what came back)' : acc ? 'Current balance' : 'Starting balance'}</label>
         <input className="input num" inputMode="decimal" value={balance} onChange={e => setBalance(e.target.value)} placeholder="0" />
-        {acc && parseNum(balance) !== current && <span className="tiny muted" style={{ paddingLeft: 4 }}>Balance will be corrected from {money(current)} without adding a transaction.</span>}
+        {linked && <span className="tiny muted" style={{ paddingLeft: 4 }}>The strategy's P&L is added on top by itself: {money(round2(pnlPart))} so far.</span>}
+        {acc && parseNum(balance) !== current && <span className="tiny muted" style={{ paddingLeft: 4 }}>{linked ? 'Capital' : 'Balance'} will be corrected from {money(current)} without adding a transaction.</span>}
       </div>
       <AnimatePresence initial={false}>
         {kind === 'credit' && (
