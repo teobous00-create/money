@@ -176,7 +176,13 @@ export interface BotPlan {
   logged?: Record<string, string>;                        // one-off withdrawals you marked as done → the day
   v?: number;                                             // plan version (one-time updates)
   lotPer?: number;                                        // € of balance per 0.01 lot at the plan's % (default 300); scales with the % that day
+  weekly?: BotWeekly;                                     // v3: account 1 to the goal with a withdrawal on the last trading day of each week
+  outs?: BotOut[];                                        // withdrawals you made from account 1
+  spend?: Array<{ id: string; name: string; amount: number }>;   // what the withdrawals pay for, in order
 }
+/** On the last trading day of each week, withdraw down to the highest step the balance has passed (never a lower step than last time). */
+export interface BotWeekly { steps: number[]; goal: number; spendFrom: string }
+export interface BotOut { id: string; date: string; amount: number; step: number }
 export interface BotAcc {
   capital: number; strategy: string | null;
   boost?: { pct: number; until: number } | null;          // a higher % a day until the balance first reaches `until`, then the plan's %

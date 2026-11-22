@@ -739,7 +739,6 @@ function Trading() {
 
   return (
     <div>
-      <BotPlanCard />
       <Segmented value={mode} onChange={changeMode}
         options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'all', label: 'All time' }]} />
       <div style={{ marginTop: 10 }}>
@@ -806,6 +805,8 @@ function Trading() {
           )}
         </motion.div>
       </AnimatePresence>
+
+      <BotPlanCard />
 
       <PnlEntrySheet date={entry} sel={selected} onClose={() => setEntry(null)} />
       <StrategyPicker open={picker} onClose={() => setPicker(false)} selected={selected} onSelect={setSel} />
