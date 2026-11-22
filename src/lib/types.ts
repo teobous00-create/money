@@ -163,6 +163,7 @@ export interface Prefs {
   learned?: Record<string, string>;  // a word you said → the category you corrected it to (voice / quick entry)
   paySplit?: PaySplitPrefs;         // what to do with each pay once the month is covered
   botPlan?: BotPlan;                // the trading bot's growth plan and milestones (Tracker → Trading)
+  accountLinks?: Record<string, AccountLink>;   // trading account id → the strategy whose daily P&L its balance follows
 }
 
 /** A bot's growth plan: compounding at `pct`/trading day, with withdrawal milestones, on one or two accounts. */
@@ -179,10 +180,17 @@ export interface BotPlan {
   weekly?: BotWeekly;                                     // v3: account 1 to the goal with a withdrawal on the last trading day of each week
   outs?: BotOut[];                                        // withdrawals you made from account 1
   spend?: Array<{ id: string; name: string; amount: number }>;   // what the withdrawals pay for, in order
+  lastTo?: string | null;                                 // the bank account the last withdrawal went to
 }
 /** On the last trading day of each week, withdraw down to the highest step the balance has passed (never a lower step than last time). */
 export interface BotWeekly { steps: number[]; goal: number; spendFrom: string }
-export interface BotOut { id: string; date: string; amount: number; step: number }
+export interface BotOut {
+  id: string; date: string; amount: number; step: number;
+  received?: string | null;                               // the day it reached the bank (null = still pending)
+  to?: string | null; tx?: string | null;                 // the bank account and the transfer written then
+}
+/** A trading account whose balance follows a strategy's P&L (from `since`), on top of its own entries; `adj` evens it out at linking. */
+export interface AccountLink { strategy: string; since: string; adj: number }
 export interface BotAcc {
   capital: number; strategy: string | null;
   boost?: { pct: number; until: number } | null;          // a higher % a day until the balance first reaches `until`, then the plan's %

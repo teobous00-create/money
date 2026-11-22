@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
-import { useStore, getState } from '../lib/store';
+import { Check, Clock, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
+import { useStore, getState, setPrefs } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
-import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, logOut, nextMonday, PLAN_V, removeOut, savePlan, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
+import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, logOut, nextMonday, PLAN_V, planAccount, receiveOut, removeOut, savePlan, stepFor, unreceiveOut, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
+import { alive, computeBalances, useAccounts } from '../lib/calc';
 import { useStrategies } from '../lib/tracker';
 import { parseNum } from '../sheets/AccountEdit';
 import { ease, Sheet, toast } from './ui';
@@ -23,19 +24,33 @@ export function BotPlanCard() {
   const [setup, setSetup] = useState(false);
   const [settings, setSettings] = useState(false);
   const [logging, setLogging] = useState<WOut | null>(null);
+  const [receiving, setReceiving] = useState<WOut | null>(null);
   const today = todayISO();
   const { plan } = v;
 
   // once: the plan of 22 Nov 2026 — 10% a day to 10.000 € with Friday withdrawals down to round steps; no account 2,
-  // nothing after the goal; 0.01 lot per 300 €; the 75 € taken out on 21 Nov logged. Capital, start and strategy stay.
+  // nothing after the goal; 0.01 lot per 300 €. Capital, start and strategy stay.
+  // then (23 Nov): the 74,51 € withdrawn on 21 Nov, still on its way to the bank, and the bot's trading account (Eightcup)
+  // linked to its strategy so its balance moves with the daily P&L (evened out to the plan's balance at linking).
   useEffect(() => {
-    if ((plan.v ?? 1) >= PLAN_V) return;
-    savePlan({
-      v: PLAN_V, bought: plan.bought ?? '2026-11-11', pct: 10, lotPer: 300,
-      a1: { ...plan.a1, boost: null }, a2: { capital: 0, start: null, strategy: null, boost: null },
-      milestones: [], logged: {}, weekly: DEFAULT_WEEKLY, spend: DEFAULT_SPEND,
-      outs: [{ id: 'o-1121', date: '2026-11-21', amount: 75, step: 0 }],
-    });
+    const v0 = plan.v ?? 1;
+    if (v0 >= PLAN_V) return;
+    let p: BotPlan = plan;
+    if (v0 < 3) p = { ...p, v: 3, bought: p.bought ?? '2026-11-11', pct: 10, lotPer: 300, a1: { ...p.a1, boost: null },
+      a2: { capital: 0, start: null, strategy: null, boost: null }, milestones: [], logged: {}, weekly: DEFAULT_WEEKLY, spend: DEFAULT_SPEND, outs: [] };
+    const outs = (p.outs ?? []).some(o => o.date === '2026-11-21') ? p.outs ?? [] : [...(p.outs ?? []), { id: 'o-1121', date: '2026-11-21', amount: 74.51, step: 0, received: null }];
+    savePlan({ ...p, v: PLAN_V, outs });
+    const st = getState();
+    const strat = p.a1.strategy;
+    if (strat && !Object.values(st.prefs.accountLinks ?? {}).some(l => l.strategy === strat)) {
+      const tradingIds = st.prefs.tradingAccounts ?? [];
+      const accs = alive(st.accounts).filter(a => !a.archived);
+      const acc = accs.find(a => /eight/i.test(a.name) && tradingIds.includes(a.id)) ?? accs.find(a => /eight/i.test(a.name));
+      if (acc) {
+        const book = computeBalances([acc], alive(st.transactions)).get(acc.id) ?? acc.opening_balance;
+        setPrefs({ accountLinks: { ...(st.prefs.accountLinks ?? {}), [acc.id]: { strategy: strat, since: p.a1.start, adj: Math.round((p.a1.capital - book) * 100) / 100 } } });
+      }
+    }
   }, [plan.v]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!plan.bought) {
@@ -71,6 +86,7 @@ export function BotPlanCard() {
             <div className="bold">Bot plan</div>
             <div className="tiny muted">{caption(plan)}</div>
           </div>
+          <button className="chip on" style={{ height: 30, gap: 4 }} onClick={() => setLogging(next && next.date <= today ? next : NEW)}><Plus size={14} />Withdrawal</button>
           <button className="iconbtn" style={{ width: 32, height: 32 }} aria-label="Plan settings" onClick={() => setSettings(true)}><Settings2 size={17} /></button>
         </div>
 
@@ -100,11 +116,12 @@ export function BotPlanCard() {
         <TodayLot v={v} today={today} />
         {v.actual != null && <Pace v={v} />}
         <PlanCurve v={v} />
-        <Fridays v={v} today={today} onLog={setLogging} />
+        <Fridays v={v} today={today} onLog={setLogging} onReceive={setReceiving} />
         <SpendList v={v} today={today} />
       </motion.div>
       <Sheet open={settings} onClose={() => setSettings(false)} title="Bot plan">{settings && <Settings close={() => setSettings(false)} />}</Sheet>
-      <Sheet open={!!logging} onClose={() => setLogging(null)} title="Withdrawal">{logging && <LogOut out={logging} close={() => setLogging(null)} />}</Sheet>
+      <Sheet open={!!logging} onClose={() => setLogging(null)} title="Withdrawal">{logging && <LogOut out={logging} v={v} close={() => setLogging(null)} />}</Sheet>
+      <Sheet open={!!receiving} onClose={() => setReceiving(null)} title="Received">{receiving && <Receive out={receiving} close={() => setReceiving(null)} />}</Sheet>
     </>
   );
 }
@@ -162,21 +179,29 @@ function PlanCurve({ v }: { v: WeekView }) {
   );
 }
 
-/** Every week's withdrawal up to the goal: the ones you made (ticked) and the ones ahead. */
-function Fridays({ v, today, onLog }: { v: WeekView; today: string; onLog: (o: WOut) => void }) {
+/** Every week's withdrawal up to the goal: the ones you made (pending until they reach the bank, then ticked) and the ones ahead. */
+function Fridays({ v, today, onLog, onReceive }: { v: WeekView; today: string; onLog: (o: WOut) => void; onReceive: (o: WOut) => void }) {
   const goal = v.weekly.goal;
   const goalRow = v.goalDate;
+  const accounts = useStore(s => s.accounts);
   return (
     <div style={{ marginTop: 4 }}>
       <div className="tiny muted" style={{ ...upper, margin: '6px 0 2px' }}>Withdrawals</div>
-      {v.outs.map((o, i) => (
-        <motion.div key={o.date + (o.id ?? '')} layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25, ease, delay: Math.min(i, 12) * 0.04 }}>
-          <Row icon={o.real ? <Check size={14} /> : <Dot />} done={o.real}
-            title={`Withdraw ${money(o.amount)}`} sub={o.step ? `leave ${money(o.step)}${o.step >= goal && o.date === goalRow ? ' · goal reached' : ''}` : undefined}
-            date={o.date} today={today}
-            action={!o.real && o.date <= today && v.linked ? { label: 'Done', run: () => onLog(o) } : undefined} />
-        </motion.div>
-      ))}
+      {v.outs.map((o, i) => {
+        const pending = o.real && !o.received;
+        const leave = o.step ? `leave ${money(o.step)}${o.step >= goal && o.date === goalRow ? ' · goal reached' : ''}` : '';
+        const sub = pending ? ['pending', leave].filter(Boolean).join(' · ')
+          : o.real ? [`in ${accounts[o.to ?? '']?.name ?? 'the bank'} ${when(o.received!)}`, leave].filter(Boolean).join(' · ')
+          : leave || undefined;
+        const action = pending ? { label: 'Received', run: () => onReceive(o) }
+          : !o.real && o.date <= today && v.linked ? { label: 'Done', run: () => onLog(o) } : undefined;
+        return (
+          <motion.div key={o.date + (o.id ?? '')} layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25, ease, delay: Math.min(i, 12) * 0.04 }}>
+            <Row icon={o.real && o.received ? <Check size={14} /> : pending ? <Clock size={13} /> : <Dot />} done={o.real && !!o.received}
+              title={`Withdraw ${money(o.amount)}`} sub={sub} date={o.date} today={today} action={action} />
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
@@ -226,25 +251,61 @@ function Row({ icon, title, sub, date, today, done, action }: { icon: React.Reac
 
 // ---------------------------------------------------------------- logging, check-in and settings
 
-/** Log a withdrawal: the suggested amount and step, editable. */
-function LogOut({ out, close }: { out: WOut; close: () => void }) {
-  const [amount, setAmount] = useState(String(out.amount));
-  const [date, setDate] = useState(out.date > todayISO() ? todayISO() : out.date);
+const NEW: WOut = { date: '', amount: 0, step: 0, real: false };
+
+/** Log a withdrawal: the plan's amount when it's due, or any amount any day. It stays pending until it reaches the bank. */
+function LogOut({ out, v, close }: { out: WOut; v: WeekView; close: () => void }) {
+  const fresh = !out.date;
+  const [amount, setAmount] = useState(fresh ? '' : String(out.amount));
+  const [date, setDate] = useState(fresh || out.date > todayISO() ? todayISO() : out.date);
   const save = () => {
     const a = parseNum(amount);
     if (!(a > 0)) return;
-    const id = logOut({ date, amount: a, step: out.step });
+    const last = Math.max(0, ...(v.plan.outs ?? []).map(o => o.step));
+    const step = !fresh && Math.abs(a - out.amount) < 0.01 ? out.step
+      : v.actual != null ? (stepFor(v.actual - a + 0.005, last, v.weekly.steps) ?? last) : last;
+    const id = logOut({ date, amount: Math.round(a * 100) / 100, step, received: null });
     close();
-    toast(`Withdrew ${money(a)}`, { label: 'Undo', run: () => removeOut(id) });
+    toast(`Withdrew ${money(a)} · pending`, { label: 'Undo', run: () => removeOut(id) });
   };
   return (
     <div className="sheet-body">
-      <div className="small muted" style={{ marginBottom: 12 }}>The plan says {money(out.amount)}, leaving {money(out.step)} in the account.</div>
+      {!fresh && <div className="small muted" style={{ marginBottom: 12 }}>The plan says {money(out.amount)}, leaving {money(out.step)} in the account.</div>}
       <div className="row" style={{ gap: 8 }}>
-        <div className="field grow"><label>Withdrawn (€)</label><input className="input num" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} /></div>
+        <div className="field grow"><label>Withdrawn (€)</label><input className="input num" inputMode="decimal" autoFocus={fresh} value={amount} onChange={e => setAmount(e.target.value)} /></div>
         <div className="field grow"><label>On</label><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
       </div>
+      <div className="tiny faint" style={{ padding: '0 4px 10px', marginTop: -6 }}>It counts against the bot right away, and stays pending until you mark it received in the bank.</div>
       <button className="btn" style={{ marginTop: 8 }} onClick={save}>Save</button>
+    </div>
+  );
+}
+
+/** It reached the bank: pick the account (the last one by default); a transfer from the bot's account is written that day. */
+function Receive({ out, close }: { out: WOut; close: () => void }) {
+  const accounts = useAccounts();
+  const tradingIds = useStore(s => s.prefs.tradingAccounts) ?? [];
+  const lastTo = useStore(s => getPlan(s).lastTo);
+  const from = planAccount();
+  const banks = accounts.filter(a => !a.archived && a.kind !== 'credit' && !tradingIds.includes(a.id) && a.id !== from);
+  const [to, setTo] = useState((lastTo && banks.some(a => a.id === lastTo) ? lastTo : banks[0]?.id) ?? '');
+  const [date, setDate] = useState(todayISO());
+  const save = () => {
+    if (!to || !out.id) return;
+    receiveOut(out.id, to, date);
+    close();
+    const id = out.id;
+    toast(`${money(out.amount)} in ${banks.find(a => a.id === to)?.name ?? 'the bank'}`, { label: 'Undo', run: () => unreceiveOut(id) });
+  };
+  return (
+    <div className="sheet-body">
+      <div className="small muted" style={{ marginBottom: 12 }}>{money(out.amount)} withdrawn {when(out.date)}.{from ? '' : ' No trading account is linked to the bot, so no transfer is written.'}</div>
+      <div className="field"><label>Into</label>
+        <select className="input" value={to} onChange={e => setTo(e.target.value)}>
+          {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select></div>
+      <div className="field"><label>On</label><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+      <button className="btn" style={{ marginTop: 8 }} onClick={save}>Received</button>
     </div>
   );
 }
@@ -351,7 +412,7 @@ function Settings({ close }: { close: () => void }) {
         <div className="list">
           {outs.map(o => (
             <div key={o.id} className="list-row" style={{ gap: 8 }}>
-              <span className="grow small">{when(o.date)}</span>
+              <span className="grow small">{when(o.date)}<span className="tiny muted">{o.received ? ` · received ${shortDate(o.received)}` : ' · pending'}</span></span>
               <span className="small num" style={{ fontWeight: 650 }}>{money(o.amount)}</span>
               <button className="iconbtn" style={{ width: 36, height: 36, flex: 'none' }} aria-label="Remove withdrawal" onClick={() => removeOut(o.id)}><Trash2 size={16} /></button>
             </div>

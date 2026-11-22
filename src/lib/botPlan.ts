@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { useStore, getState, setPrefs, type State } from './store';
+import { useStore, getState, setPrefs, put, remove, type State } from './store';
 import { alive } from './calc';
-import { addDays, fromISO, round2, toISO, todayISO } from './format';
+import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
 import type { BotOut, BotPlan, BotWeekly, Pnl } from './types';
 
 /**
@@ -28,7 +28,7 @@ export const isWithdrawDay = (iso: string) => {
 };
 export const ARRIVE_DAYS = 7;
 
-export const PLAN_V = 3;
+export const PLAN_V = 4;
 export const DEFAULT_WEEKLY: BotWeekly = { steps: [1100, 1500, 2000, 3000, 4000, 5000, 7000, 10000], goal: 10000, spendFrom: '2026-11-23' };
 export const DEFAULT_SPEND = [
   { id: 's1', name: 'Δόσεις πιστωτικής', amount: 350 },
@@ -55,7 +55,7 @@ export function stepFor(bal: number, last: number, steps: number[]) {
   return s > 0 && s >= last ? s : null;
 }
 
-export interface WOut { date: string; amount: number; step: number; real: boolean; id?: string }
+export interface WOut { date: string; amount: number; step: number; real: boolean; id?: string; received?: string | null; to?: string | null }
 export interface SpendView { id: string; name: string; amount: number; cum: number; date: string | null; arrives: string | null; done: boolean }
 export interface WeekView {
   plan: BotPlan; weekly: BotWeekly; started: boolean; linked: boolean;
@@ -151,7 +151,7 @@ export function weekView(s: State, today = todayISO()): WeekView {
     d = nextTradingDay(d);
   }
 
-  const outs: WOut[] = [...outsLogged.map(o => ({ date: o.date, amount: o.amount, step: o.step, real: true, id: o.id })), ...proj].sort((a, b) => a.date.localeCompare(b.date));
+  const outs: WOut[] = [...outsLogged.map(o => ({ date: o.date, amount: o.amount, step: o.step, real: true, id: o.id, received: o.received ?? null, to: o.to ?? null })), ...proj].sort((a, b) => a.date.localeCompare(b.date));
   const next = proj.find(o => o.date >= today) ?? null;
 
   // the spend list against the withdrawals (from spendFrom), each covered on the day the running total passes it
@@ -188,7 +188,40 @@ export function logOut(o: Omit<BotOut, 'id'> & { id?: string }) {
 }
 export function removeOut(id: string) {
   const p = getPlan(getState());
+  const o = (p.outs ?? []).find(x => x.id === id);
+  if (o?.tx) remove('transactions', o.tx);
   savePlan({ outs: (p.outs ?? []).filter(x => x.id !== id) });
+}
+
+/** The trading account linked to the plan's strategy (its balance follows the bot), if any. */
+export function planAccount(s: State = getState()): string | null {
+  const strat = getPlan(s).a1.strategy;
+  if (!strat) return null;
+  const hit = Object.entries(s.prefs.accountLinks ?? {}).find(([id, l]) => l.strategy === strat && s.accounts[id] && !s.accounts[id].deleted_at);
+  return hit ? hit[0] : null;
+}
+
+/** A withdrawal reached the bank: write the transfer from the bot's account to `to` on `date`, and mark it received. */
+export function receiveOut(id: string, to: string, date: string) {
+  const s = getState();
+  const p = getPlan(s);
+  const o = (p.outs ?? []).find(x => x.id === id);
+  if (!o) return;
+  const from = planAccount(s);
+  let tx: string | null = null;
+  if (from && from !== to) {
+    tx = uuid();
+    put('transactions', { id: tx, owner_id: '', type: 'transfer', date, amount: o.amount, account_id: from, to_account_id: to,
+      category_id: null, note: 'Bot withdrawal', recurring_id: null, seq: Date.now() % 100000 });
+  }
+  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: date, to, tx } : x)), lastTo: to });
+}
+export function unreceiveOut(id: string) {
+  const p = getPlan(getState());
+  const o = (p.outs ?? []).find(x => x.id === id);
+  if (!o) return;
+  if (o.tx) remove('transactions', o.tx);
+  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: null, to: null, tx: null } : x)) });
 }
 
 export function useWeekView(): WeekView {

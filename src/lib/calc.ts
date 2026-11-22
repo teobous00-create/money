@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useStore, type State } from './store';
 import { range, type Period } from './period';
-import type { Account, Category, Recurring, Tx } from './types';
+import type { Account, AccountLink, Category, Pnl, Recurring, Tx } from './types';
 import { round2, todayISO, addDays } from './format';
 import { nextOccurrence } from './store';
 import { isPending, useTimesVersion } from './txTime';
@@ -55,12 +55,28 @@ export function computeBalances(accounts: Account[], txs: Tx[], today = todayISO
   return b;
 }
 
+/** What a linked trading account's balance adds on top of its own entries: the strategy's P&L since the link, plus `adj`. */
+export function linkedPnl(accountId: string, links: Record<string, AccountLink> | undefined, pnl: Record<string, Pnl>, today = todayISO()) {
+  const l = links?.[accountId];
+  if (!l) return 0;
+  let sum = l.adj ?? 0;
+  for (const p of Object.values(pnl)) if (!p.deleted_at && p.strategy_id === l.strategy && p.date >= l.since && p.date <= today) sum += p.pnl;
+  return round2(sum);
+}
+
+/** Balances as the screens show them: a trading account linked to a strategy moves with its daily P&L. */
 export function useBalances() {
   const accounts = useAccounts();
   const txs = useTxs();
   const today = todayISO();
   const v = useTimesVersion();
-  return useMemo(() => computeBalances(accounts, txs, today), [accounts, txs, today, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pnl = useStore(s => s.pnl);
+  const links = useStore(s => s.prefs.accountLinks);
+  return useMemo(() => {
+    const b = computeBalances(accounts, txs, today);
+    for (const id of Object.keys(links ?? {})) if (b.has(id)) b.set(id, round2(b.get(id)! + linkedPnl(id, links, pnl, today)));
+    return b;
+  }, [accounts, txs, today, v, pnl, links]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function defaultSelection(accounts: Account[]) {

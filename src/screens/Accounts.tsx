@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Archive } from 'lucide-react';
-import { useAccounts, useBalances } from '../lib/calc';
+import { linkedPnl, useAccounts, useBalances } from '../lib/calc';
+import { getPlan, planAccount } from '../lib/botPlan';
 import { useStore, putMany } from '../lib/store';
 import { Sortable } from '../components/Sortable';
 import { NetWorthChart, netWorthSeries } from '../components/Charts';
@@ -19,6 +20,18 @@ export function AccountsScreen() {
   const [showArchive, setShowArchive] = useState(false);
 
   const tradingIds = useStore(s => s.prefs.tradingAccounts);
+  const links = useStore(s => s.prefs.accountLinks);
+  const pnl = useStore(s => s.pnl);
+  const botAcc = useStore(s => planAccount(s));
+  const botPending = useStore(s => round2((getPlan(s).outs ?? []).filter(o => !o.received).reduce((t, o) => t + o.amount, 0)));
+  // a trading account linked to a strategy: the capital still in it (what you put in, less what reached the bank) and what's on its way
+  const linkedNote = (a: Account, b: number) => {
+    if (!links?.[a.id]) return null;
+    const capital = round2(b - linkedPnl(a.id, links, pnl));
+    const parts = [capital > 0.005 ? `Capital in ${money(capital)}` : 'Capital back ✓'];
+    if (a.id === botAcc && botPending > 0) parts.push(`${money(botPending)} pending`);
+    return parts.join(' · ');
+  };
   const investIds = useStore(s => s.prefs.investmentAccounts);
   const isTrading = (a: Account) => (tradingIds ?? []).includes(a.id);
   const isInvest = (a: Account) => !isTrading(a) && (investIds ?? []).includes(a.id);
@@ -59,6 +72,7 @@ export function AccountsScreen() {
         <div className="grow">
           <div className="ellipsis" style={{ fontWeight: 550 }}>{a.name}</div>
           <Money value={b} className={b < 0 ? 'neg' : b === 0 ? 'zero' : ''} />
+          {linkedNote(a, b) && <div className="tiny muted num">{linkedNote(a, b)}</div>}
         </div>
         {a.kind === 'credit' && a.credit_limit != null && (
           <div style={{ textAlign: 'right' }}>
