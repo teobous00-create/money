@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTradingCats } from './lib/tradingCats';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { ChevronDown, ChevronLeft, ChevronRight, Plus, Wallet, Shapes, ReceiptText, ChartColumn, Pencil, CalendarCheck } from 'lucide-react';
 import { useStore, setPeriod } from './lib/store';
@@ -58,6 +59,7 @@ function useShortcut() {
 }
 
 function Shell() {
+  useTradingCats();
   const tab = useUi(u => u.tab);
   const dir = useUi(u => u.tabDir);
   useShortcut();

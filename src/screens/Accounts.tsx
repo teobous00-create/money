@@ -23,11 +23,12 @@ export function AccountsScreen() {
   const links = useStore(s => s.prefs.accountLinks);
   const pnl = useStore(s => s.pnl);
   const botAcc = useStore(s => planAccount(s));
+  const plan = useStore(s => s.prefs.botPlan);
   const botPending = useStore(s => round2((getPlan(s).outs ?? []).filter(o => !o.received).reduce((t, o) => t + o.amount, 0)));
   // a trading account linked to a strategy: the capital still in it (what you put in, less what reached the bank) and what's on its way
   const linkedNote = (a: Account, b: number) => {
     if (!links?.[a.id]) return null;
-    const capital = round2(b - linkedPnl(a.id, links, pnl));
+    const capital = round2(b - linkedPnl(a.id, links, pnl, undefined, plan));
     const parts = [capital > 0.005 ? `Capital in ${money(capital)}` : 'Capital back ✓'];
     if (a.id === botAcc && botPending > 0) parts.push(`${money(botPending)} pending`);
     return parts.join(' · ');

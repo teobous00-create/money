@@ -164,6 +164,7 @@ export interface Prefs {
   paySplit?: PaySplitPrefs;         // what to do with each pay once the month is covered
   botPlan?: BotPlan;                // the trading bot's growth plan and milestones (Tracker → Trading)
   accountLinks?: Record<string, AccountLink>;   // trading account id → the strategy whose daily P&L its balance follows
+  tradingCats?: { root: string | null; byStrategy: Record<string, string> };   // Income › Trading and its subcategory per strategy
 }
 
 /** A bot's growth plan: compounding at `pct`/trading day, with withdrawal milestones, on one or two accounts. */
@@ -187,7 +188,8 @@ export interface BotWeekly { steps: number[]; goal: number; spendFrom: string }
 export interface BotOut {
   id: string; date: string; amount: number; step: number;
   received?: string | null;                               // the day it reached the bank (null = still pending)
-  to?: string | null; tx?: string | null;                 // the bank account and the transfer written then
+  to?: string | null; tx?: string | null;                 // the bank account and the transfer written then (the capital part)
+  profit?: number; itx?: string | null;                   // the part past your capital: income (Trading › strategy) in the bank
 }
 /** A trading account whose balance follows a strategy's P&L (from `since`), on top of its own entries; `adj` evens it out at linking. */
 export interface AccountLink { strategy: string; since: string; adj: number }

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useStore, getState, setPrefs, put, remove, type State } from './store';
-import { alive } from './calc';
+import { alive, computeBalances } from './calc';
+import { tradingCatFor } from './tradingCats';
 import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
 import type { BotOut, BotPlan, BotWeekly, Pnl } from './types';
 
@@ -190,6 +191,7 @@ export function removeOut(id: string) {
   const p = getPlan(getState());
   const o = (p.outs ?? []).find(x => x.id === id);
   if (o?.tx) remove('transactions', o.tx);
+  if (o?.itx) remove('transactions', o.itx);
   savePlan({ outs: (p.outs ?? []).filter(x => x.id !== id) });
 }
 
@@ -201,27 +203,45 @@ export function planAccount(s: State = getState()): string | null {
   return hit ? hit[0] : null;
 }
 
-/** A withdrawal reached the bank: write the transfer from the bot's account to `to` on `date`, and mark it received. */
+/** The capital still in the bot's account: what you put in less what came back as a transfer (its own entries, without P&L). */
+export function capitalLeft(s: State = getState()): number {
+  const from = planAccount(s);
+  if (!from) return 0;
+  return round2(computeBalances([s.accounts[from]], alive(s.transactions)).get(from) ?? 0);
+}
+
+/** A withdrawal reached the bank. Your capital comes back first, as a transfer from the bot's account; whatever is past it
+ *  is profit, written as income in the bank under Trading › the strategy. */
 export function receiveOut(id: string, to: string, date: string) {
   const s = getState();
   const p = getPlan(s);
   const o = (p.outs ?? []).find(x => x.id === id);
   if (!o) return;
   const from = planAccount(s);
-  let tx: string | null = null;
-  if (from && from !== to) {
+  const cap = from && from !== to ? Math.min(o.amount, Math.max(0, capitalLeft(s))) : 0;
+  const profit = round2(o.amount - cap);
+  let tx: string | null = null, itx: string | null = null;
+  const seq = Date.now() % 100000;
+  if (cap > 0.005) {
     tx = uuid();
-    put('transactions', { id: tx, owner_id: '', type: 'transfer', date, amount: o.amount, account_id: from, to_account_id: to,
-      category_id: null, note: 'Bot withdrawal', recurring_id: null, seq: Date.now() % 100000 });
+    put('transactions', { id: tx, owner_id: '', type: 'transfer', date, amount: round2(cap), account_id: from!, to_account_id: to,
+      category_id: null, note: 'Bot withdrawal · capital back', recurring_id: null, seq });
   }
-  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: date, to, tx } : x)), lastTo: to });
+  const cat = profit > 0.005 ? tradingCatFor(p.a1.strategy) : null;
+  if (profit > 0.005 && cat) {
+    itx = uuid();
+    put('transactions', { id: itx, owner_id: '', type: 'income', date, amount: profit, account_id: to, to_account_id: null,
+      category_id: cat, note: 'Bot withdrawal', recurring_id: null, seq: seq + 1 });
+  }
+  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: date, to, tx, itx, profit: itx ? profit : 0 } : x)), lastTo: to });
 }
 export function unreceiveOut(id: string) {
   const p = getPlan(getState());
   const o = (p.outs ?? []).find(x => x.id === id);
   if (!o) return;
   if (o.tx) remove('transactions', o.tx);
-  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: null, to: null, tx: null } : x)) });
+  if (o.itx) remove('transactions', o.itx);
+  savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: null, to: null, tx: null, itx: null, profit: 0 } : x)) });
 }
 
 export function useWeekView(): WeekView {

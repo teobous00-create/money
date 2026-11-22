@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useStore, type State } from './store';
 import { range, type Period } from './period';
-import type { Account, AccountLink, Category, Pnl, Recurring, Tx } from './types';
+import type { Account, AccountLink, BotPlan, Category, Pnl, Recurring, Tx } from './types';
 import { round2, todayISO, addDays } from './format';
 import { nextOccurrence } from './store';
 import { isPending, useTimesVersion } from './txTime';
@@ -56,10 +56,12 @@ export function computeBalances(accounts: Account[], txs: Tx[], today = todayISO
 }
 
 /** What a linked trading account's balance adds on top of its own entries: the strategy's P&L since the link, plus `adj`. */
-export function linkedPnl(accountId: string, links: Record<string, AccountLink> | undefined, pnl: Record<string, Pnl>, today = todayISO()) {
+export function linkedPnl(accountId: string, links: Record<string, AccountLink> | undefined, pnl: Record<string, Pnl>, today = todayISO(), plan?: BotPlan) {
   const l = links?.[accountId];
   if (!l) return 0;
   let sum = l.adj ?? 0;
+  // profit taken out is written as income in the bank, not as a transfer: it leaves this account here
+  if (plan && plan.a1.strategy === l.strategy) for (const o of plan.outs ?? []) if (o.received && o.profit && o.received <= today) sum -= o.profit;
   for (const p of Object.values(pnl)) if (!p.deleted_at && p.strategy_id === l.strategy && p.date >= l.since && p.date <= today) sum += p.pnl;
   return round2(sum);
 }
@@ -72,11 +74,12 @@ export function useBalances() {
   const v = useTimesVersion();
   const pnl = useStore(s => s.pnl);
   const links = useStore(s => s.prefs.accountLinks);
+  const plan = useStore(s => s.prefs.botPlan);
   return useMemo(() => {
     const b = computeBalances(accounts, txs, today);
-    for (const id of Object.keys(links ?? {})) if (b.has(id)) b.set(id, round2(b.get(id)! + linkedPnl(id, links, pnl, today)));
+    for (const id of Object.keys(links ?? {})) if (b.has(id)) b.set(id, round2(b.get(id)! + linkedPnl(id, links, pnl, today, plan)));
     return b;
-  }, [accounts, txs, today, v, pnl, links]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accounts, txs, today, v, pnl, links, plan]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function defaultSelection(accounts: Account[]) {
