@@ -951,7 +951,7 @@ function StrategyPicker({ open, onClose, selected, onSelect, startNew = false }:
           </button>
         </div>
         {strategies.length > 1 && <div className="tiny muted" style={{ margin: '0 4px 6px' }}>Drag ≡ to reorder</div>}
-        <Sortable ids={strategies.map(s => s.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03} handle
+        <Sortable ids={strategies.map(s => s.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03} handle still
           onCommit={saveStrategyOrder}
           render={id => {
             const s = byId.get(id);

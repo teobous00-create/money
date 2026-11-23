@@ -29,6 +29,7 @@ interface Props {
   after?: ReactNode;                      // non-sortable content at the end (e.g. a "New" tile)
   liftScale?: number;
   handle?: boolean;                       // drag only from an element marked data-drag-handle, no hold needed
+  still?: boolean;   // no appear animation and no layout tracking until a drag starts (long lists in sheets)
 }
 
 interface Press {
@@ -42,7 +43,7 @@ interface Press {
  * Hold an item, then move it: the others slide out of the way and the order updates live.
  * Works for grids (any number of columns) and lists, because the drop target is the nearest slot.
  */
-export function Sortable({ ids, render, onCommit, onTap, onHold, className, style, after, liftScale = 1.1, handle = false }: Props) {
+export function Sortable({ ids, render, onCommit, onTap, onHold, className, style, after, liftScale = 1.1, handle = false, still = false }: Props) {
   const key = ids.join('|');
   const [order, setOrder] = useState(ids);
   const [held, setHeld] = useState<string | null>(null);
@@ -167,8 +168,8 @@ export function Sortable({ ids, render, onCommit, onTap, onHold, className, styl
         const lifted = held === id && !drag;
         return (
           <motion.div key={id} ref={el => { if (el) els.current.set(id, el); else els.current.delete(id); }}
-            layout="position"
-            initial={mounted.current ? false : { opacity: 0, scale: 0.85 }}
+            layout={still && !drag ? false : 'position'}
+            initial={mounted.current || still ? false : { opacity: 0, scale: 0.85 }}
             animate={{ opacity: dragging ? 0.22 : 1, scale: lifted ? liftScale - 0.02 : dragging ? 0.9 : 1 }}
             transition={{ layout: layoutSpring, default: { duration: 0.22, delay: mounted.current ? 0 : Math.min(i, 24) * 0.02 } }}
             style={{ touchAction: 'pan-y', WebkitTouchCallout: 'none', minWidth: 0, zIndex: lifted ? 2 : undefined }}
