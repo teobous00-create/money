@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Clock, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Clock, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
 import { useStore, getState, setPrefs } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
 import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, logOut, nextMonday, PLAN_V, planAccount, receiveOut, removeOut, savePlan, stepFor, unreceiveOut, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
@@ -19,8 +19,9 @@ const upper = { fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04
 
 /** Tracker → Trading: account 1's road to the goal — this week's withdrawal, today's lot, the curve, the Fridays ahead
  *  and what the withdrawals pay for. */
-export function BotPlanCard() {
+export function BotPlanCard({ selected = 'all', onPick }: { selected?: string; onPick?: (strategy: string) => void } = {}) {
   const v = useWeekView();
+  const stratName = useStore(s => (v.plan.a1.strategy ? s.strategies[v.plan.a1.strategy]?.name : null));
   const [setup, setSetup] = useState(false);
   const [settings, setSettings] = useState(false);
   const [logging, setLogging] = useState<WOut | null>(null);
@@ -71,6 +72,24 @@ export function BotPlanCard() {
     );
   }
 
+  // the plan belongs to its strategy: shown in full when that strategy is picked, as one line under All strategies
+  const own = plan.a1.strategy;
+  if (own && selected !== 'all' && selected !== own) return null;
+  if (own && selected === 'all') {
+    const n = v.next;
+    return (
+      <motion.button className="card row" style={{ padding: '12px 14px', marginTop: 12, gap: 10, width: '100%', textAlign: 'left' }}
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }} onClick={() => onPick?.(own)}>
+        <Rocket size={18} style={{ color: 'var(--accent)', flex: 'none' }} />
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="small" style={{ fontWeight: 650 }}>{stratName ?? 'Bot'} plan</div>
+          <div className="tiny muted ellipsis">{n ? `${when(n.date)}: withdraw ${money(n.amount)}, leave ${money(n.step)}` : caption(plan)}</div>
+        </div>
+        <ChevronRight size={18} className="muted" style={{ flex: 'none' }} />
+      </motion.button>
+    );
+  }
+
   const goal = v.weekly.goal;
   const now = v.actual ?? v.curve.slice().reverse().find(c => c.date <= today)?.bal ?? plan.a1.capital;
   const atGoal = v.goalDate != null && v.goalDate <= today && v.outs.some(o => o.real && o.step >= goal);
@@ -83,7 +102,7 @@ export function BotPlanCard() {
         <div className="row" style={{ gap: 10, marginBottom: 10 }}>
           <Rocket size={18} style={{ color: 'var(--accent)', flex: 'none' }} />
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="bold">Bot plan</div>
+            <div className="bold">{stratName ? `${stratName} plan` : 'Bot plan'}</div>
             <div className="tiny muted">{caption(plan)}</div>
           </div>
           <button className="chip on" style={{ height: 30, gap: 4 }} onClick={() => setLogging(next && next.date <= today ? next : NEW)}><Plus size={14} />Withdrawal</button>

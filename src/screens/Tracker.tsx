@@ -727,7 +727,7 @@ function Trading() {
   if (!strategies.length) {
     return (
       <div>
-      <BotPlanCard />
+      <BotPlanCard selected={selected} onPick={setSel} />
       <div className="empty">
         <div className="bold" style={{ color: 'var(--ink)', marginBottom: 6 }}>No strategies yet</div>
         <div className="small" style={{ marginBottom: 14 }}>Add each strategy or EA you trade, then log its daily result on the calendar.</div>
@@ -807,7 +807,7 @@ function Trading() {
         </motion.div>
       </AnimatePresence>
 
-      <BotPlanCard />
+      <BotPlanCard selected={selected} onPick={setSel} />
 
       <PnlEntrySheet date={entry} sel={selected} onClose={() => setEntry(null)} />
       <StrategyPicker open={picker} onClose={() => setPicker(false)} selected={selected} onSelect={setSel} />
