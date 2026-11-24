@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { Check, ChevronRight, Clock, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Check, ChevronRight, Clock, Menu, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
+import { Sortable } from './Sortable';
 import { useStore, getState, setPrefs } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
 import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, logOut, nextMonday, PLAN_V, planAccount, receiveOut, removeOut, savePlan, stepFor, unreceiveOut, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
@@ -412,18 +413,21 @@ function Settings({ close }: { close: () => void }) {
 
       <div className="section-head"><span className="section-title">Pays for</span></div>
       <div className="field"><label>Counting withdrawals from</label><input className="input" type="date" value={spendFrom} onChange={e => setSpendFrom(e.target.value)} /></div>
-      <div className="list">
-        <AnimatePresence initial={false}>
-          {spend.map(x => (
-            <motion.div key={x.id} className="list-row" style={{ gap: 8 }}
-              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2, ease }}>
-              <input className="input grow" value={x.name} placeholder="What" onChange={e => setS(x.id, { name: e.target.value })} style={{ height: 44 }} />
-              <input className="input num" inputMode="decimal" value={x.amount} placeholder="€" onChange={e => setS(x.id, { amount: e.target.value })} style={{ height: 44, width: 96, flex: 'none' }} />
-              <button className="iconbtn" style={{ width: 36, height: 36, flex: 'none' }} aria-label="Remove" onClick={() => setSpend(l => l.filter(y => y.id !== x.id))}><Trash2 size={16} /></button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      {spend.length > 1 && <div className="tiny muted" style={{ margin: '0 4px 6px' }}>Drag ≡ to reorder: the top one is paid first</div>}
+      <Sortable ids={spend.map(x => x.id)} style={{ display: 'grid', gap: 8 }} liftScale={1.03} handle still
+        onCommit={ids => setSpend(l => ids.map(id => l.find(x => x.id === id)!).filter(Boolean))}
+        render={id => {
+          const x = spend.find(y => y.id === id);
+          if (!x) return null;
+          return (
+            <div className="sub-row" style={{ gap: 8 }}>
+              <input className="input grow" value={x.name} placeholder="What" onChange={e => setS(x.id, { name: e.target.value })} style={{ height: 44, minWidth: 0 }} />
+              <input className="input num" inputMode="decimal" value={x.amount} placeholder="€" onChange={e => setS(x.id, { amount: e.target.value })} style={{ height: 44, width: 84, flex: 'none' }} />
+              <button className="iconbtn" style={{ width: 34, height: 36, flex: 'none' }} aria-label="Remove" onClick={() => setSpend(l => l.filter(y => y.id !== x.id))}><Trash2 size={16} /></button>
+              <span className="grip" style={{ width: 40 }} data-drag-handle aria-label={`Move ${x.name}`}><Menu size={22} /></span>
+            </div>
+          );
+        }} />
       <button className="btn secondary" style={{ marginTop: 8 }} onClick={() => setSpend(l => [...l, { id: uuid().slice(0, 8), name: '', amount: '' }])}><Plus size={18} />Add</button>
 
       {outs.length > 0 && <>
