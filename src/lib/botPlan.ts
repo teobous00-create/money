@@ -3,7 +3,7 @@ import { useStore, getState, setPrefs, put, remove, type State } from './store';
 import { alive, computeBalances } from './calc';
 import { tradingCatFor } from './tradingCats';
 import { addDays, fromISO, round2, toISO, todayISO, uuid } from './format';
-import type { BotOut, BotPlan, BotWeekly, Pnl } from './types';
+import type { BotOut, BotPhase2, BotPlan, BotWeekly, Pnl } from './types';
 
 /**
  * The bot plan (v3, Nov 2026): account 1 grows `pct` every trading day (Mon–Fri, not 25 Dec / 1 Jan) up to the goal.
@@ -16,7 +16,22 @@ import type { BotOut, BotPlan, BotWeekly, Pnl } from './types';
  * Purely a picture: nothing here writes entries.
  */
 
-export const isTradingDay = (iso: string) => { const d = fromISO(iso).getDay(); return d !== 0 && d !== 6 && !iso.endsWith('-12-25') && !iso.endsWith('-01-01'); };
+/** Good Friday (Western Easter − 2 days), when gold and FX are closed. */
+const goodFridays = new Map<number, string>();
+function goodFriday(y: number) {
+  if (!goodFridays.has(y)) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    goodFridays.set(y, toISO(new Date(y, month - 1, day - 2)));
+  }
+  return goodFridays.get(y)!;
+}
+export const isTradingDay = (iso: string) => {
+  const d = fromISO(iso).getDay();
+  return d !== 0 && d !== 6 && !iso.endsWith('-12-25') && !iso.endsWith('-01-01') && iso !== goodFriday(+iso.slice(0, 4));
+};
 export const nextTradingDay = (iso: string) => { let d = addDays(iso, 1); while (!isTradingDay(d)) d = addDays(d, 1); return d; };
 const onOrAfter = (iso: string) => (isTradingDay(iso) ? iso : nextTradingDay(iso));
 /** Next Monday (or today if it's Monday). */
@@ -242,6 +257,100 @@ export function unreceiveOut(id: string) {
   if (o.tx) remove('transactions', o.tx);
   if (o.itx) remove('transactions', o.itx);
   savePlan({ outs: (p.outs ?? []).map(x => (x.id === id ? { ...x, received: null, to: null, tx: null, itx: null, profit: 0 } : x)) });
+}
+
+// ---------------------------------------------------------------- phase 2: 10k → 100k (a projection from the plan)
+
+const it = (id: string, name: string, amount: number, second = false) => ({ id, name, amount, ...(second ? { second } : {}) });
+export const DEFAULT_PHASE2: BotPhase2 = {
+  share: 50, tax: 15, taxFree: 500, threshold: 100000,
+  life: { from: '2027-02', before: 3000, after: 10000 },
+  family: { from: '2027-03', before: 500, after: 5000 },
+  items: [
+    it('p1', 'Μηχανή', 5000), it('p2', 'Licenses', 1000), it('p3', 'ForexEA 2ος λογαριασμός', 1000, true),
+    it('p4', 'Στην άκρη · level 7 & παραίτηση', 12000), it('p5', 'VIP EA', 50000), it('p6', 'ForexEA Conservative', 50000),
+    it('p7', 'XAU Master EA', 10000), it('p8', 'ZenBot', 10000), it('p9', 'CryptoEA · level 1', 10000),
+    it('p10', 'CryptoEA · level 2', 10000), it('p11', 'CryptoEA · level 3', 10000), it('p12', 'BillTrades Elite', 10000),
+    it('p13', 'BillTrades Intraday', 10000), it('p14', 'SureShot Gold', 10000), it('p15', 'SureShot Indices', 10000),
+    it('p16', 'SureShot Forex', 10000), it('p17', 'Mourou', 10000),
+  ],
+};
+
+export interface P2Week { date: string; amount: number; tax: number; life: number; family: number; done: string[]; partial: { name: string; have: number; of: number } | null; left: number; bal: number }
+export interface P2View {
+  cfg: BotPhase2; start: string | null;
+  weeks: P2Week[];
+  items: Array<{ id: string; name: string; amount: number; date: string | null }>;
+  hit: string | null;            // the day account 1 reaches the threshold
+  second: string | null;         // the day the 2nd account reaches it (started a week after it's funded, no withdrawals)
+  totals: { out: number; tax: number; life: number; family: number; items: number; left: number };
+}
+
+export function phase2View(v: WeekView): P2View {
+  const cfg = v.plan.phase2 ?? DEFAULT_PHASE2;
+  const pct = v.plan.pct / 100;
+  const start = v.goalDate;
+  const items = cfg.items.map(x => ({ ...x, date: null as string | null }));
+  const empty: P2View = { cfg, start, weeks: [], items, hit: null, second: null, totals: { out: 0, tax: 0, life: 0, family: 0, items: 0, left: 0 } };
+  if (!start) return empty;
+
+  // what phase 1 leaves: its list still to pay, and the tax on everything withdrawn so far (past the capital)
+  const before = v.outs.filter(o => o.date <= start);
+  const cumBefore = before.reduce((a, o) => a + o.amount, 0);
+  let listLeft = Math.max(0, v.spendTotal - before.filter(o => o.date >= v.weekly.spendFrom).reduce((a, o) => a + o.amount, 0));
+  let taxOwed = Math.max(0, cumBefore - cfg.taxFree) * cfg.tax / 100;
+
+  let bal = v.weekly.goal, weekStart = bal, d = nextTradingDay(start), hit: string | null = null;
+  const months = new Set<string>();
+  const weeks: P2Week[] = [];
+  const totals = { out: 0, tax: 0, life: 0, family: 0, items: 0, left: 0 };
+  const need = items.map(x => ({ ...x, have: 0 }));
+  for (let n = 0; n < 400 && (need.some(x => x.have < x.amount) || listLeft > 0); n++) {
+    bal *= 1 + pct;
+    if (!hit && bal >= cfg.threshold) hit = d;
+    if (isWithdrawDay(d)) {
+      const w = round2((bal - weekStart) * cfg.share / 100);
+      bal -= w; weekStart = bal;
+      let net = w, tax = 0, life = 0, family = 0;
+      const done: string[] = [];
+      taxOwed += w * cfg.tax / 100;
+      if (listLeft > 0) {                         // phase 1's list first; the tax waits until it's paid
+        const x = Math.min(listLeft, net); listLeft -= x; net -= x;
+        if (listLeft <= 0.005) done.push('Λίστα φάσης 1');
+      }
+      if (listLeft <= 0.005 && net > 0) { tax = Math.min(taxOwed, net); taxOwed -= tax; net -= tax; }
+      const m = d.slice(0, 7);
+      if (!months.has(m) && listLeft <= 0.005) {
+        months.add(m);
+        const after = !!hit && hit.slice(0, 7) < m;
+        if (m >= cfg.life.from) life = after ? cfg.life.after : cfg.life.before;
+        if (m >= cfg.family.from) family = after ? cfg.family.after : cfg.family.before;
+        net -= life + family;
+      }
+      let partial: P2Week['partial'] = null;
+      for (const x of need) {
+        if (net <= 0.005) break;
+        if (x.have >= x.amount) continue;
+        const take = Math.min(x.amount - x.have, net); x.have += take; net -= take;
+        if (x.have >= x.amount - 0.005) { items.find(y => y.id === x.id)!.date = d; done.push(x.name); }
+        else partial = { name: x.name, have: round2(x.have), of: x.amount };
+      }
+      const left = Math.max(0, round2(net));
+      weeks.push({ date: d, amount: w, tax: round2(tax), life, family, done, partial, left, bal: round2(bal) });
+      totals.out += w; totals.tax += tax; totals.life += life; totals.family += family; totals.left += left;
+    }
+    d = nextTradingDay(d);
+  }
+  totals.items = items.reduce((a, x) => a + (x.date ? x.amount : 0), 0);
+  // the 2nd account: in the bank a week after it's funded, starts the next trading day, grows with no withdrawals
+  let second: string | null = null;
+  const sec = items.find(x => cfg.items.find(y => y.id === x.id)?.second);
+  if (sec?.date) {
+    let b = sec.amount, day = nextTradingDay(addDays(sec.date, ARRIVE_DAYS - 1));
+    for (let n = 0; n < 1000; n++) { b *= 1 + pct; if (b >= cfg.threshold) { second = day; break; } day = nextTradingDay(day); }
+  }
+  for (const k of Object.keys(totals) as Array<keyof typeof totals>) totals[k] = round2(totals[k]);
+  return { cfg, start, weeks, items, hit, second, totals };
 }
 
 export function useWeekView(): WeekView {

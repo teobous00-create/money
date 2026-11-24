@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, ChevronRight, Clock, Menu, Plus, Rocket, Settings2, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Clock, Menu, Plus, Rocket, Settings2, Sparkles, Trash2 } from 'lucide-react';
 import { Sortable } from './Sortable';
 import { useStore, getState, setPrefs } from '../lib/store';
 import { fromISO, money, shortDate, todayISO, uuid } from '../lib/format';
-import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, logOut, nextMonday, PLAN_V, planAccount, receiveOut, removeOut, savePlan, stepFor, unreceiveOut, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
+import { DEFAULT_SPEND, DEFAULT_WEEKLY, getPlan, phase2View, logOut, nextMonday, PLAN_V, planAccount, receiveOut, removeOut, savePlan, stepFor, unreceiveOut, useWeekView, type WeekView, type WOut } from '../lib/botPlan';
 import { alive, computeBalances, useAccounts } from '../lib/calc';
 import { useStrategies } from '../lib/tracker';
 import { parseNum } from '../sheets/AccountEdit';
@@ -91,6 +91,7 @@ export function BotPlanCard({ selected = 'all', onPick }: { selected?: string; o
     );
   }
 
+  const p2 = plan.view === 'p2';
   const goal = v.weekly.goal;
   const now = v.actual ?? v.curve.slice().reverse().find(c => c.date <= today)?.bal ?? plan.a1.capital;
   const atGoal = v.goalDate != null && v.goalDate <= today && v.outs.some(o => o.real && o.step >= goal);
@@ -110,6 +111,12 @@ export function BotPlanCard({ selected = 'all', onPick }: { selected?: string; o
           <button className="iconbtn" style={{ width: 32, height: 32 }} aria-label="Plan settings" onClick={() => setSettings(true)}><Settings2 size={17} /></button>
         </div>
 
+        {p2 ? <>
+          <TodayLot v={v} today={today} />
+          {v.actual != null && <Pace v={v} />}
+          <Phase2 v={v} today={today} />
+          <button className="btn secondary" style={{ marginTop: 14 }} onClick={() => savePlan({ view: 'p1' })}><ArrowLeft size={18} />Back to Phase 1</button>
+        </> : <>
         <div style={{ marginBottom: 10 }}>
           <div className="tiny muted" style={upper}>Next</div>
           {next ? (
@@ -138,6 +145,10 @@ export function BotPlanCard({ selected = 'all', onPick }: { selected?: string; o
         <PlanCurve v={v} />
         <Fridays v={v} today={today} onLog={setLogging} onReceive={setReceiving} />
         <SpendList v={v} today={today} />
+        <motion.button className="btn" style={{ marginTop: 14, gap: 8 }} whileTap={{ scale: 0.97 }} onClick={() => savePlan({ view: 'p2' })}>
+          <Sparkles size={18} />Level up · Phase 2: 10k → 100k
+        </motion.button>
+        </>}
       </motion.div>
       <Sheet open={settings} onClose={() => setSettings(false)} title="Bot plan">{settings && <Settings close={() => setSettings(false)} />}</Sheet>
       <Sheet open={!!logging} onClose={() => setLogging(null)} title="Withdrawal">{logging && <LogOut out={logging} v={v} close={() => setLogging(null)} />}</Sheet>
@@ -223,6 +234,51 @@ function Fridays({ v, today, onLog, onReceive }: { v: WeekView; today: string; o
         );
       })}
     </div>
+  );
+}
+
+/** Phase 2, 10k → 100k: half of each week's profit; tax first, then the month's life and family money, then the items in order. */
+function Phase2({ v, today }: { v: WeekView; today: string }) {
+  const p = phase2View(v);
+  if (!p.start) return <div className="small muted" style={{ padding: '8px 0' }}>Phase 2 starts once the account reaches {money(v.weekly.goal)}.</div>;
+  const stat = (label: string, value: string, color?: string) => (
+    <div className="card" style={{ padding: '10px 12px', background: 'var(--surface-2)', boxShadow: 'none' }}>
+      <div className="tiny muted">{label}</div>
+      <div className="small num" style={{ fontWeight: 700, marginTop: 2, color }}>{value}</div>
+    </div>
+  );
+  return (
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }}>
+      <div className="row" style={{ gap: 8, margin: '4px 0 2px' }}>
+        <Sparkles size={16} style={{ color: 'var(--accent)' }} />
+        <span className="bold">Phase 2 · {money(v.weekly.goal)} → {money(p.cfg.threshold)}</span>
+      </div>
+      <div className="tiny muted" style={{ marginBottom: 10 }}>{p.cfg.share}% of each week's profit, from {when(p.start)} · {p.cfg.tax}% tax put aside first</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        {stat('Account at ' + money(p.cfg.threshold), p.hit ? when(p.hit) : '—', 'var(--income)')}
+        {stat('2nd account at ' + money(p.cfg.threshold), p.second ? '~' + when(p.second) : '—')}
+        {stat('Tax put aside', money(p.totals.tax))}
+        {stat('Left over at the end', money(p.totals.left), 'var(--income)')}
+      </div>
+      <div className="tiny muted" style={{ ...upper, margin: '6px 0 2px' }}>Opens, in order</div>
+      {p.items.map((x, i) => (
+        <motion.div key={x.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.25, ease, delay: Math.min(i, 16) * 0.03 }}>
+          <Row icon={<Dot />} title={`${x.name} · ${money(x.amount)}`} date={x.date} today={today} />
+        </motion.div>
+      ))}
+      <div className="tiny muted" style={{ ...upper, margin: '12px 0 2px' }}>Week by week</div>
+      {p.weeks.map(w => {
+        const parts = [
+          w.tax > 0 ? `tax ${money(w.tax)}` : '',
+          w.life ? `life ${money(w.life)}` : '', w.family ? `family ${money(w.family)}` : '',
+          ...w.done.map(n => `✓ ${n}`),
+          w.partial ? `${w.partial.name} ${money(w.partial.have)}/${money(w.partial.of)}` : '',
+          w.left > 0.5 ? `left over ${money(w.left)}` : '',
+        ].filter(Boolean);
+        return <Row key={w.date} icon={<Dot />} title={`Withdraw ${money(w.amount)}`} sub={parts.join(' · ')} date={w.date} today={today} />;
+      })}
+      <div className="tiny faint" style={{ marginTop: 8 }}>A projection at {v.plan.pct}% a day from the plan, not your real results: it moves with phase 1.</div>
+    </motion.div>
   );
 }
 

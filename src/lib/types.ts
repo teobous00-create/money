@@ -183,6 +183,18 @@ export interface BotPlan {
   outs?: BotOut[];                                        // withdrawals you made from account 1
   spend?: Array<{ id: string; name: string; amount: number }>;   // what the withdrawals pay for, in order
   lastTo?: string | null;                                 // the bank account the last withdrawal went to
+  view?: 'p1' | 'p2';                                     // which phase the card shows
+  phase2?: BotPhase2;                                     // 10k → 100k (defaults in botPlan.ts)
+}
+/** Phase 2: from the goal, half of each week's profit comes out; tax is put aside, then the month's life and family
+ *  money, then the items in order (each only once its whole amount is there). */
+export interface BotPhase2 {
+  share: number;                 // % of the week's profit withdrawn (50)
+  tax: number; taxFree: number;  // % put aside for tax, and the capital (€) that came back untaxed
+  threshold: number;             // account size that switches the monthly amounts (100.000)
+  life: { from: string; before: number; after: number };     // € a month from 'YYYY-MM'
+  family: { from: string; before: number; after: number };
+  items: Array<{ id: string; name: string; amount: number; second?: boolean }>;   // second = the 2nd ForexEA account (grows to the threshold)
 }
 /** On the last trading day of each week, withdraw down to the highest step the balance has passed (never a lower step than last time). */
 export interface BotWeekly { steps: number[]; goal: number; spendFrom: string }
