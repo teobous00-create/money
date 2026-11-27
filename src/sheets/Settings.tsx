@@ -93,9 +93,11 @@ function Body() {
         <button className="list-row" onClick={() => setUi({ hidden: true })}>
           <EyeOff size={21} /><span className="grow">Hidden categories</span><ChevronRight size={18} className="faint" />
         </button>
-        <button className="list-row" onClick={() => setUi({ importer: true })}>
-          <Upload size={21} /><span className="grow">Import from 1Money</span><ChevronRight size={18} className="faint" />
-        </button>
+        {SHOW_IMPORT_1MONEY && (
+          <button className="list-row" onClick={() => setUi({ importer: true })}>
+            <Upload size={21} /><span className="grow">Import from 1Money</span><ChevronRight size={18} className="faint" />
+          </button>
+        )}
         <button className="list-row" onClick={doExport}>
           <Download size={21} /><span className="grow">Export CSV</span>
         </button>
@@ -109,7 +111,7 @@ function Body() {
       {SHOW_RECENTLY_DELETED && <RecentlyDeleted />}
 
       <div className="section list">
-        {REMOTE && <button className="list-row" onClick={() => { toast('Reloading everything from the server…'); void resyncAll().then(() => toast('Up to date')); }}><RefreshCw size={21} /><span className="grow">Reload everything from the server<div className="tiny muted">If something looks missing or wrong on this phone</div></span></button>}
+        {SHOW_RELOAD_ALL && REMOTE && <button className="list-row" onClick={() => { toast('Reloading everything from the server…'); void resyncAll().then(() => toast('Up to date')); }}><RefreshCw size={21} /><span className="grow">Reload everything from the server<div className="tiny muted">If something looks missing or wrong on this phone</div></span></button>}
         {REMOTE && <button className="list-row" onClick={() => void signOut()}><LogOut size={21} /><span className="grow">Sign out</span></button>}
         <button className="list-row" style={{ color: 'var(--expense)' }} onClick={() => setConfirmWipe(v => !v)}><Trash2 size={21} /><span className="grow">Delete all my data</span></button>
       </div>
@@ -211,6 +213,10 @@ const whenFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short
 
 /** Hidden for now (not needed day to day) — flip to true to bring the section back. */
 const SHOW_RECENTLY_DELETED = false;
+/** Hidden for now — flip to true to bring back the "Import from 1Money" row. */
+const SHOW_IMPORT_1MONEY = false;
+/** Hidden for now — flip to true to bring back the "Reload everything from the server" row. */
+const SHOW_RELOAD_ALL = false;
 
 /** Big deletions of your own data in the last 30 days (a re-import that replaced everything, a deleted account…), with a way back. */
 function RecentlyDeleted() {
