@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1636e0">
+<title>Club του 1%</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;800&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#070b24);--ink:light-dark(#0b1033,#eef1ff);--mut:light-dark(#5a6290,#9aa3d6);--card:light-dark(#f1f3ff,#0f1640);--line:light-dark(#dfe3fb,#222b63);--cob:#1636e0;--pink:#ff2e74;--ok:#0fa968}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif;overflow-x:clip}
+h1,h2,.big,.num{font-family:"Inter Tight",Inter,sans-serif}
+.band{background:var(--cob);color:#fff;padding:18px max(5vw,16px) 22px}
+.wrap{max-width:560px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{margin:0;font-size:20px;font-weight:800}
+h1 b{color:var(--pink);background:#fff;border-radius:8px;padding:0 6px;margin-left:4px}
+.status{font-size:14px;font-weight:600;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.18)}
+.status.out{background:var(--pink)}
+.stage{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:14px 0 8px}
+.big{font-size:clamp(88px,30vw,168px);line-height:.85;font-weight:800;letter-spacing:-.04em}
+.big small{font-size:.42em;vertical-align:top;margin-left:2px}
+.timer{font-family:"Inter Tight";font-weight:800;font-size:44px;line-height:1;font-variant-numeric:tabular-nums;padding-bottom:6px}
+.timer.low{background:var(--pink);border-radius:10px;padding:2px 10px;margin-bottom:6px}
+.ladder{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;scrollbar-width:none}
+.ladder button{flex:none;font:600 14px "Inter Tight";min-height:34px;padding:0 10px;border-radius:999px;background:rgba(255,255,255,.14);color:#fff}
+.ladder .past{opacity:.45;text-decoration:line-through}
+.ladder .cur{background:var(--pink);opacity:1;text-decoration:none}
+main{padding:20px max(5vw,16px) 40px}
+section{margin-bottom:24px}
+h2{font-size:22px;margin:0 0 10px;line-height:1.1}
+.card{background:var(--card);border-radius:16px;padding:16px}
+.muted{color:var(--mut);font-size:15px}
+button{font:600 16px Inter,sans-serif;min-height:48px;padding:0 18px;border-radius:12px;border:0;background:var(--cob);color:#fff;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--pink);outline-offset:2px}
+button.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+button.pink{background:var(--pink)}
+button:disabled{opacity:.4;cursor:default}
+button.ok{background:var(--ok)}
+button.wide{width:100%;min-height:60px;font-size:19px}
+input{font:600 22px Inter,sans-serif;min-height:60px;width:100%;padding:0 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.locked{font-family:"Inter Tight";font-size:32px;font-weight:800;margin:4px 0 0;overflow-wrap:anywhere}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.chips button{min-height:44px;min-width:64px;background:var(--bg);color:var(--ink);border:1.5px solid var(--line)}
+.chips button.sel{background:var(--cob);color:#fff;border-color:transparent}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.list .p{flex:none;width:3.4em;font:800 16px "Inter Tight"}
+.list .a{flex:1;overflow-wrap:anywhere}
+.tag{flex:none;font-size:13px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;color:#fff}
+.tag.y{background:var(--ok)}.tag.n{background:var(--pink)}
+.fun{opacity:.6}
+.win{font-family:"Inter Tight";font-size:30px;font-weight:800;line-height:1.1;margin:0 0 6px}
+.banner{background:var(--pink);color:#fff;border-radius:16px;padding:14px 16px;margin-bottom:14px}
+.foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+@media(prefers-reduced-motion:no-preference){.pop{animation:pop .35s ease-out}@keyframes pop{from{transform:scale(.92);opacity:.4}}}
+</style>
+</head>
+<body>
+<header class="band"><div class="wrap">
+  <div class="top"><h1>Club του <b>1%</b></h1><span class="status" id="status"></span></div>
+  <div class="stage"><div class="big" id="big"></div><div class="timer" id="timer"></div></div>
+  <div class="ladder" id="ladder"></div>
+</div></header>
+<main><div class="wrap">
+  <section id="play"></section>
+  <section id="hist"></section>
+  <section class="foot" id="foot"></section>
+</div></main>
+<script>
+{
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const L=[...Array.from({length:18},(_,i)=>90-i*5),1];
+const N=L.length,LAST=N-1,UNLOCK=[3,9];
+const KEY='club1.v2';
+const fresh=()=>({i:0,phase:'ready',ans:'',startedAt:0,out:null,passes:0,hist:[]});
+let G;try{G=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}
+if(!G||!Array.isArray(G.hist))G=fresh();
+const DUR=30;
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(G))}catch(e){}};
+const pct=()=>L[G.i];
+const left=()=>Math.max(0,Math.ceil(DUR-(Date.now()-G.startedAt)/1000));
+const pl=n=>n===1?'1 πάσο':n+' πάσα';
+
+function start(){G.phase='answer';G.ans='';G.startedAt=Date.now();save();render();setTimeout(()=>{const a=$('#ans');if(a)a.focus()},50)}
+function lock(){if(!G.ans.trim())return;G.phase='locked';save();render()}
+function advance(){if(G.i>=LAST)G.phase='done';else{G.i++;G.phase='ready'}G.ans='';save();render()}
+function record(ok,pass){
+  const fun=G.out!=null,h={p:pct(),a:pass?'':G.ans.trim(),ok,pass:!!pass,fun,wasOut:G.out,prevPasses:G.passes,unlocked:false};
+  if(pass)G.passes--;
+  if(!fun){if(!ok){G.out=pct();G.passes=0}else if(UNLOCK.includes(G.i)){G.passes++;h.unlocked=true}}
+  G.hist.push(h);advance();
+  if(navigator.vibrate)try{navigator.vibrate(ok?40:[60,60,60])}catch(e){}}
+function usePass(){if(G.phase!=='answer'||G.out!=null||G.passes<1||G.i>=LAST||left()<=0)return;record(true,true)}
+function undo(){const h=G.hist.pop();if(!h)return;G.out=h.wasOut;G.passes=h.prevPasses;G.i=L.indexOf(h.p);G.ans=h.a;G.phase=h.pass?'ready':'locked';save();render()}
+function jump(i){if(G.phase!=='ready')return;G.i=i;save();render()}
+function newGame(){G=fresh();save();render()}
+
+function render(){
+  const out=G.out!=null;
+  const st=$('#status');st.textContent=out?'Εκτός στο '+G.out+'% · για πλάκα':'Μέσα'+(G.passes?' · '+pl(G.passes):'');st.className='status'+(out?' out':'');
+  $('#big').innerHTML=G.phase==='done'?'✓':pct()+'<small>%</small>';
+  $('#ladder').innerHTML=L.map((p,i)=>`<button data-i="${i}" class="${i===G.i&&G.phase!=='done'?'cur':i<G.i||G.phase==='done'?'past':''}" ${G.phase==='ready'?'':'tabindex="-1"'}>${p}%</button>`).join('');
+  document.querySelectorAll('#ladder [data-i]').forEach(b=>b.onclick=()=>jump(+b.dataset.i));
+  const cur=document.querySelector('#ladder .cur');if(cur)cur.scrollIntoView({block:'nearest',inline:'center'});
+  const el=$('#play'),last=G.hist[G.hist.length-1];let h='';
+  const banner=out&&G.phase!=='done'?`<div class="banner">Αποκλείστηκες στο ${G.out}%. Συνέχισε για πλάκα, δεν μετράει.</div>`
+    :G.phase==='ready'&&last&&last.unlocked?`<div class="banner" style="background:var(--ok)">Ξεκλείδωσες πάσο! Έχεις ${pl(G.passes)}.</div>`:'';
+  const canPass=!out&&G.passes>0&&G.i<LAST;
+  if(G.phase==='ready'){
+    h=banner+`<div class="card"><h2>Ερώτηση ${G.i+1} από ${N} · ${pct()}%</h2><p class="muted">Πάτα μόλις εμφανιστεί η ερώτηση στην τηλεόραση. Έχεις 30 δευτερόλεπτα.</p>
+      <div class="actions"><button class="pink wide" id="go">Πάμε</button></div>
+      <p class="muted">Αν βγήκες εκτός συγχρονισμού με την εκπομπή, πάτα το σωστό ποσοστό στη μπλε μπάρα.</p></div>`;
+  }else if(G.phase==='answer'){
+    h=banner+`<div class="card"><h2>Η απάντησή σου</h2><input id="ans" autocomplete="off" enterkeyhint="done" maxlength="200" placeholder="Γράψε εδώ…">
+      <div class="${canPass?'grid2':'actions'}"><button class="pink wide" id="lock">Κλείδωμα</button>${canPass?`<button class="ghost wide" id="pass">Πάσο (${G.passes})</button>`:''}</div>
+      <p class="muted">Μετά το κλείδωμα δεν αλλάζει. Όταν τελειώσει ο χρόνος, κλειδώνει μόνη της.${canPass?' Το πάσο περνάει την ερώτηση ως σωστή, μόνο μέσα στα 30″.':''}${!out&&G.passes>0&&G.i===LAST?' Στο 1% δεν επιτρέπεται πάσο.':''}</p></div>`;
+  }else if(G.phase==='locked'){
+    h=banner+`<div class="card pop"><div class="muted">Κλειδωμένη απάντηση</div><p class="locked" id="lk"></p>
+      <p class="muted">Μόλις δείξει η τηλεόραση τη λύση:</p><div class="grid2"><button class="ok wide" id="y">✓ Το βρήκα</button><button class="pink wide" id="n">✗ Το έχασα</button></div></div>`;
+  }else{
+    const real=G.hist.filter(x=>!x.fun),fun=G.hist.filter(x=>x.fun),fr=fun.filter(x=>x.ok).length,good=real.filter(x=>x.ok).length;
+    h=`<div class="card pop">${!out?`<p class="win">Μπήκες στο Club του 1%!</p><p class="muted">Πέρασες και τις ${N} ερωτήσεις.</p>`
+      :`<p class="win">${good?'Πέρασες '+good+' από '+N:'Καμία σωστή αυτή τη φορά'}</p><p class="muted">Αποκλείστηκες στο ${G.out}%.${fun.length?` Για πλάκα μετά: ${fr} από ${fun.length} σωστές.`:''}</p>`}
+      <div class="actions"><button class="pink" id="ng2">Νέο παιχνίδι</button></div></div>`;
+  }
+  el.innerHTML=h;
+  const on=(id,f)=>{const b=el.querySelector('#'+id);if(b)b.onclick=f};
+  on('go',start);on('lock',lock);on('pass',usePass);on('y',()=>record(true));on('n',()=>record(false));on('ng2',newGame);
+  const a=$('#ans');if(a){a.value=G.ans;a.oninput=()=>{G.ans=a.value;save()};a.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();lock()}}}
+  const lk=$('#lk');if(lk)lk.textContent=G.ans;
+  $('#hist').innerHTML=G.hist.length?`<h2>Οι απαντήσεις σου</h2><div class="card"><ul class="list">${G.hist.slice().reverse().map(x=>`<li class="${x.fun?'fun':''}"><span class="p">${x.p}%</span><span class="a">${x.pass?'<span class="muted">—</span>':esc(x.a)}${x.fun?' <span class="muted">(για πλάκα)</span>':''}</span><span class="tag ${x.pass?'':x.ok?'y':'n'}" ${x.pass?'style="background:var(--cob)"':''}>${x.pass?'πάσο':x.ok?'σωστό':'λάθος'}</span></li>`).join('')}</ul></div>`:'';
+  $('#foot').innerHTML=`${G.hist.length?'<button class="ghost" id="un">Αναίρεση τελευταίου</button>':'<span></span>'}<button class="ghost" id="ng">Νέο παιχνίδι</button>`;
+  const un=$('#un');if(un)un.onclick=undo;$('#ng').onclick=newGame;
+  tick();
+}
+function tick(){const t=$('#timer');if(G.phase!=='answer'){t.textContent='';t.className='timer';return}
+  const rem=left();t.textContent=rem+'″';t.className='timer'+(rem<=5?' low':'');
+  const pb=$('#pass');if(pb&&rem<=0)pb.disabled=true;
+  if(rem===0&&G.ans.trim())lock()}
+setInterval(tick,250);
+async function wake(){try{if(navigator.wakeLock)await navigator.wakeLock.request('screen')}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wake()});wake();
+render();
+}
+</script>
+</body>
+</html>
